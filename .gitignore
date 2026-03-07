@@ -1,0 +1,45 @@
+# Build outputs
+bin/
+obj/
+out/
+
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Logs
+*.log
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+appsettings.Development.json
+appsettings.Local.json
+secrets.json
+credentials.json
+*.pfx
+*.snk
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Package and tool caches
+node_modules/
+.npm/
+.pnpm-store/
+
+# Test artifacts
+TestResults/
+coverage/
+
+# Generated data
+artifacts/
+tmp/
+temp/
