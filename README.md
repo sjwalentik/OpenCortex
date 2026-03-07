@@ -12,6 +12,8 @@ The working build plan lives outside the repo in a local, user-configurable note
 
 The core concept notes currently live outside the repo alongside the rest of the local planning documents.
 
+If you want to keep local document paths near the repo without committing them, use `opencortex.local.json` or files under `.opencortex/`. See `opencortex.local.example.json` for a simple example.
+
 ## What OpenCortex Aims To Provide
 
 - Markdown as the source of truth for durable knowledge

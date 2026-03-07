@@ -1,0 +1,9 @@
+{
+  "localDocuments": {
+    "buildPlan": "//your-host/your-share/path/opencortex-build-plan.md",
+    "conceptNotes": [
+      "//your-host/your-share/path/opencortex-concept.md",
+      "//your-host/your-share/path/agent-memory-runtime.md"
+    ]
+  }
+}
