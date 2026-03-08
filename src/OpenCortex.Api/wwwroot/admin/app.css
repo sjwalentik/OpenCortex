@@ -87,7 +87,7 @@ h1 { font-size: clamp(2.2rem, 5vw, 4.1rem); line-height: 0.98; }
 h2 { font-size: 1.35rem; }
 h3 { font-size: 1.06rem; }
 
-.lede, .panel-header p, .brain-meta, .run-meta, .run-id, .empty-state {
+.lede, .panel-header p, .brain-meta, .brain-health-detail, .run-meta, .run-id, .empty-state {
   color: var(--muted);
 }
 
@@ -133,9 +133,15 @@ h3 { font-size: 1.06rem; }
 
 .brain-card {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.brain-card-main {
+  display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px;
   align-items: center;
 }
 
@@ -199,6 +205,14 @@ input, select {
 }
 
 .button:hover { background: #f3e6d1; }
+.button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.button-danger {
+  background: rgba(159, 45, 45, 0.08);
+  border-color: rgba(159, 45, 45, 0.28);
+  color: var(--danger);
+}
+.button-danger:hover { background: rgba(159, 45, 45, 0.16); }
 
 .button-primary {
   background: linear-gradient(180deg, #8d5a37, var(--primary));
@@ -221,6 +235,45 @@ input, select {
 .run-status.completed { color: var(--success); }
 .run-status.running { color: var(--warn); }
 .run-status.failed { color: var(--danger); }
+
+.health-chip.healthy,
+.health-chip.stable { color: var(--success); }
+.health-chip.active { color: var(--warn); }
+.health-chip.attention,
+.health-chip.failed { color: var(--danger); }
+
+.create-brain-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.create-brain-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.source-root-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  background: rgba(255,255,255,0.55);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  margin-top: 10px;
+}
+
+.source-root-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+}
 
 .result-card, .error-card {
   padding: 14px 16px;

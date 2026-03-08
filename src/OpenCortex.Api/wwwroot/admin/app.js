@@ -2,6 +2,11 @@ const state = {
   health: null,
   brains: [],
   runs: [],
+  errors: {
+    health: null,
+    brains: null,
+    runs: null,
+  },
   selectedRunId: null,
 };
 
@@ -22,6 +27,7 @@ const queryFormEl = document.getElementById('queryForm');
 const queryResultEl = document.getElementById('queryResult');
 
 document.getElementById('refreshAll').addEventListener('click', () => refreshAll());
+document.getElementById('createBrainForm').addEventListener('submit', onCreateBrainSubmit);
 queryFormEl.addEventListener('submit', onQuerySubmit);
 
 refreshAll();
@@ -31,28 +37,54 @@ async function refreshAll() {
 }
 
 async function loadHealth() {
-  state.health = await fetchJson('/health');
+  try {
+    state.health = await fetchJson('/health');
+    state.errors.health = null;
+  } catch (error) {
+    state.health = null;
+    state.errors.health = error;
+  }
+
   renderSummary();
 }
 
 async function loadBrains() {
-  state.brains = await fetchJson('/brains');
+  try {
+    state.brains = await fetchJson('/admin/brains/health');
+    state.errors.brains = null;
+  } catch (error) {
+    state.brains = [];
+    state.errors.brains = error;
+  }
+
   renderBrains();
   renderBrainOptions();
   renderSummary();
 }
 
 async function loadRuns() {
-  state.runs = await fetchJson('/indexing/runs?limit=25');
+  try {
+    state.runs = await fetchJson('/indexing/runs?limit=25');
+    state.errors.runs = null;
+  } catch (error) {
+    state.runs = [];
+    state.errors.runs = error;
+  }
+
   renderRuns();
   renderSummary();
 
-  if (state.selectedRunId) {
+  if (!state.errors.runs && state.selectedRunId) {
     await loadErrors(state.selectedRunId);
   }
 }
 
 function renderSummary() {
+  if (state.errors.health) {
+    serviceStatusEl.textContent = 'Unavailable';
+    serviceDetailEl.textContent = 'Health endpoint could not be loaded.';
+  }
+
   if (state.health) {
     const validationErrors = state.health.validationErrors || [];
     serviceStatusEl.textContent = validationErrors.length === 0 ? 'Ready' : 'Config Issues';
@@ -62,15 +94,23 @@ function renderSummary() {
   }
 
   brainCountEl.textContent = String(state.brains.length);
+  if (state.errors.brains) {
+    brainDetailEl.textContent = 'Brain health data is currently unavailable.';
+  }
+
   brainDetailEl.textContent = state.brains.length === 0
-    ? 'No configured brains were returned.'
+    ? (state.errors.brains ? 'Brain health data is currently unavailable.' : 'No configured brains were returned.')
     : `${countByMode('filesystem')} filesystem brain(s) loaded.`;
 
   runCountEl.textContent = String(state.runs.length);
   if (state.runs.length === 0) {
-    runDetailEl.textContent = 'No recent index runs recorded.';
-    runHealthEl.textContent = 'No Data';
-    runHealthDetailEl.textContent = 'Run health appears after the first index job.';
+    runDetailEl.textContent = state.errors.runs
+      ? 'Run history is currently unavailable.'
+      : 'No recent index runs recorded.';
+    runHealthEl.textContent = state.errors.runs ? 'Unavailable' : 'No Data';
+    runHealthDetailEl.textContent = state.errors.runs
+      ? 'The runs endpoint could not be loaded.'
+      : 'Run health appears after the first index job.';
     return;
   }
 
@@ -88,7 +128,9 @@ function renderBrains() {
   brainsEl.innerHTML = '';
 
   if (state.brains.length === 0) {
-    brainsEl.innerHTML = '<div class="empty-state">No brains found.</div>';
+    brainsEl.innerHTML = state.errors.brains
+      ? '<div class="empty-state">Unable to load brain health right now.</div>'
+      : '<div class="empty-state">No brains found.</div>';
     return;
   }
 
@@ -99,8 +141,28 @@ function renderBrains() {
     node.querySelector('h3').textContent = brain.name;
     node.querySelector('.mode-chip').textContent = brain.mode;
     node.querySelector('.brain-meta').textContent = `${brain.slug} · ${brain.status} · ${brain.sourceRootCount} source root(s)`;
-    node.querySelector('.run-index').addEventListener('click', () => runIndex(brain.brainId));
-    node.querySelector('.preview-index').addEventListener('click', () => previewIndex(brain.brainId));
+    const healthChipEl = node.querySelector('.health-chip');
+    const healthState = getBrainHealthState(brain);
+    healthChipEl.textContent = healthState.label;
+    healthChipEl.classList.add(healthState.className);
+    node.querySelector('.brain-health-detail').textContent = describeBrainHealth(brain);
+    const runIndexBtn = node.querySelector('.run-index');
+    const previewIndexBtn = node.querySelector('.preview-index');
+    const addSourceRootBtn = node.querySelector('.add-source-root');
+    const retireBrainBtn = node.querySelector('.retire-brain');
+
+    if (!brain.isConfigured) {
+      runIndexBtn.disabled = true;
+      runIndexBtn.title = 'This brain is no longer in the current config and cannot be indexed.';
+      previewIndexBtn.disabled = true;
+      previewIndexBtn.title = 'This brain is no longer in the current config.';
+    } else {
+      runIndexBtn.addEventListener('click', () => runIndex(brain.brainId));
+      previewIndexBtn.addEventListener('click', () => previewIndex(brain.brainId));
+    }
+
+    addSourceRootBtn.addEventListener('click', () => toggleSourceRootForm(node, brain.brainId));
+    retireBrainBtn.addEventListener('click', () => retireBrain(brain.brainId, brain.name));
     brainsEl.appendChild(node);
   }
 }
@@ -125,7 +187,9 @@ function renderRuns() {
   runsEl.innerHTML = '';
 
   if (state.runs.length === 0) {
-    runsEl.innerHTML = '<div class="empty-state">No index runs found.</div>';
+    runsEl.innerHTML = state.errors.runs
+      ? '<div class="empty-state">Unable to load index runs right now.</div>'
+      : '<div class="empty-state">No index runs found.</div>';
     return;
   }
 
@@ -251,6 +315,154 @@ async function fetchJson(url, options) {
 
 function countByMode(mode) {
   return state.brains.filter(brain => brain.mode === mode).length;
+}
+
+function getBrainHealthState(brain) {
+  if (!brain.isConfigured) {
+    return { label: 'Retired', className: 'stable' };
+  }
+
+  if (brain.latestRunStatus === 'failed') {
+    return { label: 'Needs Attention', className: 'attention' };
+  }
+
+  if (brain.isLatestRunActive || brain.latestRunStatus === 'running') {
+    return { label: 'Indexing', className: 'active' };
+  }
+
+  if (brain.latestRunStatus === 'completed') {
+    return { label: 'Healthy', className: 'healthy' };
+  }
+
+  return { label: 'Not Indexed', className: 'stable' };
+}
+
+function describeBrainHealth(brain) {
+  if (!brain.isConfigured) {
+    return 'This brain is no longer present in the current config. Its history is preserved but it cannot be reindexed.';
+  }
+
+  if (brain.latestRunStatus === 'never-run') {
+    return 'No index run has completed yet for this brain.';
+  }
+
+  const parts = [];
+  parts.push(`Last run ${brain.latestRunStatus} at ${formatTimestamp(brain.latestRunStartedAt)}.`);
+
+  if (typeof brain.latestDocumentsIndexed === 'number' && typeof brain.latestDocumentsSeen === 'number') {
+    parts.push(`Indexed ${brain.latestDocumentsIndexed} of ${brain.latestDocumentsSeen} document(s).`);
+  }
+
+  if (brain.latestDocumentsFailed) {
+    parts.push(`${brain.latestDocumentsFailed} document(s) failed.`);
+  }
+
+  if (brain.latestErrorSummary) {
+    parts.push(brain.latestErrorSummary);
+  }
+
+  if (!brain.isLatestRunActive && brain.runningRunCount > 0) {
+    parts.push(`${brain.runningRunCount} older run(s) still show as running in history.`);
+  }
+
+  return parts.join(' ');
+}
+
+async function onCreateBrainSubmit(event) {
+  event.preventDefault();
+
+  const brainId = document.getElementById('newBrainId').value.trim();
+  const name = document.getElementById('newBrainName').value.trim();
+  const slug = document.getElementById('newBrainSlug').value.trim() || brainId;
+  const mode = document.getElementById('newBrainMode').value;
+  const resultEl = document.getElementById('createBrainResult');
+
+  try {
+    const brain = await fetchJson('/admin/brains', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ brainId, name, slug, mode }),
+    });
+
+    resultEl.innerHTML = `
+      <article class="result-card">
+        <strong>${escapeHtml(brain.name)}</strong>
+        <p>Brain <code>${escapeHtml(brain.brainId)}</code> created with status <em>${escapeHtml(brain.status)}</em>.</p>
+      </article>
+    `;
+    event.target.reset();
+    await loadBrains();
+  } catch (err) {
+    resultEl.innerHTML = `<div class="empty-state">${escapeHtml(String(err))}</div>`;
+  }
+}
+
+function toggleSourceRootForm(brainCardNode, brainId) {
+  const existing = brainCardNode.querySelector('.source-root-form');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const form = document.createElement('form');
+  form.className = 'source-root-form';
+  form.innerHTML = `
+    <label><span>Root ID</span><input name="sourceRootId" type="text" placeholder="my-docs" required></label>
+    <label><span>Path</span><input name="path" type="text" placeholder="C:\\docs or //server/share" required></label>
+    <label><span>Path Type</span>
+      <select name="pathType">
+        <option value="local">local</option>
+        <option value="unc">unc</option>
+        <option value="nas">nas</option>
+      </select>
+    </label>
+    <div style="display:flex;gap:8px;align-items:end">
+      <button type="submit" class="button button-primary">Add</button>
+      <button type="button" class="button cancel-source-root">Cancel</button>
+    </div>
+  `;
+
+  form.querySelector('.cancel-source-root').addEventListener('click', () => form.remove());
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    try {
+      await fetchJson(`/admin/brains/${encodeURIComponent(brainId)}/source-roots`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceRootId: data.sourceRootId,
+          path: data.path,
+          pathType: data.pathType,
+          isWritable: false,
+          includePatterns: ['**/*.md'],
+          excludePatterns: [],
+          watchMode: 'scheduled',
+        }),
+      });
+      form.remove();
+      await loadBrains();
+    } catch (err) {
+      alert(`Failed to add source root: ${err}`);
+    }
+  });
+
+  // Append below the brain card content
+  brainCardNode.appendChild(form);
+}
+
+async function retireBrain(brainId, brainName) {
+  if (!confirm(`Retire brain "${brainName}" (${brainId})? It will remain visible in history but cannot be reindexed.`)) {
+    return;
+  }
+
+  try {
+    await fetchJson(`/admin/brains/${encodeURIComponent(brainId)}`, { method: 'DELETE' });
+    await loadBrains();
+  } catch (err) {
+    alert(`Failed to retire brain: ${err}`);
+  }
 }
 
 function formatTimestamp(value) {

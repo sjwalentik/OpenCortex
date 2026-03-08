@@ -21,10 +21,33 @@ These should be planned now even if they ship after the runtime and MCP layers.
 
 ### Current Implementation Snapshot
 
-- the API already exposes operator-facing endpoints for health, brain listing, indexing preview, indexing runs, run history, run errors, and OQL execution
-- a lightweight admin console is served from `/admin/`
-- the current console supports browsing brains, triggering indexing, inspecting run history and errors, and smoke-testing OQL queries
-- brain creation, source root CRUD, and schedule management are still future admin workflows
+The API exposes operator-facing endpoints including:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /health` | Service health and config validation |
+| `GET /brains` | List registered brains |
+| `GET /admin/brains/health` | Per-brain health summaries with latest run state, document counts, and error info |
+| `GET /indexing/plans` | Preview all brain indexing plans |
+| `GET /indexing/preview/{brainId}` | Preview a single brain's indexing plan |
+| `GET /indexing/run/{brainId}` | Trigger an index run for a brain |
+| `GET /indexing/runs` | List recent index runs |
+| `GET /indexing/runs/{runId}/errors` | Inspect errors for a specific run |
+| `POST /query` | Execute an OQL query |
+
+A lightweight admin console is served from `/admin/`. Navigation to `/admin` (no trailing slash) redirects to `/admin/` cleanly without a redirect loop.
+
+The current console supports:
+- browsing all registered brains with per-brain health chips (Healthy / Indexing / Needs Attention / Not Indexed)
+- each brain card shows latest run status, started/completed timestamps, document counts, and error summaries
+- triggering indexing and previewing index plans per brain
+- inspecting index run history and per-run errors
+- smoke-testing OQL queries against any brain
+- graceful fallback messaging when individual API sections fail to load
+
+Health chip state is derived exclusively from the latest run for each brain; older stale runs with `running` status in history do not pollute the current health indicator.
+
+Brain creation, source root CRUD, and schedule management are still future admin workflows.
 
 ### v1 Admin Capabilities
 
@@ -76,7 +99,7 @@ These should be planned now even if they ship after the runtime and MCP layers.
 - admin API and UI third
 - authoring UI fourth
 
-That sequence is still holding: runtime, indexing, retrieval, and the first admin inspection surface exist now, while richer admin workflows and authoring remain ahead.
+That sequence is still holding: runtime, indexing, retrieval, and the first admin inspection surface (including per-brain health) exist now, while richer admin workflows (brain/source root CRUD) and authoring remain ahead.
 
 ## Future Considerations
 

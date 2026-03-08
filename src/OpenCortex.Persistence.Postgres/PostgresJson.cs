@@ -10,4 +10,9 @@ internal static class PostgresJson
     {
         return JsonSerializer.Serialize(value, SerializerOptions);
     }
+
+    public static T? Deserialize<T>(string json)
+    {
+        return JsonSerializer.Deserialize<T>(json, SerializerOptions);
+    }
 }

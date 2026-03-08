@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
     <ProjectReference Include="..\OpenCortex.Core\OpenCortex.Core.csproj" />
@@ -11,7 +11,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>b3caf333-417e-43cd-b33e-4477315f7d7b</UserSecretsId>
+    <UserSecretsId>03fe64b9-bd3c-41f0-a870-2bb838b223d8</UserSecretsId>
   </PropertyGroup>
 
 </Project>

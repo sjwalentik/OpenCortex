@@ -75,6 +75,38 @@
       <section class="panel panel-wide">
         <div class="panel-header">
           <div>
+            <h2>Create Brain</h2>
+            <p>Register a new brain. Source roots can be added after creation.</p>
+          </div>
+        </div>
+        <form id="createBrainForm" class="create-brain-form">
+          <label>
+            <span>Brain ID</span>
+            <input id="newBrainId" type="text" placeholder="my-team" required>
+          </label>
+          <label>
+            <span>Name</span>
+            <input id="newBrainName" type="text" placeholder="My Team Brain" required>
+          </label>
+          <label>
+            <span>Slug</span>
+            <input id="newBrainSlug" type="text" placeholder="my-team">
+          </label>
+          <label>
+            <span>Mode</span>
+            <select id="newBrainMode">
+              <option value="Filesystem">Filesystem</option>
+              <option value="ManagedContent">Managed Content</option>
+            </select>
+          </label>
+          <button type="submit" class="button button-primary">Create Brain</button>
+        </form>
+        <div id="createBrainResult" class="stack compact empty-state" style="margin-top:14px">No brain created yet.</div>
+      </section>
+
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <div>
             <h2>OQL Smoke Test</h2>
             <p>Run a quick retrieval query against a selected brain.</p>
           </div>
@@ -113,16 +145,22 @@
 
   <template id="brainTemplate">
     <article class="brain-card">
-      <div>
-        <div class="brain-title-row">
-          <h3></h3>
-          <span class="chip mode-chip"></span>
+      <div class="brain-card-main">
+        <div>
+          <div class="brain-title-row">
+            <h3></h3>
+            <span class="chip mode-chip"></span>
+            <span class="chip health-chip"></span>
+          </div>
+          <p class="brain-meta"></p>
+          <p class="brain-health-detail"></p>
         </div>
-        <p class="brain-meta"></p>
-      </div>
-      <div class="brain-actions">
-        <button class="button run-index">Run Index</button>
-        <button class="button preview-index">Preview</button>
+        <div class="brain-actions">
+          <button class="button run-index">Run Index</button>
+          <button class="button preview-index">Preview</button>
+          <button class="button add-source-root">+ Source Root</button>
+          <button class="button retire-brain button-danger">Retire</button>
+        </div>
       </div>
     </article>
   </template>

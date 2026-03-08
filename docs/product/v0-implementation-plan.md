@@ -63,6 +63,10 @@ Deliver the first end-to-end OpenCortex slice for multi-brain, filesystem-backed
 - [x] create worker scaffold for scheduled brain indexing
 - [x] add operator-facing admin API endpoints for indexing, runs, errors, and querying
 - [x] add first web UI shell for admin inspection and smoke testing
+- [x] add `/admin/brains/health` endpoint combining brain summaries with latest run state
+- [x] fix admin redirect loop (`/admin` → `/admin/` only, no `/admin/` → `/admin/` loop)
+- [x] update admin console to use health endpoint with per-brain health chips and run detail
+- [x] add graceful error handling in admin console per section (health, brains, runs)
 - [ ] add admin API endpoints for brain and source root CRUD
 - [ ] add authoring UI shell
 
@@ -84,14 +88,24 @@ The repository now has:
 - filesystem ingestion with frontmatter parsing, heading chunking, wiki-link extraction, and link-edge persistence
 - deletion reconciliation plus cleanup of stale chunks, edges, and embeddings on rescans
 - index run persistence, run history, and run error inspection endpoints
-- a lightweight admin console for browsing brains, triggering indexing, reviewing runs/errors, and smoke-testing OQL
+- a `/admin/brains/health` endpoint returning per-brain summaries with latest run status, document counts, and error info
+- brain health status driven by latest run only (stale historical runs do not pollute current health)
+- a lightweight admin console for browsing brains with health chips, triggering indexing, reviewing runs/errors, and smoke-testing OQL
+- graceful error fallback messaging in the admin console when individual API sections fail to load
 - local Postgres plus pgvector compose infrastructure and manual SQL migration workflow
+
+## Known Issues
+
+- source root counts shown per brain may not match expected values; the `SourceRootCount` field on `BrainSummary` reflects persisted records, which can diverge from the local config if brains were registered before source roots were configured correctly
+- brains must be registered in Postgres before indexing can be triggered via the API; mismatch between config brain IDs and persisted slugs will cause 404s on indexing endpoints
+- older index runs with `running` status in history are surfaced in the admin health detail to help operators identify stuck runs, but they do not affect the health chip state
 
 ## Remaining v0 Priorities
 
-1. deepen admin API and console workflows for per-brain health, configuration, and operations
-2. improve hybrid scoring explainability and result reasoning output
-3. continue graph-aware retrieval tuning and context-pack shaping
-4. harden MCP tool contracts around the current OQL execution path
-5. add deeper end-to-end integration coverage for indexing plus retrieval
-6. start the first authoring-surface browsing slice after admin stabilizes
+1. add brain and source root CRUD to the admin API and console
+2. resolve source root count discrepancy between config and persisted brain records
+3. improve hybrid scoring explainability and result reasoning output
+4. continue graph-aware retrieval tuning and context-pack shaping
+5. harden MCP tool contracts around the current OQL execution path
+6. add deeper end-to-end integration coverage for indexing plus retrieval
+7. start the first authoring-surface browsing slice after admin stabilizes

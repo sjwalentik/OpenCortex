@@ -40,7 +40,10 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 - operator-managed multi-brain filesystem indexing works against Postgres plus pgvector
 - OQL supports single-brain retrieval with text, metadata, semantic, hybrid, and graph-aware ranking inputs
 - the API exposes health, brain listing, indexing preview/run, index run history, run errors, and query execution
-- a lightweight admin console now ships at `/admin/` for operational inspection and smoke testing
+- a lightweight admin console ships at `/admin/` for operational inspection and smoke testing
+- the admin console correctly uses the `/admin/brains/health` endpoint to show per-brain health status, latest run details, document counts, and error summaries
+- brain health chips reflect latest-run state only (not stale historical runs) to avoid misleading "indexing" indicators
+- the admin shell handles API errors gracefully with per-section fallback messaging
 - the next focus is deepening admin workflows and improving retrieval explainability
 
 ## Phases
@@ -134,14 +137,16 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 - [x] M4: multi-brain indexing works with strict isolation
 - [x] M5: OQL query path works end to end
 - [~] M6: MCP server exposes stable brain-scoped tools
-- [~] M7: admin API and UI support brain management
+- [~] M7: admin API and UI support brain management and per-brain health
 - [ ] M8: authoring UI supports Markdown editing
 - [ ] M9: hosted/cloud operational model is ready
 
 ## Near-Term Deliverables
 
-- deepen admin API and browser workflows beyond inspection and manual operations
+- add brain and source root CRUD to the admin API and console
+- resolve source root count discrepancy between config and persisted brain records
 - improve hybrid scoring explainability and result reasons returned from retrieval
 - continue graph-aware retrieval tuning and add richer context-pack shaping
 - harden MCP tool shape and brain-scoped retrieval ergonomics
 - prepare the first authoring-surface slice for document browsing
+- add end-to-end integration tests covering indexing and retrieval together
