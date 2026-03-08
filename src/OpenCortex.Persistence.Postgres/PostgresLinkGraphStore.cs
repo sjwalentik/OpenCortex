@@ -17,6 +17,32 @@ public sealed class PostgresLinkGraphStore : ILinkGraphStore
         return ExecuteAsync(edges, cancellationToken);
     }
 
+    public async Task DeleteStaleEdgesAsync(string brainId, IReadOnlyList<string> activeEdgeIds, IReadOnlyList<string> activeDocumentIds, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+
+        if (activeDocumentIds.Count == 0)
+        {
+            command.CommandText = $"DELETE FROM {_connectionFactory.Schema}.link_edges WHERE brain_id = @brain_id;";
+            command.Parameters.AddWithValue("brain_id", brainId);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return;
+        }
+
+        command.CommandText = $"""
+            DELETE FROM {_connectionFactory.Schema}.link_edges
+            WHERE brain_id = @brain_id
+              AND from_document_id = ANY(@active_document_ids)
+              AND link_edge_id <> ALL(@active_edge_ids);
+            """;
+        command.Parameters.AddWithValue("brain_id", brainId);
+        command.Parameters.AddWithValue("active_document_ids", activeDocumentIds.ToArray());
+        command.Parameters.AddWithValue("active_edge_ids", activeEdgeIds.Count == 0 ? Array.Empty<string>() : activeEdgeIds.ToArray());
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private async Task ExecuteAsync(IReadOnlyList<LinkEdgeRecord> edges, CancellationToken cancellationToken)
     {
         if (edges.Count == 0)

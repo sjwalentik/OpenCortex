@@ -17,6 +17,32 @@ public sealed class PostgresEmbeddingStore : IEmbeddingStore
         return ExecuteAsync(embeddings, cancellationToken);
     }
 
+    public async Task DeleteStaleEmbeddingsAsync(string brainId, IReadOnlyList<string> activeEmbeddingIds, IReadOnlyList<string> activeChunkIds, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+
+        if (activeChunkIds.Count == 0)
+        {
+            command.CommandText = $"DELETE FROM {_connectionFactory.Schema}.embeddings WHERE brain_id = @brain_id;";
+            command.Parameters.AddWithValue("brain_id", brainId);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return;
+        }
+
+        command.CommandText = $"""
+            DELETE FROM {_connectionFactory.Schema}.embeddings
+            WHERE brain_id = @brain_id
+              AND chunk_id = ANY(@active_chunk_ids)
+              AND embedding_id <> ALL(@active_embedding_ids);
+            """;
+        command.Parameters.AddWithValue("brain_id", brainId);
+        command.Parameters.AddWithValue("active_chunk_ids", activeChunkIds.ToArray());
+        command.Parameters.AddWithValue("active_embedding_ids", activeEmbeddingIds.Count == 0 ? Array.Empty<string>() : activeEmbeddingIds.ToArray());
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private async Task ExecuteAsync(IReadOnlyList<EmbeddingRecord> embeddings, CancellationToken cancellationToken)
     {
         if (embeddings.Count == 0)

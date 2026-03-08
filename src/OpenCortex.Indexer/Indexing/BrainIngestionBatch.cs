@@ -4,6 +4,7 @@ namespace OpenCortex.Indexer.Indexing;
 
 public sealed record BrainIngestionBatch(
     string BrainId,
+    IReadOnlyList<string> SourceRootIds,
     IReadOnlyList<DocumentRecord> Documents,
     IReadOnlyList<ChunkRecord> Chunks,
     IReadOnlyList<LinkEdgeRecord> LinkEdges,

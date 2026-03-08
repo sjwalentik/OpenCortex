@@ -17,6 +17,32 @@ public sealed class PostgresChunkStore : IChunkStore
         return ExecuteAsync(chunks, cancellationToken);
     }
 
+    public async Task DeleteStaleChunksAsync(string brainId, IReadOnlyList<string> activeChunkIds, IReadOnlyList<string> activeDocumentIds, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+
+        if (activeDocumentIds.Count == 0)
+        {
+            command.CommandText = $"DELETE FROM {_connectionFactory.Schema}.chunks WHERE brain_id = @brain_id;";
+            command.Parameters.AddWithValue("brain_id", brainId);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return;
+        }
+
+        command.CommandText = $"""
+            DELETE FROM {_connectionFactory.Schema}.chunks
+            WHERE brain_id = @brain_id
+              AND document_id = ANY(@active_document_ids)
+              AND chunk_id <> ALL(@active_chunk_ids);
+            """;
+        command.Parameters.AddWithValue("brain_id", brainId);
+        command.Parameters.AddWithValue("active_document_ids", activeDocumentIds.ToArray());
+        command.Parameters.AddWithValue("active_chunk_ids", activeChunkIds.Count == 0 ? Array.Empty<string>() : activeChunkIds.ToArray());
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private async Task ExecuteAsync(IReadOnlyList<ChunkRecord> chunks, CancellationToken cancellationToken)
     {
         if (chunks.Count == 0)

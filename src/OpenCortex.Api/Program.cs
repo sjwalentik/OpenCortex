@@ -111,6 +111,19 @@ app.MapGet("/indexing/runs/{indexRunId}", async (string indexRunId, Cancellation
         : Results.Ok(run);
 });
 
+app.MapGet("/indexing/runs/{indexRunId}/errors", async (string indexRunId, CancellationToken cancellationToken) =>
+{
+    var run = await indexRunStore.GetIndexRunAsync(indexRunId, cancellationToken);
+
+    if (run is null)
+    {
+        return Results.NotFound(new { message = $"Index run '{indexRunId}' was not found." });
+    }
+
+    var errors = await indexRunStore.ListIndexRunErrorsAsync(indexRunId, cancellationToken);
+    return Results.Ok(errors);
+});
+
 app.MapPost("/query", async (OqlQueryRequest request, CancellationToken cancellationToken) =>
 {
     var executor = new OqlQueryExecutor(new PostgresDocumentQueryStore(connectionFactory, embeddingProvider));

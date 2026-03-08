@@ -67,7 +67,11 @@ For secret-backed or cluster-managed databases, keep the real connection string 
 
 Embedding provider settings also live under `OpenCortex:Embeddings`. The default open source setup uses the deterministic provider, while hosted or operator-managed deployments can switch to an `openai-compatible` endpoint with secrets stored outside the repo.
 
-Once the API is running, you can inspect indexing operations through `GET /indexing/runs`, `GET /indexing/runs?brainId=<brainId>`, and `GET /indexing/runs/<indexRunId>`.
+Once the API is running, you can inspect indexing operations through `GET /indexing/runs`, `GET /indexing/runs?brainId=<brainId>`, `GET /indexing/runs/<indexRunId>`, and `GET /indexing/runs/<indexRunId>/errors`.
+
+Filesystem indexing now reconciles deletions per source root, so Markdown files removed from the configured knowledge roots are marked deleted in Postgres and excluded from retrieval.
+
+During each index run, stale chunks, link edges, and embeddings for rescanned documents are also cleaned up so changed documents do not leave old retrieval artifacts behind.
 
 ## Licensing
 

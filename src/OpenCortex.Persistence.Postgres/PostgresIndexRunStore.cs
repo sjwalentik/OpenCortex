@@ -93,6 +93,79 @@ public sealed class PostgresIndexRunStore : IIndexRunStore
         return MapIndexRun(reader);
     }
 
+    public async Task AddIndexRunErrorAsync(IndexRunErrorRecord error, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            INSERT INTO {_connectionFactory.Schema}.index_run_errors (
+                index_run_error_id,
+                index_run_id,
+                source_root_id,
+                document_path,
+                error_code,
+                error_message,
+                created_at
+            )
+            VALUES (
+                @index_run_error_id,
+                @index_run_id,
+                @source_root_id,
+                @document_path,
+                @error_code,
+                @error_message,
+                @created_at
+            );
+            """;
+
+        command.Parameters.AddWithValue("index_run_error_id", error.IndexRunErrorId);
+        command.Parameters.AddWithValue("index_run_id", error.IndexRunId);
+        command.Parameters.AddWithValue("source_root_id", (object?)error.SourceRootId ?? DBNull.Value);
+        command.Parameters.AddWithValue("document_path", (object?)error.DocumentPath ?? DBNull.Value);
+        command.Parameters.AddWithValue("error_code", error.ErrorCode);
+        command.Parameters.AddWithValue("error_message", error.ErrorMessage);
+        command.Parameters.AddWithValue("created_at", error.CreatedAt.UtcDateTime);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<IndexRunErrorRecord>> ListIndexRunErrorsAsync(string indexRunId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT
+                index_run_error_id,
+                index_run_id,
+                source_root_id,
+                document_path,
+                error_code,
+                error_message,
+                created_at
+            FROM {_connectionFactory.Schema}.index_run_errors
+            WHERE index_run_id = @index_run_id
+            ORDER BY created_at ASC;
+            """;
+        command.Parameters.AddWithValue("index_run_id", indexRunId);
+
+        var errors = new List<IndexRunErrorRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            errors.Add(new IndexRunErrorRecord(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                new DateTimeOffset(DateTime.SpecifyKind(reader.GetDateTime(6), DateTimeKind.Utc))));
+        }
+
+        return errors;
+    }
+
     private async Task UpsertAsync(IndexRunRecord indexRun, CancellationToken cancellationToken)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);

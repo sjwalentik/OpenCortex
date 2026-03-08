@@ -15,10 +15,13 @@ public sealed class IndexRunStoreContractTests
 
         var listed = await store.ListIndexRunsAsync("brain-a", 10);
         var fetched = await store.GetIndexRunAsync("run-1");
+        await store.AddIndexRunErrorAsync(new IndexRunErrorRecord("err-1", "run-1", null, null, "TestError", "boom", DateTimeOffset.UtcNow));
+        var errors = await store.ListIndexRunErrorsAsync("run-1");
 
         Assert.Equal(2, listed.Count);
         Assert.NotNull(fetched);
         Assert.Equal("run-1", fetched!.IndexRunId);
+        Assert.Single(errors);
     }
 
     private sealed class InMemoryIndexRunStore : IIndexRunStore
@@ -50,5 +53,19 @@ public sealed class IndexRunStoreContractTests
         {
             return Task.FromResult(_runs.LastOrDefault(run => run.IndexRunId == indexRunId));
         }
+
+        public Task AddIndexRunErrorAsync(IndexRunErrorRecord error, CancellationToken cancellationToken = default)
+        {
+            _errors.Add(error);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<IndexRunErrorRecord>> ListIndexRunErrorsAsync(string indexRunId, CancellationToken cancellationToken = default)
+        {
+            IReadOnlyList<IndexRunErrorRecord> result = _errors.Where(error => error.IndexRunId == indexRunId).ToArray();
+            return Task.FromResult(result);
+        }
+
+        private readonly List<IndexRunErrorRecord> _errors = [];
     }
 }

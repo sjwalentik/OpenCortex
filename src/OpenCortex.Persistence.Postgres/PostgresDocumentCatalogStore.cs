@@ -17,6 +17,46 @@ public sealed class PostgresDocumentCatalogStore : IDocumentCatalogStore
         return ExecuteAsync(documents, cancellationToken);
     }
 
+    public async Task MarkMissingDocumentsDeletedAsync(
+        string brainId,
+        string sourceRootId,
+        IReadOnlyList<string> activeCanonicalPaths,
+        DateTimeOffset indexedAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+
+        if (activeCanonicalPaths.Count == 0)
+        {
+            command.CommandText = $"""
+                UPDATE {_connectionFactory.Schema}.documents
+                SET is_deleted = true,
+                    indexed_at = @indexed_at
+                WHERE brain_id = @brain_id
+                  AND source_root_id = @source_root_id;
+                """;
+        }
+        else
+        {
+            command.CommandText = $"""
+                UPDATE {_connectionFactory.Schema}.documents
+                SET is_deleted = true,
+                    indexed_at = @indexed_at
+                WHERE brain_id = @brain_id
+                  AND source_root_id = @source_root_id
+                  AND canonical_path <> ALL(@active_paths);
+                """;
+            command.Parameters.AddWithValue("active_paths", activeCanonicalPaths.ToArray());
+        }
+
+        command.Parameters.AddWithValue("brain_id", brainId);
+        command.Parameters.AddWithValue("source_root_id", sourceRootId);
+        command.Parameters.AddWithValue("indexed_at", indexedAt.UtcDateTime);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private async Task ExecuteAsync(IReadOnlyList<DocumentRecord> documents, CancellationToken cancellationToken)
     {
         if (documents.Count == 0)

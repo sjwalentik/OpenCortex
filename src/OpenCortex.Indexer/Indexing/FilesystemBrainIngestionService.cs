@@ -23,7 +23,7 @@ public sealed class FilesystemBrainIngestionService
 
         if (brain.Mode != BrainMode.Filesystem)
         {
-            return new BrainIngestionBatch(brain.BrainId, [], [], [], []);
+            return new BrainIngestionBatch(brain.BrainId, [], [], [], [], []);
         }
 
         var discoveredFiles = _discovery.DiscoverFiles(brain);
@@ -99,7 +99,13 @@ public sealed class FilesystemBrainIngestionService
                 "wiki"));
         }
 
-        return new BrainIngestionBatch(brain.BrainId, documents, chunks, edges, embeddings);
+        return new BrainIngestionBatch(
+            brain.BrainId,
+            brain.SourceRoots.Select(sourceRoot => sourceRoot.SourceRootId).ToArray(),
+            documents,
+            chunks,
+            edges,
+            embeddings);
     }
 
     private static void RegisterDocumentAliases(Dictionary<string, string> aliases, string documentId, string canonicalPath, string title)
