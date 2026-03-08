@@ -20,18 +20,39 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
 
-        var filters = BuildFilters(query, command);
         var hasSearchText = !string.IsNullOrWhiteSpace(query.SearchText);
         var searchPattern = hasSearchText ? $"%{query.SearchText}%" : "%";
-        var usesSemantic = hasSearchText && (string.Equals(query.RankMode, "semantic", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(query.RankMode, "hybrid", StringComparison.OrdinalIgnoreCase));
-        var queryEmbedding = usesSemantic ? await _embeddingProvider.GenerateAsync(query.SearchText, cancellationToken) : null;
-        var queryVectorLiteral = queryEmbedding is not null ? EmbeddingVector.ToVectorLiteral(queryEmbedding.Vector) : null;
-        var searchPredicate = hasSearchText && !string.Equals(query.RankMode, "semantic", StringComparison.OrdinalIgnoreCase)
+        var usesSemantic = hasSearchText && (
+            string.Equals(query.RankMode, "semantic", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(query.RankMode, "hybrid", StringComparison.OrdinalIgnoreCase));
+        var usesKeyword = hasSearchText && !string.Equals(query.RankMode, "semantic", StringComparison.OrdinalIgnoreCase);
+
+        var queryEmbedding = usesSemantic
+            ? await _embeddingProvider.GenerateAsync(query.SearchText, cancellationToken)
+            : null;
+        var queryVectorLiteral = queryEmbedding is not null
+            ? EmbeddingVector.ToVectorLiteral(queryEmbedding.Vector)
+            : null;
+
+        var filters = BuildFilters(query, command);
+
+        // Each signal is returned as a separate column so the caller can build
+        // an accurate per-signal breakdown rather than inferring it from text.
+        var keywordScoreExpr = BuildKeywordScoreExpr(hasSearchText, usesKeyword);
+        var semanticScoreExpr = BuildSemanticScoreExpr(usesSemantic);
+        const string graphScoreExpr = "LEAST(COALESCE(graph.related_edge_count, 0), 5) * 0.15";
+
+        var totalScoreExpr = query.RankMode.ToLowerInvariant() switch
+        {
+            "semantic" => $"(({semanticScoreExpr}) + ({graphScoreExpr}))",
+            "hybrid"   => $"(({keywordScoreExpr}) + ({semanticScoreExpr}) + ({graphScoreExpr}))",
+            _          => $"(({keywordScoreExpr}) + ({graphScoreExpr}))",
+        };
+
+        // Search predicate: keyword modes require at least a keyword or embedding hit.
+        var searchPredicate = usesKeyword
             ? "(d.title ILIKE @search_pattern OR c.content ILIKE @search_pattern OR e.embedding_id IS NOT NULL)"
             : "1 = 1";
-        var scoreExpression = BuildScoreExpression(query.RankMode, hasSearchText, usesSemantic);
-        var reasonExpression = BuildReasonExpression(query.RankMode, hasSearchText, usesSemantic);
 
         command.CommandText = $"""
             SELECT
@@ -40,9 +61,14 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
                 d.canonical_path,
                 d.title,
                 c.chunk_id,
-                LEFT(c.content, 280) AS snippet,
-                {scoreExpression} AS score,
-                {reasonExpression} AS reason
+                LEFT(c.content, 280)                AS snippet,
+                {totalScoreExpr}                    AS score,
+                {keywordScoreExpr}                  AS keyword_score,
+                {semanticScoreExpr}                 AS semantic_score,
+                {graphScoreExpr}                    AS graph_score,
+                CASE WHEN d.title ILIKE @search_pattern THEN true ELSE false END AS title_matched,
+                CASE WHEN c.content ILIKE @search_pattern THEN true ELSE false END AS content_matched,
+                COALESCE(graph.related_edge_count, 0) AS related_edge_count
             FROM {_connectionFactory.Schema}.documents d
             LEFT JOIN {_connectionFactory.Schema}.chunks c ON c.document_id = d.document_id
             LEFT JOIN {_connectionFactory.Schema}.embeddings e ON e.chunk_id = c.chunk_id
@@ -79,6 +105,17 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
 
         while (await reader.ReadAsync(cancellationToken))
         {
+            var keywordScore  = reader.GetDouble(7);
+            var semanticScore = reader.GetDouble(8);
+            var graphScore    = reader.GetDouble(9);
+            var titleMatched  = reader.GetBoolean(10);
+            var contentMatched = reader.GetBoolean(11);
+            var edgeCount     = reader.GetInt32(12);
+
+            var breakdown = new ScoreBreakdown(keywordScore, semanticScore, graphScore);
+            var reason = BuildReason(query.RankMode, keywordScore, semanticScore, graphScore,
+                titleMatched, contentMatched, edgeCount, hasSearchText, usesSemantic);
+
             results.Add(new RetrievalResultRecord(
                 reader.GetString(0),
                 reader.GetString(1),
@@ -87,50 +124,80 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
                 reader.IsDBNull(4) ? null : reader.GetString(4),
                 reader.IsDBNull(5) ? null : reader.GetString(5),
                 reader.GetDouble(6),
-                reader.GetString(7)));
+                reason,
+                breakdown));
         }
 
         return results;
     }
 
-    private static string BuildScoreExpression(string rankMode, bool hasSearchText, bool usesSemantic)
+    private static string BuildKeywordScoreExpr(bool hasSearchText, bool usesKeyword)
     {
-        var keywordScore = hasSearchText
-            ? "CASE WHEN d.title ILIKE @search_pattern THEN 2.0 WHEN c.content ILIKE @search_pattern THEN 1.0 ELSE 0.0 END"
-            : "0.25";
-
-        var semanticScore = usesSemantic
-            ? "CASE WHEN e.embedding_id IS NOT NULL THEN (1 - (e.vector <=> CAST(@query_vector AS vector))) ELSE 0.0 END"
-            : "0.0";
-
-        const string graphScore = "LEAST(COALESCE(graph.related_edge_count, 0), 5) * 0.15";
-
-        return rankMode.ToLowerInvariant() switch
+        if (!hasSearchText || !usesKeyword)
         {
-            "semantic" => $"(({semanticScore}) + ({graphScore}))",
-            "hybrid" => $"(({keywordScore}) + ({semanticScore}) + ({graphScore}))",
-            _ => $"(({keywordScore}) + ({graphScore}))",
-        };
+            return hasSearchText ? "0.0" : "0.25";
+        }
+
+        return "CASE WHEN d.title ILIKE @search_pattern THEN 2.0 WHEN c.content ILIKE @search_pattern THEN 1.0 ELSE 0.0 END";
     }
 
-    private static string BuildReasonExpression(string rankMode, bool hasSearchText, bool usesSemantic)
+    private static string BuildSemanticScoreExpr(bool usesSemantic)
     {
-        if (string.Equals(rankMode, "semantic", StringComparison.OrdinalIgnoreCase) && usesSemantic)
+        return usesSemantic
+            ? "CASE WHEN e.embedding_id IS NOT NULL THEN (1.0 - (e.vector <=> CAST(@query_vector AS vector))) ELSE 0.0 END"
+            : "0.0";
+    }
+
+    /// <summary>
+    /// Builds a structured, human-readable reason string from the actual
+    /// per-signal score values rather than re-inferring from SQL CASE expressions.
+    /// </summary>
+    private static string BuildReason(
+        string rankMode,
+        double keywordScore,
+        double semanticScore,
+        double graphScore,
+        bool titleMatched,
+        bool contentMatched,
+        int edgeCount,
+        bool hasSearchText,
+        bool usesSemantic)
+    {
+        var signals = new List<string>();
+
+        if (titleMatched && keywordScore > 0)
         {
-            return "CASE WHEN e.embedding_id IS NOT NULL AND COALESCE(graph.related_edge_count, 0) > 0 THEN 'semantic similarity + graph boost' WHEN e.embedding_id IS NOT NULL THEN 'semantic similarity' WHEN COALESCE(graph.related_edge_count, 0) > 0 THEN 'graph boost' ELSE 'metadata filter match' END";
+            signals.Add($"title match ({keywordScore:F2})");
+        }
+        else if (contentMatched && keywordScore > 0)
+        {
+            signals.Add($"content match ({keywordScore:F2})");
+        }
+        else if (!hasSearchText && keywordScore > 0)
+        {
+            signals.Add($"metadata filter ({keywordScore:F2})");
         }
 
-        if (string.Equals(rankMode, "hybrid", StringComparison.OrdinalIgnoreCase) && usesSemantic)
+        if (usesSemantic && semanticScore > 0)
         {
-            return "CASE WHEN d.title ILIKE @search_pattern AND COALESCE(graph.related_edge_count, 0) > 0 THEN 'hybrid:title+semantic+graph' WHEN c.content ILIKE @search_pattern AND COALESCE(graph.related_edge_count, 0) > 0 THEN 'hybrid:content+semantic+graph' WHEN d.title ILIKE @search_pattern THEN 'hybrid:title+semantic' WHEN c.content ILIKE @search_pattern THEN 'hybrid:content+semantic' WHEN e.embedding_id IS NOT NULL AND COALESCE(graph.related_edge_count, 0) > 0 THEN 'hybrid:semantic+graph' WHEN e.embedding_id IS NOT NULL THEN 'hybrid:semantic' WHEN COALESCE(graph.related_edge_count, 0) > 0 THEN 'graph boost' ELSE 'metadata filter match' END";
+            signals.Add($"semantic similarity ({semanticScore:F2})");
         }
 
-        if (hasSearchText)
+        if (graphScore > 0)
         {
-            return "CASE WHEN d.title ILIKE @search_pattern AND COALESCE(graph.related_edge_count, 0) > 0 THEN 'title match + graph boost' WHEN c.content ILIKE @search_pattern AND COALESCE(graph.related_edge_count, 0) > 0 THEN 'content match + graph boost' WHEN d.title ILIKE @search_pattern THEN 'title match' WHEN c.content ILIKE @search_pattern THEN 'content match' WHEN COALESCE(graph.related_edge_count, 0) > 0 THEN 'graph boost' ELSE 'metadata filter match' END";
+            signals.Add($"graph boost ×{edgeCount} ({graphScore:F2})");
         }
 
-        return "CASE WHEN COALESCE(graph.related_edge_count, 0) > 0 THEN 'graph boost' ELSE 'metadata filter match' END";
+        if (signals.Count == 0)
+        {
+            return rankMode.ToLowerInvariant() switch
+            {
+                "semantic" => "no embedding available",
+                _          => "metadata filter match",
+            };
+        }
+
+        return string.Join(" + ", signals);
     }
 
     private static string BuildFilters(OqlQuery query, Npgsql.NpgsqlCommand command)

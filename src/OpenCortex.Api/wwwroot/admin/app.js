@@ -288,17 +288,39 @@ function renderQueryResult(payload) {
     return;
   }
 
+  // Execution summary bar
+  if (payload.summary) {
+    const s = payload.summary;
+    const summaryBar = document.createElement('p');
+    summaryBar.className = 'result-summary';
+    summaryBar.textContent =
+      `${s.totalResults} result(s) · ` +
+      `keyword: ${s.resultsWithKeywordSignal} · ` +
+      `semantic: ${s.resultsWithSemanticSignal} · ` +
+      `graph: ${s.resultsWithGraphSignal} · ` +
+      `scores ${Number(s.minScore).toFixed(3)}–${Number(s.maxScore).toFixed(3)}`;
+    queryResultEl.appendChild(summaryBar);
+  }
+
   for (const result of payload.results) {
+    const b = result.breakdown || {};
+    const breakdownParts = [];
+    if (b.keywordScore > 0) breakdownParts.push(`kw ${Number(b.keywordScore).toFixed(2)}`);
+    if (b.semanticScore > 0) breakdownParts.push(`sem ${Number(b.semanticScore).toFixed(2)}`);
+    if (b.graphScore > 0) breakdownParts.push(`graph ${Number(b.graphScore).toFixed(2)}`);
+    const breakdownStr = breakdownParts.length > 0 ? breakdownParts.join(' · ') : 'no signals';
+
     const card = document.createElement('article');
     card.className = 'result-card';
     card.innerHTML = `
       <div class="run-topline">
         <strong>${escapeHtml(result.title)}</strong>
         <span class="chip">${escapeHtml(result.reason)}</span>
+        <span class="chip score-chip">score ${Number(result.score).toFixed(3)}</span>
       </div>
+      <p class="result-breakdown">${escapeHtml(breakdownStr)}</p>
       <p>${escapeHtml(result.canonicalPath)}</p>
       <p>${escapeHtml(result.snippet || '')}</p>
-      <code>score ${Number(result.score).toFixed(3)}</code>
     `;
     queryResultEl.appendChild(card);
   }

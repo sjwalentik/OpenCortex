@@ -281,6 +281,20 @@ input, select {
 
 .result-card code, .error-card code, .run-id { font-size: 0.83rem; }
 
+.result-summary {
+  font-size: 0.83rem;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.result-breakdown {
+  font-size: 0.83rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.score-chip { font-variant-numeric: tabular-nums; }
+
 .empty-state {
   padding: 18px;
   border: 1px dashed var(--line);
