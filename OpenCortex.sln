@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCortex.McpServer.Tests"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCortex.Persistence.Postgres", "src\OpenCortex.Persistence.Postgres\OpenCortex.Persistence.Postgres.csproj", "{96A14FF0-7749-4FD0-816B-79BD377C89D7}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenCortex.Integration.Tests", "tests\OpenCortex.Integration.Tests\OpenCortex.Integration.Tests.csproj", "{4A020AB9-3C9E-4748-8EAE-CEA677C99722}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -82,6 +84,10 @@ Global
 		{96A14FF0-7749-4FD0-816B-79BD377C89D7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{96A14FF0-7749-4FD0-816B-79BD377C89D7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{96A14FF0-7749-4FD0-816B-79BD377C89D7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4A020AB9-3C9E-4748-8EAE-CEA677C99722}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4A020AB9-3C9E-4748-8EAE-CEA677C99722}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4A020AB9-3C9E-4748-8EAE-CEA677C99722}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4A020AB9-3C9E-4748-8EAE-CEA677C99722}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{A975BE40-0A10-4422-822C-A8A8B008D72B} = {7FCCA71F-BFEF-4430-9F4D-6EED45FCA526}
@@ -95,5 +101,6 @@ Global
 		{A7EF2EDA-43F8-470A-B93A-4440D4B8EDDB} = {3FDB1AA8-5E90-440F-9A73-0007AC9F65FA}
 		{F889535D-D553-4F13-8EDA-D69636593A8A} = {3FDB1AA8-5E90-440F-9A73-0007AC9F65FA}
 		{96A14FF0-7749-4FD0-816B-79BD377C89D7} = {7FCCA71F-BFEF-4430-9F4D-6EED45FCA526}
+		{4A020AB9-3C9E-4748-8EAE-CEA677C99722} = {3FDB1AA8-5E90-440F-9A73-0007AC9F65FA}
 	EndGlobalSection
 EndGlobal
