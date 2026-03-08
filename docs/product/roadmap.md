@@ -34,6 +34,15 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 - self-hosted and cloud modes share the same conceptual model
 - explainable context packs are more important than opaque ranking
 
+## Current Status
+
+- architecture, storage, indexing, retrieval, and MCP foundation are in place
+- operator-managed multi-brain filesystem indexing works against Postgres plus pgvector
+- OQL supports single-brain retrieval with text, metadata, semantic, hybrid, and graph-aware ranking inputs
+- the API exposes health, brain listing, indexing preview/run, index run history, run errors, and query execution
+- a lightweight admin console now ships at `/admin/` for operational inspection and smoke testing
+- the next focus is deepening admin workflows and improving retrieval explainability
+
 ## Phases
 
 ### Phase 0: Product Definition
@@ -119,20 +128,20 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 
 ## Milestones
 
-- M1: architecture documentation complete
-- M2: Postgres schema and core contracts complete
-- M3: single-brain indexing works end to end
-- M4: multi-brain indexing works with strict isolation
-- M5: OQL query path works end to end
-- M6: MCP server exposes stable brain-scoped tools
-- M7: admin API and UI support brain management
-- M8: authoring UI supports Markdown editing
-- M9: hosted/cloud operational model is ready
+- [x] M1: architecture documentation complete
+- [x] M2: Postgres schema and core contracts complete
+- [x] M3: single-brain indexing works end to end
+- [x] M4: multi-brain indexing works with strict isolation
+- [x] M5: OQL query path works end to end
+- [~] M6: MCP server exposes stable brain-scoped tools
+- [~] M7: admin API and UI support brain management
+- [ ] M8: authoring UI supports Markdown editing
+- [ ] M9: hosted/cloud operational model is ready
 
 ## Near-Term Deliverables
 
-- multi-brain architecture spec
-- OQL and retrieval spec
-- source-root and indexing spec
-- admin and authoring surfaces spec
-- Postgres schema draft
+- deepen admin API and browser workflows beyond inspection and manual operations
+- improve hybrid scoring explainability and result reasons returned from retrieval
+- continue graph-aware retrieval tuning and add richer context-pack shaping
+- harden MCP tool shape and brain-scoped retrieval ergonomics
+- prepare the first authoring-surface slice for document browsing

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCortex Admin</title>
+  <link rel="stylesheet" href="/admin/app.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">OpenCortex</p>
+        <h1>Admin Console</h1>
+        <p class="lede">Inspect brains, trigger indexing, review run history, and smoke-test OQL from one place.</p>
+      </div>
+      <button id="refreshAll" class="button button-primary">Refresh All</button>
+    </header>
+
+    <section class="summary-strip" aria-label="Runtime summary">
+      <article class="summary-card">
+        <p class="summary-label">Runtime</p>
+        <strong id="serviceStatus">Loading...</strong>
+        <p id="serviceDetail" class="summary-detail">Checking API health.</p>
+      </article>
+      <article class="summary-card">
+        <p class="summary-label">Brains</p>
+        <strong id="brainCount">0</strong>
+        <p id="brainDetail" class="summary-detail">No brains loaded yet.</p>
+      </article>
+      <article class="summary-card">
+        <p class="summary-label">Recent Runs</p>
+        <strong id="runCount">0</strong>
+        <p id="runDetail" class="summary-detail">No index runs loaded yet.</p>
+      </article>
+      <article class="summary-card">
+        <p class="summary-label">Run Health</p>
+        <strong id="runHealth">Waiting...</strong>
+        <p id="runHealthDetail" class="summary-detail">No run data loaded yet.</p>
+      </article>
+    </section>
+
+    <main class="grid">
+      <section class="panel panel-featured">
+        <div class="panel-header">
+          <div>
+            <h2>Brains</h2>
+            <p>Configured knowledge spaces and indexing actions.</p>
+          </div>
+        </div>
+        <div id="brains" class="stack"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Index Runs</h2>
+            <p>Recent ingest activity across all brains.</p>
+          </div>
+        </div>
+        <div id="runs" class="stack compact"></div>
+      </section>
+
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <div>
+            <h2>Run Errors</h2>
+            <p>Failures attached to the selected index run.</p>
+          </div>
+          <span id="selectedRunLabel" class="chip">No run selected</span>
+        </div>
+        <div id="errors" class="stack compact empty-state">Select a run to inspect errors.</div>
+      </section>
+
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <div>
+            <h2>OQL Smoke Test</h2>
+            <p>Run a quick retrieval query against a selected brain.</p>
+          </div>
+        </div>
+        <form id="queryForm" class="query-form">
+          <label>
+            <span>Brain</span>
+            <select id="queryBrain"></select>
+          </label>
+          <label>
+            <span>Search</span>
+            <input id="querySearch" type="text" placeholder="product plan">
+          </label>
+          <label>
+            <span>Rank</span>
+            <select id="queryRank">
+              <option value="keyword">keyword</option>
+              <option value="semantic">semantic</option>
+              <option value="hybrid" selected>hybrid</option>
+            </select>
+          </label>
+          <label>
+            <span>Where</span>
+            <input id="queryWhere" type="text" placeholder="type = &quot;plan&quot; AND tag = &quot;roadmap&quot;">
+          </label>
+          <label>
+            <span>Limit</span>
+            <input id="queryLimit" type="number" min="1" max="50" value="5">
+          </label>
+          <button type="submit" class="button button-primary">Run Query</button>
+        </form>
+        <div id="queryResult" class="stack compact empty-state">No query executed yet.</div>
+      </section>
+    </main>
+  </div>
+
+  <template id="brainTemplate">
+    <article class="brain-card">
+      <div>
+        <div class="brain-title-row">
+          <h3></h3>
+          <span class="chip mode-chip"></span>
+        </div>
+        <p class="brain-meta"></p>
+      </div>
+      <div class="brain-actions">
+        <button class="button run-index">Run Index</button>
+        <button class="button preview-index">Preview</button>
+      </div>
+    </article>
+  </template>
+
+  <template id="runTemplate">
+    <button class="run-card" type="button">
+      <div class="run-topline">
+        <strong class="run-brain"></strong>
+        <span class="chip run-status"></span>
+      </div>
+      <p class="run-meta"></p>
+      <p class="run-id"></p>
+    </button>
+  </template>
+
+  <script src="/admin/app.js"></script>
+</body>
+</html>

@@ -18,6 +18,20 @@ var indexRunStore = new PostgresIndexRunStore(connectionFactory);
 
 var app = builder.Build();
 
+app.Use(async (context, next) =>
+{
+    if (string.Equals(context.Request.Path.Value, "/admin", StringComparison.Ordinal))
+    {
+        context.Response.Redirect("/admin/", permanent: false);
+        return;
+    }
+
+    await next();
+});
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.MapGet("/", () => Results.Ok(new
 {
     service = "OpenCortex.Api",

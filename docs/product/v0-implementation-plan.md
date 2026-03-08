@@ -12,7 +12,7 @@ Deliver the first end-to-end OpenCortex slice for multi-brain, filesystem-backed
 - Postgres plus pgvector as the default backend
 - OQL as the agent-facing MCP query surface
 - manual and scheduled indexing
-- basic admin-ready brain model, without a full admin UI yet
+- operator-facing admin inspection APIs and a lightweight browser admin shell
 
 ## Out Of Scope
 
@@ -29,7 +29,7 @@ Deliver the first end-to-end OpenCortex slice for multi-brain, filesystem-backed
 - [x] create initial solution and project structure
 - [x] create starter brain and source-root configuration model
 - [x] define core persistence contracts for documents, chunks, links, embeddings, and index runs
-- [ ] define admin-facing brain registration contracts
+- [x] define operator-managed brain registration and validation contracts
 
 ### 2. Infrastructure
 
@@ -50,18 +50,21 @@ Deliver the first end-to-end OpenCortex slice for multi-brain, filesystem-backed
 
 - [x] create OQL parser skeleton
 - [x] create retrieval planner skeleton
-- [ ] define OQL grammar v0 in executable tests
+- [x] define OQL grammar v0 in executable tests
 - [x] implement Postgres-backed text and metadata filtering
 - [x] implement pgvector similarity retrieval
 - [x] implement hybrid ranking and explainability
+- [x] add graph-aware retrieval boosts and wiki-link resolution persistence
 
 ### 5. Surfaces
 
 - [x] create API scaffold with health and brain endpoints
 - [x] create MCP scaffold with OQL planning endpoint
 - [x] create worker scaffold for scheduled brain indexing
-- [ ] add admin API endpoints for brain management
-- [ ] add first web UI shell for admin and authoring work
+- [x] add operator-facing admin API endpoints for indexing, runs, errors, and querying
+- [x] add first web UI shell for admin inspection and smoke testing
+- [ ] add admin API endpoints for brain and source root CRUD
+- [ ] add authoring UI shell
 
 ### 6. Quality
 
@@ -69,28 +72,26 @@ Deliver the first end-to-end OpenCortex slice for multi-brain, filesystem-backed
 - [x] add parser, validation, and planner tests
 - [ ] add integration tests for filesystem indexing and retrieval
 
-## Recommended Build Order
-
-1. finalize OQL grammar and parser tests
-2. define Postgres schema and migrations
-3. implement filesystem indexing for one brain
-4. implement retrieval over one brain
-5. promote to multi-brain execution and worker scheduling
-6. add admin API and UI shell
-
-## Current Scaffold Outcome
+## Current State
 
 The repository now has:
 
 - a .NET solution with core, indexer, retrieval, API, MCP server, workers, and tests
-- starter OpenCortex configuration binding and validation
-- a basic OQL parser and retrieval planner skeleton
-- core persistence interfaces and a Postgres persistence scaffold
-- a first filesystem ingestion slice with discovery, frontmatter parsing, wiki-link extraction, and chunk generation
-- a first Postgres-backed retrieval slice for brain-scoped keyword and metadata search
-- deterministic local embeddings and initial pgvector-backed semantic retrieval plumbing
-- embedding provider abstraction, openai-compatible provider support, and graph-aware hybrid ranking boosts
-- starter API and MCP endpoints
-- a first manual API path for ingestion preview and indexing execution
-- local Postgres plus pgvector compose infrastructure
-- plain SQL migrations and a manual migration workflow for secret-backed deployments
+- starter OpenCortex configuration binding and validation for operator-managed brains
+- a working OQL parser, planner, and Postgres-backed executor for single-brain queries
+- brain-scoped keyword, semantic, hybrid, and graph-aware retrieval
+- deterministic and openai-compatible embedding providers behind a shared abstraction
+- filesystem ingestion with frontmatter parsing, heading chunking, wiki-link extraction, and link-edge persistence
+- deletion reconciliation plus cleanup of stale chunks, edges, and embeddings on rescans
+- index run persistence, run history, and run error inspection endpoints
+- a lightweight admin console for browsing brains, triggering indexing, reviewing runs/errors, and smoke-testing OQL
+- local Postgres plus pgvector compose infrastructure and manual SQL migration workflow
+
+## Remaining v0 Priorities
+
+1. deepen admin API and console workflows for per-brain health, configuration, and operations
+2. improve hybrid scoring explainability and result reasoning output
+3. continue graph-aware retrieval tuning and context-pack shaping
+4. harden MCP tool contracts around the current OQL execution path
+5. add deeper end-to-end integration coverage for indexing plus retrieval
+6. start the first authoring-surface browsing slice after admin stabilizes

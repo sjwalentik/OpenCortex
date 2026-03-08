@@ -20,6 +20,16 @@ It is exposed primarily through the MCP server and represents the stable product
 - no cross-brain joins
 - no arbitrary user-defined functions
 
+## Current Implementation Snapshot
+
+- OQL is parsed and executed today through the API and MCP-adjacent runtime layers
+- queries are brain-scoped and support `SEARCH`, `WHERE`, `RANK`, and `LIMIT`
+- current `WHERE` support is intentionally narrow: equality filters joined by `AND`
+- current metadata filters cover document `tag`, `title`, `path`, and `type`
+- rank modes currently include `keyword`, `semantic`, and `hybrid`
+- hybrid retrieval combines text signals, pgvector similarity, and graph-aware boosts from persisted link edges
+- results already return reasons and scores, but explainability depth still needs improvement
+
 ## Conceptual Query Shape
 
 ```text
@@ -85,6 +95,8 @@ OpenCortex should explain why a result appeared, for example:
 - linked from a high-relevance document
 - recently updated and tag-matched
 
+The current implementation already returns a reason string per result, but richer score breakdowns and clearer hybrid explanations remain active follow-up work.
+
 ## Storage Independence
 
 OQL must not depend on Postgres-specific syntax.
@@ -106,10 +118,9 @@ Likely tool shapes:
 - `get_related_documents`
 - `build_context_pack`
 
-## Recommended v0 Delivery Order
+## Remaining v0 Retrieval Work
 
-- define the grammar and AST
-- implement parser tests
-- implement planner contracts
-- implement Postgres-backed executor
-- implement explainable ranking output
+- deepen hybrid score breakdowns so results explain keyword, semantic, and graph contributions more clearly
+- expand executable grammar coverage as new OQL clauses are added
+- shape ranked results into more intentional context-pack outputs
+- preserve storage independence while keeping Postgres plus pgvector the default implementation

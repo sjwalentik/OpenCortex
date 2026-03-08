@@ -19,6 +19,13 @@ These should be planned now even if they ship after the runtime and MCP layers.
 - monitor health, status, and failures
 - trigger reindex and smoke-test retrieval
 
+### Current Implementation Snapshot
+
+- the API already exposes operator-facing endpoints for health, brain listing, indexing preview, indexing runs, run history, run errors, and OQL execution
+- a lightweight admin console is served from `/admin/`
+- the current console supports browsing brains, triggering indexing, inspecting run history and errors, and smoke-testing OQL queries
+- brain creation, source root CRUD, and schedule management are still future admin workflows
+
 ### v1 Admin Capabilities
 
 - brain CRUD
@@ -26,6 +33,7 @@ These should be planned now even if they ship after the runtime and MCP layers.
 - indexing schedule management
 - index run history and status
 - brain health dashboard
+- retrieval smoke-test and operator diagnostics
 
 ### Later Admin Capabilities
 
@@ -67,6 +75,8 @@ These should be planned now even if they ship after the runtime and MCP layers.
 - OQL and MCP second
 - admin API and UI third
 - authoring UI fourth
+
+That sequence is still holding: runtime, indexing, retrieval, and the first admin inspection surface exist now, while richer admin workflows and authoring remain ahead.
 
 ## Future Considerations
 
