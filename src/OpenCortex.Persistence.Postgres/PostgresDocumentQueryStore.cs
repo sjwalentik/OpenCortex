@@ -54,40 +54,67 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
             ? "(d.title ILIKE @search_pattern OR c.content ILIKE @search_pattern OR e.embedding_id IS NOT NULL)"
             : "1 = 1";
 
+        // Rank all matching chunks, then return the single best chunk per document.
+        // This prevents a document with many chunks from consuming the entire LIMIT
+        // and ensures the agent receives diverse document-level results.
         command.CommandText = $"""
+            WITH ranked_chunks AS (
+                SELECT
+                    d.document_id,
+                    d.brain_id,
+                    d.canonical_path,
+                    d.title,
+                    c.chunk_id,
+                    LEFT(c.content, 280)                AS snippet,
+                    {totalScoreExpr}                    AS score,
+                    {keywordScoreExpr}                  AS keyword_score,
+                    {semanticScoreExpr}                 AS semantic_score,
+                    {graphScoreExpr}                    AS graph_score,
+                    CASE WHEN d.title ILIKE @search_pattern THEN true ELSE false END AS title_matched,
+                    CASE WHEN c.content ILIKE @search_pattern THEN true ELSE false END AS content_matched,
+                    COALESCE(graph.related_edge_count, 0) AS related_edge_count,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY d.document_id
+                        ORDER BY {totalScoreExpr} DESC,
+                                 CASE WHEN c.content ILIKE @search_pattern THEN 0 ELSE 1 END ASC,
+                                 c.chunk_id ASC
+                    ) AS rn
+                FROM {_connectionFactory.Schema}.documents d
+                LEFT JOIN {_connectionFactory.Schema}.chunks c ON c.document_id = d.document_id
+                LEFT JOIN {_connectionFactory.Schema}.embeddings e ON e.chunk_id = c.chunk_id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::int AS related_edge_count
+                    FROM {_connectionFactory.Schema}.link_edges le
+                    WHERE le.brain_id = d.brain_id
+                      AND (
+                        le.from_document_id = d.document_id
+                        OR le.to_document_id = d.document_id
+                        OR le.target_ref = d.title
+                        OR le.target_ref = d.canonical_path
+                      )
+                ) graph ON TRUE
+                WHERE d.brain_id = @brain_id
+                  AND d.is_deleted = false
+                  AND {searchPredicate}
+                  {filters}
+            )
             SELECT
-                d.document_id,
-                d.brain_id,
-                d.canonical_path,
-                d.title,
-                c.chunk_id,
-                LEFT(c.content, 280)                AS snippet,
-                {totalScoreExpr}                    AS score,
-                {keywordScoreExpr}                  AS keyword_score,
-                {semanticScoreExpr}                 AS semantic_score,
-                {graphScoreExpr}                    AS graph_score,
-                CASE WHEN d.title ILIKE @search_pattern THEN true ELSE false END AS title_matched,
-                CASE WHEN c.content ILIKE @search_pattern THEN true ELSE false END AS content_matched,
-                COALESCE(graph.related_edge_count, 0) AS related_edge_count
-            FROM {_connectionFactory.Schema}.documents d
-            LEFT JOIN {_connectionFactory.Schema}.chunks c ON c.document_id = d.document_id
-            LEFT JOIN {_connectionFactory.Schema}.embeddings e ON e.chunk_id = c.chunk_id
-            LEFT JOIN LATERAL (
-                SELECT COUNT(*)::int AS related_edge_count
-                FROM {_connectionFactory.Schema}.link_edges le
-                WHERE le.brain_id = d.brain_id
-                  AND (
-                    le.from_document_id = d.document_id
-                    OR le.to_document_id = d.document_id
-                    OR le.target_ref = d.title
-                    OR le.target_ref = d.canonical_path
-                  )
-            ) graph ON TRUE
-            WHERE d.brain_id = @brain_id
-              AND d.is_deleted = false
-              AND {searchPredicate}
-              {filters}
-            ORDER BY score DESC, d.title ASC
+                document_id,
+                brain_id,
+                canonical_path,
+                title,
+                chunk_id,
+                snippet,
+                score,
+                keyword_score,
+                semantic_score,
+                graph_score,
+                title_matched,
+                content_matched,
+                related_edge_count
+            FROM ranked_chunks
+            WHERE rn = 1
+            ORDER BY score DESC, title ASC
             LIMIT @limit;
             """;
 

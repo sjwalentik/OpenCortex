@@ -1,4 +1,5 @@
 using Npgsql;
+using NpgsqlTypes;
 using OpenCortex.Core.Persistence;
 
 namespace OpenCortex.Persistence.Postgres;
@@ -67,7 +68,7 @@ public sealed class PostgresDocumentCatalogStore : IDocumentCatalogStore
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
 
-        command.CommandText = $"""
+        var sql = $"""
             SELECT
                 document_id,
                 brain_id,
@@ -80,19 +81,26 @@ public sealed class PostgresDocumentCatalogStore : IDocumentCatalogStore
             FROM {_connectionFactory.Schema}.documents
             WHERE brain_id = @brain_id
               AND is_deleted = false
-              AND (@source_root_id IS NULL OR source_root_id = @source_root_id)
-              AND (@path_prefix IS NULL OR canonical_path LIKE @path_prefix_like)
-            ORDER BY canonical_path
-            LIMIT @limit;
             """;
 
-        object pathPrefixLikeValue = pathPrefix is null ? DBNull.Value : (object)(pathPrefix.TrimEnd('/') + "/%");
+        if (!string.IsNullOrWhiteSpace(sourceRootId))
+        {
+            sql += "\n  AND source_root_id = @source_root_id";
+            command.Parameters.AddWithValue("source_root_id", sourceRootId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(pathPrefix))
+        {
+            sql += "\n  AND canonical_path LIKE @path_prefix_like";
+            command.Parameters.AddWithValue("path_prefix_like", pathPrefix.TrimEnd('/') + "/%");
+        }
+
+        sql += "\nORDER BY canonical_path\nLIMIT CAST(@limit AS integer);";
+
+        command.CommandText = sql;
 
         command.Parameters.AddWithValue("brain_id", brainId);
-        command.Parameters.AddWithValue("source_root_id", (object?)sourceRootId ?? DBNull.Value);
-        command.Parameters.AddWithValue("path_prefix", (object?)pathPrefix ?? DBNull.Value);
-        command.Parameters.AddWithValue("path_prefix_like", pathPrefixLikeValue);
-        command.Parameters.AddWithValue("limit", limit);
+        command.Parameters.AddWithValue("limit", NpgsqlDbType.Integer, limit);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var results = new List<DocumentListItem>();

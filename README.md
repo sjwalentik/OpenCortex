@@ -63,6 +63,28 @@ dotnet test OpenCortex.sln
 dotnet run --project src/OpenCortex.Api
 ```
 
+## Aspire Local Orchestration
+
+To start the local .NET services together with the Aspire dashboard:
+
+```bash
+dotnet run --project src/OpenCortex.AppHost
+```
+
+This AppHost starts:
+
+- `src/OpenCortex.Api`
+- `src/OpenCortex.McpServer`
+- `src/OpenCortex.Workers`
+
+The local Aspire dashboard opens at `http://127.0.0.1:18888`.
+
+The AppHost does not provision Postgres yet, so start the local database separately first:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml up -d
+```
+
 For secret-backed or cluster-managed databases, keep the real connection string in user secrets or deployment secrets and apply SQL migrations manually from `infra/postgres/migrations/`.
 
 Embedding provider settings also live under `OpenCortex:Embeddings`. The default open source setup uses the deterministic provider, while hosted or operator-managed deployments can switch to an `openai-compatible` endpoint with secrets stored outside the repo.

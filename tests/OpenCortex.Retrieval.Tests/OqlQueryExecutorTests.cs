@@ -98,6 +98,24 @@ public sealed class OqlQueryExecutorTests
         Assert.Contains("graph", first.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ParsesSingleLineOql()
+    {
+        // Agents send OQL as a single line; the parser must handle this correctly
+        // or SearchText/RankMode are lost and semantic scoring is silently skipped.
+        var store = new FakeDocumentQueryStore();
+        var executor = new OqlQueryExecutor(store);
+
+        const string oql = "FROM brain(\"sample-team\") SEARCH \"Pixel\" RANK hybrid LIMIT 10";
+
+        var result = await executor.ExecuteAsync(oql);
+
+        Assert.Equal("sample-team", store.LastQuery?.BrainId);
+        Assert.Equal("Pixel", store.LastQuery?.SearchText);
+        Assert.Equal("hybrid", store.LastQuery?.RankMode);
+        Assert.Equal(10, store.LastQuery?.Limit);
+    }
+
     private sealed class FakeDocumentQueryStore : IDocumentQueryStore
     {
         private readonly double _keywordScore;

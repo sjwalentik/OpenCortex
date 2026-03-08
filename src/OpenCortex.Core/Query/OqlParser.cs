@@ -13,7 +13,19 @@ public sealed partial class OqlParser
 
         var query = new OqlQuery();
 
-        foreach (var rawLine in text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        // Support both multiline OQL (one clause per line) and single-line OQL
+        // (clauses separated by spaces). Split on newlines first; if the result is a
+        // single token that contains multiple clauses, re-split on keyword boundaries.
+        var rawLines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (rawLines.Length == 1)
+        {
+            rawLines = ClauseKeywordRegex().Split(rawLines[0].Trim())
+                .Select(s => s.Trim())
+                .Where(s => s.Length > 0)
+                .ToArray();
+        }
+
+        foreach (var rawLine in rawLines)
         {
             if (rawLine.StartsWith("FROM brain(", StringComparison.OrdinalIgnoreCase))
             {
@@ -120,4 +132,12 @@ public sealed partial class OqlParser
 
     [GeneratedRegex("\"([^\"]+)\"")]
     private static partial Regex QuotedValueRegex();
+
+    /// <summary>
+    /// Splits a single-line OQL string into clause tokens by matching the keyword
+    /// boundaries (FROM, SEARCH, WHERE, RANK, LIMIT) that start each clause.
+    /// The lookahead keeps the keyword at the start of each resulting token.
+    /// </summary>
+    [GeneratedRegex(@"(?=\b(?:FROM|SEARCH|WHERE|RANK|LIMIT)\b)", RegexOptions.IgnoreCase)]
+    private static partial Regex ClauseKeywordRegex();
 }

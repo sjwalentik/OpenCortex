@@ -47,24 +47,6 @@ builder.Services.AddMcpServer()
 var app = builder.Build();
 
 // ---------------------------------------------------------------------------
-// Seed brain catalog from config on startup (non-blocking, best-effort)
-// ---------------------------------------------------------------------------
-
-_ = Task.Run(async () =>
-{
-    try
-    {
-        using var scope = app.Services.CreateScope();
-        var catalog = scope.ServiceProvider.GetRequiredService<IBrainCatalogStore>();
-        await catalog.UpsertBrainsAsync(options.Brains, CancellationToken.None);
-    }
-    catch
-    {
-        // Startup seeding is best-effort; the server still starts cleanly
-    }
-});
-
-// ---------------------------------------------------------------------------
 // Diagnostic HTTP endpoints (not part of MCP protocol)
 // ---------------------------------------------------------------------------
 

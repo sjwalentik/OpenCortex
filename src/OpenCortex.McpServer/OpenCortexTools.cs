@@ -54,6 +54,27 @@ public sealed class OpenCortexTools(
                 "OQL must include a FROM brain(...) clause. Example: FROM brain(\"my-brain\") SEARCH \"term\" RANK hybrid LIMIT 10");
         }
 
+        // Extract brain IDs from the OQL and verify each one is active before executing.
+        // This surfaces a clear error rather than silently returning empty results for a retired brain.
+        var brainIds = ExtractBrainIds(oql);
+        if (brainIds.Count > 0)
+        {
+            var allBrains = await brainCatalogStore.ListBrainsAsync(cancellationToken);
+            var brainMap = allBrains.ToDictionary(b => b.BrainId, b => b.Status, StringComparer.OrdinalIgnoreCase);
+            foreach (var id in brainIds)
+            {
+                if (brainMap.TryGetValue(id, out var status))
+                {
+                    if (string.Equals(status, "retired", StringComparison.OrdinalIgnoreCase))
+                        return QueryBrainResult.Failure(oql, $"Brain '{id}' is retired and cannot be queried. Use list_brains to see active brains.");
+                }
+                else
+                {
+                    return QueryBrainResult.Failure(oql, $"Brain '{id}' was not found. Use list_brains to see available brains.");
+                }
+            }
+        }
+
         OqlQueryExecutionResult result;
         try
         {
@@ -89,6 +110,32 @@ public sealed class OpenCortexTools(
             ResultsWithSemanticSignal: summary.ResultsWithSemanticSignal,
             ResultsWithGraphSignal: summary.ResultsWithGraphSignal,
             Results: items);
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Extracts brain IDs from FROM brain("...") clauses in an OQL string.
+    /// </summary>
+    private static List<string> ExtractBrainIds(string oql)
+    {
+        var ids = new List<string>();
+        var span = oql.AsSpan();
+        const string marker = "brain(\"";
+        int pos = 0;
+        while (true)
+        {
+            var idx = span[pos..].IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) break;
+            var start = pos + idx + marker.Length;
+            var end = oql.IndexOf('"', start);
+            if (end < 0) break;
+            ids.Add(oql[start..end]);
+            pos = end + 1;
+        }
+        return ids;
     }
 
     // -----------------------------------------------------------------------

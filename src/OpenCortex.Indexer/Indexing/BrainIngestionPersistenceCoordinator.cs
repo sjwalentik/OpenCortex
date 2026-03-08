@@ -53,12 +53,21 @@ public sealed class BrainIngestionPersistenceCoordinator
 
             await _documentStore.UpsertDocumentsAsync(batch.Documents, cancellationToken);
 
+            // Only reconcile deletions when at least one document was discovered for a source root.
+            // Skipping deletion reconciliation for empty source roots prevents a temporarily
+            // unreachable path (e.g. a network share that is offline) from wiping all indexed
+            // documents for that root.
             foreach (var sourceRootId in batch.SourceRootIds)
             {
                 var activeCanonicalPaths = batch.Documents
                     .Where(document => string.Equals(document.SourceRootId, sourceRootId, StringComparison.OrdinalIgnoreCase))
                     .Select(document => document.CanonicalPath)
                     .ToArray();
+
+                if (activeCanonicalPaths.Length == 0)
+                {
+                    continue;
+                }
 
                 await _documentStore.MarkMissingDocumentsDeletedAsync(
                     batch.BrainId,
