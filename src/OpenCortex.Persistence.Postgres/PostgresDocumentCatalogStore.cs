@@ -57,6 +57,62 @@ public sealed class PostgresDocumentCatalogStore : IDocumentCatalogStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<DocumentListItem>> ListDocumentsAsync(
+        string brainId,
+        string? sourceRootId = null,
+        string? pathPrefix = null,
+        int limit = 200,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = $"""
+            SELECT
+                document_id,
+                brain_id,
+                source_root_id,
+                canonical_path,
+                title,
+                document_type,
+                source_updated_at,
+                indexed_at
+            FROM {_connectionFactory.Schema}.documents
+            WHERE brain_id = @brain_id
+              AND is_deleted = false
+              AND (@source_root_id IS NULL OR source_root_id = @source_root_id)
+              AND (@path_prefix IS NULL OR canonical_path LIKE @path_prefix_like)
+            ORDER BY canonical_path
+            LIMIT @limit;
+            """;
+
+        object pathPrefixLikeValue = pathPrefix is null ? DBNull.Value : (object)(pathPrefix.TrimEnd('/') + "/%");
+
+        command.Parameters.AddWithValue("brain_id", brainId);
+        command.Parameters.AddWithValue("source_root_id", (object?)sourceRootId ?? DBNull.Value);
+        command.Parameters.AddWithValue("path_prefix", (object?)pathPrefix ?? DBNull.Value);
+        command.Parameters.AddWithValue("path_prefix_like", pathPrefixLikeValue);
+        command.Parameters.AddWithValue("limit", limit);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var results = new List<DocumentListItem>();
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(new DocumentListItem(
+                DocumentId: reader.GetString(0),
+                BrainId: reader.GetString(1),
+                SourceRootId: reader.IsDBNull(2) ? null : reader.GetString(2),
+                CanonicalPath: reader.GetString(3),
+                Title: reader.GetString(4),
+                DocumentType: reader.IsDBNull(5) ? null : reader.GetString(5),
+                SourceUpdatedAt: reader.IsDBNull(6) ? null : new DateTimeOffset(reader.GetDateTime(6), TimeSpan.Zero),
+                IndexedAt: new DateTimeOffset(reader.GetDateTime(7), TimeSpan.Zero)));
+        }
+
+        return results;
+    }
+
     private async Task ExecuteAsync(IReadOnlyList<DocumentRecord> documents, CancellationToken cancellationToken)
     {
         if (documents.Count == 0)

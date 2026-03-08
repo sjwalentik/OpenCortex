@@ -81,6 +81,9 @@ public sealed class BrainIngestionPersistenceCoordinatorTests
             Reconciliations.Add((brainId, sourceRootId, activeCanonicalPaths));
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<DocumentListItem>> ListDocumentsAsync(string brainId, string? sourceRootId = null, string? pathPrefix = null, int limit = 200, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<DocumentListItem>>([]);
     }
 
     private sealed class ThrowingDocumentStore : IDocumentCatalogStore
@@ -94,6 +97,9 @@ public sealed class BrainIngestionPersistenceCoordinatorTests
         {
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<DocumentListItem>> ListDocumentsAsync(string brainId, string? sourceRootId = null, string? pathPrefix = null, int limit = 200, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<DocumentListItem>>([]);
     }
 
     private sealed class FakeChunkStore : IChunkStore

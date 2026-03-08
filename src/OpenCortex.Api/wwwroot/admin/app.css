@@ -222,6 +222,22 @@ input, select {
 
 .button-primary:hover { background: linear-gradient(180deg, #9a633f, var(--primary-strong)); }
 
+.button-secondary {
+  background: rgba(122, 75, 44, 0.08);
+  border-color: rgba(122, 75, 44, 0.22);
+  color: var(--primary);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.button-secondary:hover { background: rgba(122, 75, 44, 0.14); }
+
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

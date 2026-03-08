@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCortex Browse</title>
+  <link rel="stylesheet" href="/browse/app.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">OpenCortex</p>
+        <h1>Browse Documents</h1>
+        <p class="lede">Select a brain and explore the documents it has indexed.</p>
+      </div>
+      <nav class="header-nav">
+        <a href="/admin/" class="nav-link">Admin Console</a>
+      </nav>
+    </header>
+
+    <section class="controls-bar" aria-label="Brain selection and filters">
+      <div class="control-group">
+        <label for="brainSelect" class="control-label">Brain</label>
+        <select id="brainSelect" class="control-input">
+          <option value="">Loading brains...</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="pathPrefixInput" class="control-label">Path prefix</label>
+        <input id="pathPrefixInput" class="control-input" type="text" placeholder="e.g. docs/" />
+      </div>
+      <div class="control-group">
+        <label for="limitInput" class="control-label">Limit</label>
+        <input id="limitInput" class="control-input control-input-sm" type="number" value="200" min="1" max="1000" />
+      </div>
+      <button id="loadDocuments" class="button button-primary" disabled>Load</button>
+    </section>
+
+    <section id="statusBanner" class="status-banner hidden" aria-live="polite"></section>
+
+    <section id="documentsSection" class="documents-section hidden" aria-label="Document listing">
+      <div class="documents-header">
+        <span id="documentCount" class="document-count"></span>
+        <input id="filterInput" class="filter-input" type="search" placeholder="Filter by title or path..." />
+      </div>
+      <div class="document-table-wrap">
+        <table class="document-table" aria-label="Document list">
+          <thead>
+            <tr>
+              <th class="col-title">Title</th>
+              <th class="col-path">Path</th>
+              <th class="col-type">Type</th>
+              <th class="col-updated">Updated</th>
+              <th class="col-indexed">Indexed</th>
+            </tr>
+          </thead>
+          <tbody id="documentTableBody"></tbody>
+        </table>
+      </div>
+      <p id="filteredNote" class="filtered-note hidden"></p>
+    </section>
+
+    <section id="emptyState" class="empty-state hidden" aria-live="polite">
+      <p id="emptyMessage">Select a brain and click Load to browse its documents.</p>
+    </section>
+  </div>
+
+  <script src="/browse/app.js"></script>
+</body>
+</html>

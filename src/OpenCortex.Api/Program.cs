@@ -20,9 +20,16 @@ var app = builder.Build();
 
 app.Use(async (context, next) =>
 {
-    if (string.Equals(context.Request.Path.Value, "/admin", StringComparison.Ordinal))
+    var path = context.Request.Path.Value ?? "";
+    if (string.Equals(path, "/admin", StringComparison.Ordinal))
     {
         context.Response.Redirect("/admin/", permanent: false);
+        return;
+    }
+
+    if (string.Equals(path, "/browse", StringComparison.Ordinal))
+    {
+        context.Response.Redirect("/browse/", permanent: false);
         return;
     }
 
@@ -291,6 +298,27 @@ app.MapPost("/query", async (OqlQueryRequest request, CancellationToken cancella
     var executor = new OqlQueryExecutor(new PostgresDocumentQueryStore(connectionFactory, embeddingProvider));
     var result = await executor.ExecuteAsync(request.Oql, cancellationToken);
     return Results.Ok(result);
+});
+
+// ---------------------------------------------------------------------------
+// Browse API — document listing for authoring surface
+// ---------------------------------------------------------------------------
+
+app.MapGet("/browse/brains/{brainId}/documents", async (
+    string brainId,
+    string? sourceRootId,
+    string? pathPrefix,
+    int? limit,
+    CancellationToken cancellationToken) =>
+{
+    var documentCatalogStore = new PostgresDocumentCatalogStore(connectionFactory);
+    var documents = await documentCatalogStore.ListDocumentsAsync(
+        brainId,
+        sourceRootId,
+        pathPrefix,
+        limit ?? 200,
+        cancellationToken);
+    return Results.Ok(new { brainId, count = documents.Count, documents });
 });
 
 app.Run();
