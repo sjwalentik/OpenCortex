@@ -55,6 +55,9 @@ Deliver the first end-to-end OpenCortex slice for multi-brain, filesystem-backed
 - [x] implement pgvector similarity retrieval
 - [x] implement hybrid ranking and explainability
 - [x] add graph-aware retrieval boosts and wiki-link resolution persistence
+- [x] add per-signal `ScoreBreakdown` (keyword, semantic, graph) to `RetrievalResultRecord`
+- [x] build `Reason` string from actual signal values in C# instead of SQL CASE expressions
+- [x] add `ExecutionSummary` to `OqlQueryExecutionResult` (per-signal result counts, score range)
 
 ### 5. Surfaces
 
@@ -67,14 +70,18 @@ Deliver the first end-to-end OpenCortex slice for multi-brain, filesystem-backed
 - [x] fix admin redirect loop (`/admin` → `/admin/` only, no `/admin/` → `/admin/` loop)
 - [x] update admin console to use health endpoint with per-brain health chips and run detail
 - [x] add graceful error handling in admin console per section (health, brains, runs)
-- [ ] add admin API endpoints for brain and source root CRUD
+- [x] add admin API endpoints for brain and source root CRUD (`GET/POST/PUT/DELETE /admin/brains/{id}`, `POST/PUT/DELETE /admin/brains/{id}/source-roots/{id}`)
+- [x] fix source root orphan accumulation: delete rows no longer in config on every upsert
+- [x] soft-retire persisted brains removed from config; surface `IsConfigured` flag in health endpoint
+- [x] add Create Brain form, inline Add Source Root form, and Retire button to admin console
 - [ ] add authoring UI shell
 
 ### 6. Quality
 
 - [x] add initial unit test projects
 - [x] add parser, validation, and planner tests
-- [ ] add integration tests for filesystem indexing and retrieval
+- [x] add `OpenCortex.Integration.Tests` with `InMemoryDocumentQueryStore` for database-free end-to-end coverage
+- [x] add 14 integration tests covering keyword/semantic/hybrid ranking, graph boost, metadata filters, score breakdown, wiki-link resolution, limit enforcement, and brain isolation
 
 ## Current State
 
@@ -88,24 +95,20 @@ The repository now has:
 - filesystem ingestion with frontmatter parsing, heading chunking, wiki-link extraction, and link-edge persistence
 - deletion reconciliation plus cleanup of stale chunks, edges, and embeddings on rescans
 - index run persistence, run history, and run error inspection endpoints
-- a `/admin/brains/health` endpoint returning per-brain summaries with latest run status, document counts, and error info
-- brain health status driven by latest run only (stale historical runs do not pollute current health)
-- a lightweight admin console for browsing brains with health chips, triggering indexing, reviewing runs/errors, and smoke-testing OQL
-- graceful error fallback messaging in the admin console when individual API sections fail to load
+- full brain and source root CRUD: `GET/POST/PUT/DELETE /admin/brains/{id}` and `POST/PUT/DELETE /admin/brains/{id}/source-roots/{id}`
+- source root sync correctness: orphaned rows are deleted on every config upsert; removed brains are soft-retired
+- `IsConfigured` flag on `BrainHealthSummary` distinguishes active config-backed brains from retired historical ones
+- per-signal `ScoreBreakdown` (keyword, semantic, graph) on every `RetrievalResultRecord`
+- `Reason` string built from actual signal values rather than inferred from SQL CASE expressions
+- `ExecutionSummary` on `OqlQueryExecutionResult` with per-signal counts and score range
+- admin console with Create Brain form, inline Add Source Root form, Retire button, and score breakdown in OQL smoke-test
+- `OpenCortex.Integration.Tests` project with `InMemoryDocumentQueryStore` for database-free end-to-end coverage
+- 36 tests total across unit, planner, coordinator, and integration layers
 - local Postgres plus pgvector compose infrastructure and manual SQL migration workflow
-
-## Known Issues
-
-- source root counts shown per brain may not match expected values; the `SourceRootCount` field on `BrainSummary` reflects persisted records, which can diverge from the local config if brains were registered before source roots were configured correctly
-- brains must be registered in Postgres before indexing can be triggered via the API; mismatch between config brain IDs and persisted slugs will cause 404s on indexing endpoints
-- older index runs with `running` status in history are surfaced in the admin health detail to help operators identify stuck runs, but they do not affect the health chip state
 
 ## Remaining v0 Priorities
 
-1. add brain and source root CRUD to the admin API and console
-2. resolve source root count discrepancy between config and persisted brain records
-3. improve hybrid scoring explainability and result reasoning output
-4. continue graph-aware retrieval tuning and context-pack shaping
-5. harden MCP tool contracts around the current OQL execution path
-6. add deeper end-to-end integration coverage for indexing plus retrieval
-7. start the first authoring-surface browsing slice after admin stabilizes
+1. harden MCP tool contracts around OQL execution, brain scoping, and result formatting
+2. add the first authoring-surface browsing slice (document listing inside a brain)
+3. continue graph-aware retrieval tuning and context-pack shaping
+4. add production-readiness work: auth, observability, and operational hardening

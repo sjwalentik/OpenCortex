@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\OpenCortex.McpServer\OpenCortex.McpServer.csproj" />
     <ProjectReference Include="..\..\src\OpenCortex.Core\OpenCortex.Core.csproj" />
+    <ProjectReference Include="..\..\src\OpenCortex.Retrieval\OpenCortex.Retrieval.csproj" />
   </ItemGroup>
 
 </Project>

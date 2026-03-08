@@ -39,12 +39,15 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 - architecture, storage, indexing, retrieval, and MCP foundation are in place
 - operator-managed multi-brain filesystem indexing works against Postgres plus pgvector
 - OQL supports single-brain retrieval with text, metadata, semantic, hybrid, and graph-aware ranking inputs
-- the API exposes health, brain listing, indexing preview/run, index run history, run errors, and query execution
-- a lightweight admin console ships at `/admin/` for operational inspection and smoke testing
-- the admin console correctly uses the `/admin/brains/health` endpoint to show per-brain health status, latest run details, document counts, and error summaries
-- brain health chips reflect latest-run state only (not stale historical runs) to avoid misleading "indexing" indicators
-- the admin shell handles API errors gracefully with per-section fallback messaging
-- the next focus is deepening admin workflows and improving retrieval explainability
+- retrieval results now carry a per-signal `ScoreBreakdown` (keyword, semantic, graph) alongside the combined score
+- the `Reason` string is built from actual signal values, e.g. `"title match (2.00) + semantic similarity (0.85) + graph boost ×3 (0.45)"`
+- `OqlQueryExecutionResult` exposes an `ExecutionSummary` with per-signal result counts and score range
+- brain and source root CRUD is fully implemented: `GET/POST/PUT/DELETE /admin/brains/{id}` and `POST/PUT/DELETE /admin/brains/{id}/source-roots/{id}`
+- orphaned source root rows are cleaned up on every config sync; brains removed from config are soft-retired
+- the admin console surfaces per-brain health chips, retired brain indicators, Create Brain form, and inline Add Source Root form with Retire button
+- the API exposes health, brain listing, CRUD, indexing preview/run, index run history, run errors, and query execution
+- end-to-end integration tests cover the full pipeline from filesystem discovery through OQL query execution and score breakdown validation without requiring a database
+- the next focus is hardening MCP tool contracts and adding the first authoring-surface browsing slice
 
 ## Phases
 
@@ -137,16 +140,13 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 - [x] M4: multi-brain indexing works with strict isolation
 - [x] M5: OQL query path works end to end
 - [~] M6: MCP server exposes stable brain-scoped tools
-- [~] M7: admin API and UI support brain management and per-brain health
+- [x] M7: admin API and UI support brain management, per-brain health, and CRUD
 - [ ] M8: authoring UI supports Markdown editing
 - [ ] M9: hosted/cloud operational model is ready
 
 ## Near-Term Deliverables
 
-- add brain and source root CRUD to the admin API and console
-- resolve source root count discrepancy between config and persisted brain records
-- improve hybrid scoring explainability and result reasons returned from retrieval
-- continue graph-aware retrieval tuning and add richer context-pack shaping
-- harden MCP tool shape and brain-scoped retrieval ergonomics
-- prepare the first authoring-surface slice for document browsing
-- add end-to-end integration tests covering indexing and retrieval together
+- harden MCP tool contracts around OQL execution, brain scoping, and result formatting
+- prepare the first authoring-surface slice for document browsing inside a brain
+- continue graph-aware retrieval tuning and context-pack shaping
+- add production-readiness work: auth, observability, and operational hardening

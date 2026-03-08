@@ -28,7 +28,9 @@ It is exposed primarily through the MCP server and represents the stable product
 - current metadata filters cover document `tag`, `title`, `path`, and `type`
 - rank modes currently include `keyword`, `semantic`, and `hybrid`
 - hybrid retrieval combines text signals, pgvector similarity, and graph-aware boosts from persisted link edges
-- results already return reasons and scores, but explainability depth still needs improvement
+- results include a `ScoreBreakdown` with separate `KeywordScore`, `SemanticScore`, and `GraphScore` fields
+- each result carries a human-readable `Reason` string built in C# from active signals, e.g. `"title match (2.00) + semantic similarity (0.85) + graph boost ×3 (0.45)"`
+- `OqlQueryExecutionResult` includes an `ExecutionSummary` with per-signal result counts and min/max score across the result set
 
 ## Conceptual Query Shape
 
@@ -88,14 +90,20 @@ Returns ranked, explainable results that can be emitted directly or assembled in
 
 ## Explainability
 
-OpenCortex should explain why a result appeared, for example:
+OpenCortex explains why each result appeared. The current implementation provides:
 
-- keyword match on title
+- `ScoreBreakdown` per result: separate `KeywordScore`, `SemanticScore`, and `GraphScore` values
+- `Reason` string per result constructed in C# from active signals, e.g. `"title match (2.00) + semantic similarity (0.85) + graph boost ×3 (0.45)"`
+- `ExecutionSummary` on the query result: counts of keyword-matched, semantic-matched, and graph-boosted results, plus min/max score across the result set
+
+The Postgres implementation selects these scores as separate columns rather than building opaque reason strings in SQL, making the breakdown testable in isolation.
+
+Examples of signals that appear in reason strings:
+
+- keyword match on title or content
 - semantic similarity to query
-- linked from a high-relevance document
-- recently updated and tag-matched
-
-The current implementation already returns a reason string per result, but richer score breakdowns and clearer hybrid explanations remain active follow-up work.
+- graph boost from linked document edges
+- combinations of the above with per-signal weights
 
 ## Storage Independence
 
@@ -120,7 +128,7 @@ Likely tool shapes:
 
 ## Remaining v0 Retrieval Work
 
-- deepen hybrid score breakdowns so results explain keyword, semantic, and graph contributions more clearly
 - expand executable grammar coverage as new OQL clauses are added
 - shape ranked results into more intentional context-pack outputs
 - preserve storage independence while keeping Postgres plus pgvector the default implementation
+- harden MCP tool contracts around OQL execution (brain scoping, result formatting, error handling)
