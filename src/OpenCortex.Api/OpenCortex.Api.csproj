@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenCortex.Core\OpenCortex.Core.csproj" />
+    <ProjectReference Include="..\OpenCortex.Indexer\OpenCortex.Indexer.csproj" />
+    <ProjectReference Include="..\OpenCortex.Retrieval\OpenCortex.Retrieval.csproj" />
+    <ProjectReference Include="..\OpenCortex.Persistence.Postgres\OpenCortex.Persistence.Postgres.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>2d7f2c8b-d2c3-4032-9389-eba4f2a75633</UserSecretsId>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: opencortex-postgres
+    environment:
+      POSTGRES_DB: opencortex
+      POSTGRES_USER: opencortex
+      POSTGRES_PASSWORD: opencortex
+    ports:
+      - "5432:5432"
+    volumes:
+      - opencortex-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opencortex -d opencortex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  opencortex-postgres-data:

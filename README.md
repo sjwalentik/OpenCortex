@@ -14,6 +14,8 @@ The core concept notes currently live outside the repo alongside the rest of the
 
 If you want to keep local document paths near the repo without committing them, use `opencortex.local.json` or files under `.opencortex/`. See `opencortex.local.example.json` for a simple example.
 
+Current in-repo planning docs live under `docs/product/roadmap.md` and `docs/architecture/`.
+
 ## What OpenCortex Aims To Provide
 
 - Markdown as the source of truth for durable knowledge
@@ -34,6 +36,15 @@ OpenCortex/
   scripts/
 ```
 
+## Current Bootstrap Artifacts
+
+- product roadmap: `docs/product/roadmap.md`
+- v0 implementation plan: `docs/product/v0-implementation-plan.md`
+- architecture docs: `docs/architecture/`
+- solution scaffold: `OpenCortex.sln`
+- local Postgres compose: `infra/compose/docker-compose.yml`
+- manual Postgres setup guide: `docs/operations/manual-postgres-setup.md`
+
 ## Initial Architecture Direction
 
 - `.NET / C#` for the runtime and MCP server
@@ -42,6 +53,21 @@ OpenCortex/
 - Markdown parsing, chunking, link extraction, and indexing pipelines
 - Hybrid retrieval that combines keyword, semantic, and graph signals
 - Docker-based local development infrastructure
+
+## Local Development Bootstrap
+
+```bash
+docker compose -f infra/compose/docker-compose.yml up -d
+dotnet build OpenCortex.sln
+dotnet test OpenCortex.sln
+dotnet run --project src/OpenCortex.Api
+```
+
+For secret-backed or cluster-managed databases, keep the real connection string in user secrets or deployment secrets and apply SQL migrations manually from `infra/postgres/migrations/`.
+
+Embedding provider settings also live under `OpenCortex:Embeddings`. The default open source setup uses the deterministic provider, while hosted or operator-managed deployments can switch to an `openai-compatible` endpoint with secrets stored outside the repo.
+
+Once the API is running, you can inspect indexing operations through `GET /indexing/runs`, `GET /indexing/runs?brainId=<brainId>`, and `GET /indexing/runs/<indexRunId>`.
 
 ## Licensing
 
