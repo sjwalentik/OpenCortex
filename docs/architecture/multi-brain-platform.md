@@ -97,3 +97,43 @@ The main difference is where the canonical content lives.
 - implement filesystem mode first
 - design managed-content mode into the schema and docs now, even if execution comes later
 - use a shared Postgres database with strong `brainId` scoping
+
+## Hosted SaaS Model
+
+The cloud-hosted product uses managed-content brains exclusively for tenant users. Filesystem brains remain operator-only in v1.
+
+### Individual Accounts
+
+- every user gets one personal workspace (customer) on signup
+- one personal brain created by default (mode: managed-content)
+- documents are created and edited in the browser
+- filesystem is not exposed to cloud users in v1
+
+### Team Accounts (Phase 13)
+
+- a workspace can have multiple members
+- shared brains are accessible to all workspace members according to role
+- individual personal brains still exist per member
+- roles: owner, admin, editor, viewer
+
+### Deployment Mode Split
+
+| Aspect | Self-Hosted (Filesystem) | Hosted SaaS (Managed-Content) |
+|---|---|---|
+| Content source of truth | Filesystem / NAS | Postgres (`managed_documents`) |
+| Editing | External editor (Obsidian, VSCode) | Browser (TipTap editor) |
+| Indexing trigger | Manual, scheduled | On save + manual reindex |
+| Auth | Operator-managed | Firebase Auth + tenant JWT |
+| Billing | None | Stripe subscriptions |
+| MCP access | Operator config | Personal API tokens (`oct_xxx`) |
+| Available to cloud users | No (v1) | Yes |
+
+### Tenant Isolation Rules (Hosted)
+
+- every API request resolves `customerId` from the authenticated session
+- all brain reads, writes, and indexing operations filter by `customerId`
+- users cannot access or enumerate brains from other customers
+- OQL query execution checks brain ownership before executing
+- operator/admin surface requires separate elevated role and is not reachable from the public domain
+
+See `docs/architecture/auth-and-identity.md` for identity and tenancy design.

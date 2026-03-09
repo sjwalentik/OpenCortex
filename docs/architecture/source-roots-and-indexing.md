@@ -68,8 +68,24 @@ This avoids depending too early on file-watch behavior across NAS and network sh
 ## Managed-Content Mode Notes
 
 - OpenCortex becomes the canonical source of truth
-- indexing is triggered by internal document changes as well as background jobs
-- filesystem discovery steps may be replaced by internal content enumeration
+- document content is stored in the `managed_documents` table in Postgres
+- indexing is triggered on document save via background job, not by filesystem scan
+- filesystem discovery (step 1) is replaced by enumeration of `managed_documents` records
+- `source_root_id` is null on all `documents` records for managed-content brains
+- full reindex still available as a manual operation
+
+### Managed-Content Indexing Trigger
+
+```
+User saves document in browser
+    → PUT /documents/:id (tenant API)
+    → content saved to managed_documents
+    → background job queued
+    → job runs indexing pipeline against managed_documents record
+    → documents, chunks, embeddings, link_edges upserted
+```
+
+Filesystem mode remains for self-hosted operator deployments. Hosted cloud users use managed-content mode exclusively in v1.
 
 ## Suggested Indexing Records
 

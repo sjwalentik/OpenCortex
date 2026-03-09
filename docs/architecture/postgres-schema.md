@@ -190,3 +190,37 @@ Typical execution needs:
 - implement both `filesystem` and `managed-content` brain modes on `brains`
 - fully implement filesystem-backed indexing first
 - defer versioning and collaborative editing tables until authoring work begins
+
+## SaaS Schema Additions
+
+The following tables are added in later migrations to support the hosted cloud product. All SQL lives in `infra/postgres/migrations/`.
+
+### Migration 0002: Identity And Tenancy
+
+**`users`** — one record per authenticated human, keyed by Firebase Auth UID via `external_id`.
+
+**`customer_memberships`** — links users to workspaces with a role (`owner`, `admin`, `editor`, `viewer`). Unique on `(user_id, customer_id)`.
+
+`customers` gains: `owner_user_id`, `stripe_customer_id`, `plan_id`.
+
+### Migration 0003: Billing
+
+**`subscriptions`** — mirrors Stripe subscription state per customer. Fields: `plan_id` (free/pro/teams/enterprise), `status`, `stripe_customer_id`, `stripe_subscription_id`, `current_period_end`, `cancel_at_period_end`.
+
+**`subscription_events`** — immutable append-only log of all Stripe webhook events. Deduplicated on `stripe_event_id`.
+
+**`usage_counters`** — keyed by `(customer_id, counter_key)`. Counter keys: `documents.active`, `mcp.queries.YYYY-MM`, `indexing.runs.YYYY-MM-DD`. Upserted atomically on every billable action.
+
+### Migration 0004: Managed Content
+
+**`managed_documents`** — canonical document storage for hosted cloud brains. Fields: `brain_id`, `customer_id`, `title`, `slug`, `content` (Markdown text), `content_hash`, `word_count`, `frontmatter` (jsonb), `status` (draft/published/archived), `created_by`, `updated_by`, `is_deleted`. Unique index on `(brain_id, slug)` where `is_deleted = false`.
+
+Indexing pipeline reads from `managed_documents` instead of filesystem for managed-content brains. `source_root_id` is null on resulting `documents` records.
+
+### Migration 0005: API Tokens
+
+**`api_tokens`** — personal API tokens for MCP and programmatic access. Fields: `user_id`, `customer_id`, `name` (user label), `token_hash` (SHA-256, never stored plaintext), `token_prefix` (first 8 chars for display), `scopes` (array: `mcp:read`, `mcp:write`), `expires_at` (nullable), `last_used_at`, `revoked_at`.
+
+Token format: `oct_<32+ bytes base62-encoded random>`. Shown once at creation. Validated by hashing the presented token and looking up `token_hash`.
+
+See `docs/architecture/auth-and-identity.md`, `docs/architecture/billing-and-quotas.md`, and `docs/architecture/mcp-security.md` for full design.

@@ -112,3 +112,49 @@ The repository now has:
 2. add the first authoring-surface browsing slice (document listing inside a brain)
 3. continue graph-aware retrieval tuning and context-pack shaping
 4. add production-readiness work: auth, observability, and operational hardening
+
+## SaaS Roadmap (Post-v0)
+
+The v0 scope is intentionally operator-focused and filesystem-first. The hosted SaaS product builds on top of this foundation in clearly sequenced phases. Full detail lives in `docs/product/roadmap.md`.
+
+### Phase 9: Authoring Surface (managed-content)
+
+- browser Markdown editor using TipTap (WYSIWYG with source mode)
+- managed-content document CRUD stored in Postgres (`managed_documents` table)
+- indexing triggered on save, not by filesystem scan
+- document browser, import single `.md`, export single `.md`
+
+### Phase 10: Auth And Identity
+
+- Firebase Auth: email/password and Google social login
+- JWT validation middleware on all tenant-facing routes
+- `users`, `customer_memberships` tables added via migration 0002
+- auto-provision personal workspace, brain, and free subscription on first login
+- operator surface separated from tenant surface at the routing layer
+
+See `docs/architecture/auth-and-identity.md`.
+
+### Phase 11: Billing And Quotas
+
+- Stripe Checkout for Pro upgrade, Stripe Customer Portal for self-service management
+- webhook-driven subscription state: `subscriptions`, `subscription_events`, `usage_counters` tables
+- free plan: 10 documents; pro plan: 500 documents
+- quota enforced on document create/import with structured 402 response and upgrade prompt
+
+See `docs/architecture/billing-and-quotas.md`.
+
+### Phase 12: Secure MCP Access
+
+- personal API tokens (`oct_` prefix, SHA-256 stored, shown once at creation)
+- `api_tokens` table: name, hash, scopes, last used, revoked
+- MCP server validates tokens, resolves user brain, scopes all tool calls
+- free plan: `mcp:read` only; pro plan: `mcp:read mcp:write`
+- token management UI in account settings
+
+See `docs/architecture/mcp-security.md`.
+
+### Phase 13+: Teams, Observability, Enterprise
+
+- shared brains and workspace membership (Phase 13)
+- structured logging, metrics, alerting (Phase 14)
+- SAML/SSO, BYOC, Helm packaging (Phase 15)

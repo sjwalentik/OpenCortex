@@ -2,12 +2,13 @@
 
 ## Overview
 
-OpenCortex needs two human-facing surfaces in addition to MCP:
+OpenCortex has three human-facing surfaces in addition to MCP:
 
-- an admin surface for operating brains and customers
-- an authoring surface for editing and curating Markdown knowledge
+- an **operator/admin surface** for infrastructure operators managing brains and customers
+- an **authoring surface** for editing and curating Markdown knowledge in the browser
+- a **tenant API** for hosted cloud users managing their documents, brains, billing, and API tokens
 
-These should be planned now even if they ship after the runtime and MCP layers.
+These must be clearly separated in routing, auth middleware, and deployment topology.
 
 ## Admin Surface
 
@@ -72,51 +73,114 @@ Schedule management remains a future admin workflow.
 ### Later Admin Capabilities
 
 - customer management
-- quotas and billing metadata
+- quotas and billing metadata: per-customer plan, document count, monthly query usage
 - user and role management
 - per-brain access policies
+
+## Operator Surface Isolation
+
+Before public launch the operator/admin surface must not be reachable on the public-facing domain.
+
+Recommended approach:
+- separate Kubernetes Ingress for `/admin/*` and `/indexing/*` restricted to internal cluster IPs
+- or: separate deployment for operator-facing API on a non-public port
+
+All `/admin/*` and `/indexing/*` routes must require an elevated operator role, not just any authenticated user token.
 
 ## Authoring Surface
 
 ### Goals
 
-- browse documents inside a brain
-- open Markdown documents
-- edit and preview Markdown in the browser
-- preserve link-aware authoring workflows
+- create, browse, open, edit, preview, and save Markdown documents in the browser
+- support managed-content mode as the primary hosted cloud editing model
+- support filesystem-backed editing for self-hosted brains later
 
-### Filesystem-Backed Authoring
+### Managed-Content Authoring (Hosted Cloud — Phase 9)
 
-- browser editing writes back to the configured source root
+- users create and edit Markdown entirely in the browser
+- OpenCortex stores canonical document content in the `managed_documents` table
+- editor: TipTap (WYSIWYG with Markdown source mode toggle)
+- indexing triggered automatically on document save via background job
+- document list, create, edit, soft-delete, import single `.md`, export single `.md`
+
+### Filesystem-Backed Authoring (Self-Hosted — Later)
+
+- browser editing writes back to the configured source root on disk or NAS
 - OpenCortex triggers a targeted reindex after save
-- conflict handling and lock awareness will matter later
+- conflict handling and lock awareness deferred
 
-### Managed-Content Authoring
+## Tenant API Surface (Hosted Cloud)
 
-- OpenCortex stores canonical content directly
-- version history, publishing, and review workflows become easier to add
-- this is the likely model for hosted/cloud usage
+The tenant API is distinct from the operator/admin surface. All routes are authenticated via Firebase Auth JWT and scoped to the requesting user's workspace.
 
-## Why Both Surfaces Matter Early
+### Document Routes
+
+| Route | Method | Description |
+|---|---|---|
+| `/documents` | GET | List documents in active brain |
+| `/documents` | POST | Create document (quota checked) |
+| `/documents/:id` | GET | Get document content and metadata |
+| `/documents/:id` | PUT | Update document content |
+| `/documents/:id` | DELETE | Soft-delete document |
+| `/documents/import` | POST | Import a single `.md` file |
+| `/documents/export` | GET | Export document as `.md` |
+
+### Brain Routes (Tenant)
+
+| Route | Method | Description |
+|---|---|---|
+| `/brains` | GET | List brains in active workspace |
+| `/brains` | POST | Create brain (quota checked) |
+| `/brains/:id` | GET | Get brain details |
+| `/brains/:id/reindex` | POST | Trigger full reindex |
+
+### Query Routes
+
+| Route | Method | Description |
+|---|---|---|
+| `/query` | POST | Execute OQL query scoped to authenticated user's brain |
+
+### Billing Routes
+
+| Route | Method | Description |
+|---|---|---|
+| `/billing/plan` | GET | Current plan and usage summary |
+| `/billing/upgrade` | POST | Create Stripe Checkout session |
+| `/billing/portal` | POST | Create Stripe Customer Portal session |
+
+### API Token Routes (MCP Access)
+
+| Route | Method | Description |
+|---|---|---|
+| `/tokens` | GET | List user's API tokens (name, prefix, scopes, last used) |
+| `/tokens` | POST | Create a new API token (shown once at creation) |
+| `/tokens/:id` | DELETE | Revoke a token immediately |
+
+See `docs/architecture/mcp-security.md` for full MCP token design.
+
+## Why Both Surfaces Matter
 
 - admin requirements affect how brains are created and persisted
 - authoring requirements affect document identity, path handling, and versioning
 - both surfaces rely on the same brain model and indexing lifecycle
+- the tenant API and operator surface must never share auth middleware
 
-## Recommended Delivery Order
+## Delivery Order
 
-- runtime and storage first
-- OQL and MCP second
-- admin API and UI third
-- authoring UI fourth
-
-That sequence is still holding: runtime, indexing, retrieval, admin inspection, and brain/source root CRUD all exist now, while authoring remains ahead.
+- runtime and storage: complete
+- OQL and MCP: complete (hardening in progress)
+- operator admin API and UI: complete
+- managed-content authoring surface: Phase 9 (next)
+- auth and tenant API: Phase 10
+- billing and quotas: Phase 11
+- secure MCP tokens: Phase 12
 
 ## Future Considerations
 
-- collaborative editing
-- wiki link autocomplete
-- backlinks and graph navigation
-- document version history
+- collaborative real-time editing
+- wiki-link autocomplete in editor
+- backlinks panel and graph navigation
+- document version history and restore
 - review and publishing workflows
-- customer-scoped branding or management experiences
+- customer-scoped branding
+- public read-only brain sharing
