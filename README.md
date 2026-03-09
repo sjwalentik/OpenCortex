@@ -8,13 +8,11 @@ It is designed to turn human-maintained knowledge into an agent-accessible memor
 
 OpenCortex is in planning and bootstrap mode.
 
-The working build plan lives outside the repo in a local, user-configurable notes location.
+The primary product and architecture plan now lives in-repo under `docs/product/` and `docs/architecture/`.
 
-The core concept notes currently live outside the repo alongside the rest of the local planning documents.
+Private NAS or Obsidian notes can still hold draft thinking and working notes, but the repo docs are the shareable implementation baseline.
 
 If you want to keep local document paths near the repo without committing them, use `opencortex.local.json` or files under `.opencortex/`. See `opencortex.local.example.json` for a simple example.
-
-Current in-repo planning docs live under `docs/product/roadmap.md` and `docs/architecture/`.
 
 ## What OpenCortex Aims To Provide
 
@@ -41,6 +39,7 @@ OpenCortex/
 - product roadmap: `docs/product/roadmap.md`
 - v0 implementation plan: `docs/product/v0-implementation-plan.md`
 - architecture docs: `docs/architecture/`
+- SaaS planning reduced into repo docs for auth, tenancy, billing, managed content, and MCP security
 - solution scaffold: `OpenCortex.sln`
 - local Postgres compose: `infra/compose/docker-compose.yml`
 - manual Postgres setup guide: `docs/operations/manual-postgres-setup.md`

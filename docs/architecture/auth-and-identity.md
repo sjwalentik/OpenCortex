@@ -31,8 +31,8 @@ On first login (triggered by Firebase `user.created` webhook or lazy on first AP
 1. create `users` record keyed by `external_id = firebase_uid`
 2. create personal `customers` record (`plan_id = 'free'`)
 3. create `customer_memberships` record (`role = 'owner'`)
-4. create `subscriptions` record (`plan_id = 'free'`, `status = 'active'`)
-5. create default personal `brains` record (`mode = 'managed-content'`, `status = 'active'`)
+4. create default personal `brains` record (`mode = 'managed-content'`, `status = 'active'`)
+5. create or ensure mirrored `subscriptions` record (`plan_id = 'free'`, `status = 'active'`)
 
 This gives every new user a ready-to-use personal workspace with one brain.
 
@@ -45,7 +45,7 @@ Every authenticated tenant API handler receives a resolved context containing:
 - `Role` — user's role in that workspace (owner/admin/editor/viewer)
 - `PlanId` — current subscription plan (free/pro/teams/enterprise)
 
-This context is never derived from the request body or URL. It is always resolved server-side from the validated token and DB.
+`PlanId` resolves from the mirrored `subscriptions` row, with `customers.plan_id` retained only as legacy bootstrap metadata. It is never derived from the request body or URL.
 
 ## User Model
 

@@ -6,7 +6,11 @@ public interface IBrainCatalogStore
 {
     Task<IReadOnlyList<BrainSummary>> ListBrainsAsync(CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<BrainSummary>> ListBrainsByCustomerAsync(string customerId, CancellationToken cancellationToken = default);
+
     Task<BrainDetail?> GetBrainAsync(string brainId, CancellationToken cancellationToken = default);
+
+    Task<BrainDetail?> GetBrainByCustomerAsync(string customerId, string brainId, CancellationToken cancellationToken = default);
 
     Task<BrainDetail> CreateBrainAsync(BrainDefinition brain, CancellationToken cancellationToken = default);
 

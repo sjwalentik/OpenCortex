@@ -82,6 +82,9 @@ public sealed class BrainIngestionPersistenceCoordinatorTests
             return Task.CompletedTask;
         }
 
+        public Task MarkMissingManagedDocumentsDeletedAsync(string brainId, IReadOnlyList<string> activeCanonicalPaths, DateTimeOffset indexedAt, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task<IReadOnlyList<DocumentListItem>> ListDocumentsAsync(string brainId, string? sourceRootId = null, string? pathPrefix = null, int limit = 200, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<DocumentListItem>>([]);
     }
@@ -97,6 +100,9 @@ public sealed class BrainIngestionPersistenceCoordinatorTests
         {
             return Task.CompletedTask;
         }
+
+        public Task MarkMissingManagedDocumentsDeletedAsync(string brainId, IReadOnlyList<string> activeCanonicalPaths, DateTimeOffset indexedAt, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
 
         public Task<IReadOnlyList<DocumentListItem>> ListDocumentsAsync(string brainId, string? sourceRootId = null, string? pathPrefix = null, int limit = 200, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<DocumentListItem>>([]);

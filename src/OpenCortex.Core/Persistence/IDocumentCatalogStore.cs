@@ -11,6 +11,12 @@ public interface IDocumentCatalogStore
         DateTimeOffset indexedAt,
         CancellationToken cancellationToken = default);
 
+    Task MarkMissingManagedDocumentsDeletedAsync(
+        string brainId,
+        IReadOnlyList<string> activeCanonicalPaths,
+        DateTimeOffset indexedAt,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Returns all non-deleted documents for the given brain, ordered by canonical path.
     /// Supports optional filtering by source root ID and path prefix.

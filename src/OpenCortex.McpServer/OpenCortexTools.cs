@@ -1,7 +1,10 @@
 using System.ComponentModel;
+using Microsoft.AspNetCore.Http;
 using ModelContextProtocol.Server;
+using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Persistence;
-using OpenCortex.Persistence.Postgres;
+using OpenCortex.Core.Tenancy;
+using OpenCortex.Indexer.Indexing;
 using OpenCortex.Retrieval.Execution;
 
 namespace OpenCortex.McpServer;
@@ -13,8 +16,16 @@ namespace OpenCortex.McpServer;
 [McpServerToolType]
 public sealed class OpenCortexTools(
     IBrainCatalogStore brainCatalogStore,
-    OqlQueryExecutor queryExecutor)
+    OqlQueryExecutor queryExecutor,
+    ISubscriptionStore subscriptionStore,
+    IUsageCounterStore usageCounterStore,
+    IManagedDocumentStore managedDocumentStore,
+    IManagedContentBrainIndexingService managedContentBrainIndexingService,
+    IHttpContextAccessor httpContextAccessor,
+    OpenCortexOptions options)
 {
+    private const string DocumentsActiveCounterKey = "documents.active";
+
     // -----------------------------------------------------------------------
     // list_brains
     // -----------------------------------------------------------------------
@@ -25,7 +36,8 @@ public sealed class OpenCortexTools(
         "Use this to discover available brains before querying them.")]
     public async Task<ListBrainsResult> list_brains(CancellationToken cancellationToken)
     {
-        var brains = await brainCatalogStore.ListBrainsAsync(cancellationToken);
+        var tokenContext = GetRequiredTokenContext();
+        var brains = await brainCatalogStore.ListBrainsByCustomerAsync(tokenContext.CustomerId, cancellationToken);
         var active = brains.Where(b => b.Status != "retired").ToList();
         return new ListBrainsResult(
             active.Count,
@@ -46,7 +58,8 @@ public sealed class OpenCortexTools(
         [Description("Full OQL query string. Must include FROM brain(\"...\") with a valid brain ID.")] string oql,
         CancellationToken cancellationToken)
     {
-        // Validate that the OQL targets at least one brain before executing
+        var tokenContext = GetRequiredTokenContext();
+
         if (!oql.Contains("FROM brain(", StringComparison.OrdinalIgnoreCase))
         {
             return QueryBrainResult.Failure(
@@ -54,25 +67,31 @@ public sealed class OpenCortexTools(
                 "OQL must include a FROM brain(...) clause. Example: FROM brain(\"my-brain\") SEARCH \"term\" RANK hybrid LIMIT 10");
         }
 
-        // Extract brain IDs from the OQL and verify each one is active before executing.
-        // This surfaces a clear error rather than silently returning empty results for a retired brain.
         var brainIds = ExtractBrainIds(oql);
         if (brainIds.Count > 0)
         {
-            var allBrains = await brainCatalogStore.ListBrainsAsync(cancellationToken);
+            var allBrains = await brainCatalogStore.ListBrainsByCustomerAsync(tokenContext.CustomerId, cancellationToken);
             var brainMap = allBrains.ToDictionary(b => b.BrainId, b => b.Status, StringComparer.OrdinalIgnoreCase);
             foreach (var id in brainIds)
             {
                 if (brainMap.TryGetValue(id, out var status))
                 {
                     if (string.Equals(status, "retired", StringComparison.OrdinalIgnoreCase))
+                    {
                         return QueryBrainResult.Failure(oql, $"Brain '{id}' is retired and cannot be queried. Use list_brains to see active brains.");
+                    }
                 }
                 else
                 {
                     return QueryBrainResult.Failure(oql, $"Brain '{id}' was not found. Use list_brains to see available brains.");
                 }
             }
+        }
+
+        var quotaError = await ConsumeQueryQuotaAsync(tokenContext.CustomerId, cancellationToken);
+        if (quotaError is not null)
+        {
+            return QueryBrainResult.Failure(oql, quotaError);
         }
 
         OqlQueryExecutionResult result;
@@ -113,33 +132,7 @@ public sealed class OpenCortexTools(
     }
 
     // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// Extracts brain IDs from FROM brain("...") clauses in an OQL string.
-    /// </summary>
-    private static List<string> ExtractBrainIds(string oql)
-    {
-        var ids = new List<string>();
-        var span = oql.AsSpan();
-        const string marker = "brain(\"";
-        int pos = 0;
-        while (true)
-        {
-            var idx = span[pos..].IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (idx < 0) break;
-            var start = pos + idx + marker.Length;
-            var end = oql.IndexOf('"', start);
-            if (end < 0) break;
-            ids.Add(oql[start..end]);
-            pos = end + 1;
-        }
-        return ids;
-    }
-
-    // -----------------------------------------------------------------------
-    // get_document
+    // get_brain
     // -----------------------------------------------------------------------
 
     [McpServerTool, Description(
@@ -150,12 +143,18 @@ public sealed class OpenCortexTools(
         [Description("The brain ID to look up (e.g. \"my-brain\").")] string brain_id,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(brain_id))
-            return new GetBrainResult(null, "brain_id is required.");
+        var tokenContext = GetRequiredTokenContext();
 
-        var brain = await brainCatalogStore.GetBrainAsync(brain_id, cancellationToken);
+        if (string.IsNullOrWhiteSpace(brain_id))
+        {
+            return new GetBrainResult(null, "brain_id is required.");
+        }
+
+        var brain = await brainCatalogStore.GetBrainByCustomerAsync(tokenContext.CustomerId, brain_id, cancellationToken);
         if (brain is null)
+        {
             return new GetBrainResult(null, $"Brain '{brain_id}' not found.");
+        }
 
         return new GetBrainResult(
             new BrainDetailItem(
@@ -174,6 +173,400 @@ public sealed class OpenCortexTools(
                     sr.ExcludePatterns)).ToList()),
             null);
     }
+
+    // -----------------------------------------------------------------------
+    // create_document
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Create a managed document in a managed-content brain. " +
+        "Requires mcp:write scope and a plan that allows MCP write access. " +
+        "The brain is reindexed immediately after the document is created.")]
+    public async Task<ManagedDocumentResult> create_document(
+        [Description("The managed-content brain ID that will own the document.")] string brain_id,
+        [Description("Document title. Required.")] string title,
+        [Description("Markdown or plain text content for the document.")] string content,
+        [Description("Optional slug override.")] string? slug,
+        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter,
+        [Description("Document status. Defaults to draft when omitted.")] string? status,
+        CancellationToken cancellationToken)
+    {
+        var tokenContext = GetRequiredTokenContext();
+
+        if (string.IsNullOrWhiteSpace(brain_id))
+        {
+            return ManagedDocumentResult.Failure("brain_id is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return ManagedDocumentResult.Failure("title is required.");
+        }
+
+        var writeAccessError = await ValidateWriteAccessAsync(tokenContext, cancellationToken);
+        if (writeAccessError is not null)
+        {
+            return ManagedDocumentResult.Failure(writeAccessError);
+        }
+
+        var (brain, brainError) = await GetManagedContentBrainAsync(tokenContext.CustomerId, brain_id, cancellationToken);
+        if (brain is null)
+        {
+            return ManagedDocumentResult.Failure(brainError!);
+        }
+
+        var (billingState, plan) = await GetBillingContextAsync(tokenContext.CustomerId, cancellationToken);
+        if (plan.MaxDocuments >= 0)
+        {
+            var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(tokenContext.CustomerId, cancellationToken);
+            if (activeDocuments >= plan.MaxDocuments)
+            {
+                return ManagedDocumentResult.Failure(
+                    $"Document limit reached for plan '{billingState.PlanId}'. Upgrade to continue adding more content.");
+            }
+        }
+
+        try
+        {
+            var document = await managedDocumentStore.CreateManagedDocumentAsync(
+                new ManagedDocumentCreateRequest(
+                    BrainId: brain.BrainId,
+                    CustomerId: tokenContext.CustomerId,
+                    Title: title,
+                    Slug: slug,
+                    Content: content ?? string.Empty,
+                    Frontmatter: frontmatter ?? new Dictionary<string, string>(),
+                    Status: string.IsNullOrWhiteSpace(status) ? "draft" : status,
+                    UserId: tokenContext.UserId),
+                cancellationToken);
+
+            var indexRun = await managedContentBrainIndexingService.ReindexAsync(
+                tokenContext.CustomerId,
+                brain.BrainId,
+                "mcp-document-create",
+                cancellationToken);
+
+            await SyncActiveDocumentCounterAsync(tokenContext.CustomerId, cancellationToken);
+
+            return ManagedDocumentResult.Success(document, indexRun);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ManagedDocumentResult.Failure(ex.Message);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // update_document
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Update an existing managed document in a managed-content brain. " +
+        "Requires mcp:write scope and an MCP-write-enabled plan. " +
+        "The brain is reindexed immediately after the document is updated.")]
+    public async Task<ManagedDocumentResult> update_document(
+        [Description("The managed-content brain ID that owns the document.")] string brain_id,
+        [Description("Managed document ID to update.")] string managed_document_id,
+        [Description("Document title. Required.")] string title,
+        [Description("Markdown or plain text content for the document.")] string content,
+        [Description("Optional slug override.")] string? slug,
+        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter,
+        [Description("Document status. Defaults to draft when omitted.")] string? status,
+        CancellationToken cancellationToken)
+    {
+        var tokenContext = GetRequiredTokenContext();
+
+        if (string.IsNullOrWhiteSpace(brain_id))
+        {
+            return ManagedDocumentResult.Failure("brain_id is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(managed_document_id))
+        {
+            return ManagedDocumentResult.Failure("managed_document_id is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return ManagedDocumentResult.Failure("title is required.");
+        }
+
+        var writeAccessError = await ValidateWriteAccessAsync(tokenContext, cancellationToken);
+        if (writeAccessError is not null)
+        {
+            return ManagedDocumentResult.Failure(writeAccessError);
+        }
+
+        var (brain, brainError) = await GetManagedContentBrainAsync(tokenContext.CustomerId, brain_id, cancellationToken);
+        if (brain is null)
+        {
+            return ManagedDocumentResult.Failure(brainError!);
+        }
+
+        try
+        {
+            var document = await managedDocumentStore.UpdateManagedDocumentAsync(
+                new ManagedDocumentUpdateRequest(
+                    ManagedDocumentId: managed_document_id,
+                    BrainId: brain.BrainId,
+                    CustomerId: tokenContext.CustomerId,
+                    Title: title,
+                    Slug: slug,
+                    Content: content ?? string.Empty,
+                    Frontmatter: frontmatter ?? new Dictionary<string, string>(),
+                    Status: string.IsNullOrWhiteSpace(status) ? "draft" : status,
+                    UserId: tokenContext.UserId),
+                cancellationToken);
+
+            if (document is null)
+            {
+                return ManagedDocumentResult.Failure($"Document '{managed_document_id}' was not found in brain '{brain.BrainId}'.");
+            }
+
+            var indexRun = await managedContentBrainIndexingService.ReindexAsync(
+                tokenContext.CustomerId,
+                brain.BrainId,
+                "mcp-document-update",
+                cancellationToken);
+
+            return ManagedDocumentResult.Success(document, indexRun);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ManagedDocumentResult.Failure(ex.Message);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // delete_document
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Soft-delete a managed document from a managed-content brain. " +
+        "Requires mcp:write scope and an MCP-write-enabled plan. " +
+        "The brain is reindexed immediately after the document is deleted.")]
+    public async Task<DeleteManagedDocumentResult> delete_document(
+        [Description("The managed-content brain ID that owns the document.")] string brain_id,
+        [Description("Managed document ID to delete.")] string managed_document_id,
+        CancellationToken cancellationToken)
+    {
+        var tokenContext = GetRequiredTokenContext();
+
+        if (string.IsNullOrWhiteSpace(brain_id))
+        {
+            return DeleteManagedDocumentResult.Failure("brain_id is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(managed_document_id))
+        {
+            return DeleteManagedDocumentResult.Failure("managed_document_id is required.");
+        }
+
+        var writeAccessError = await ValidateWriteAccessAsync(tokenContext, cancellationToken);
+        if (writeAccessError is not null)
+        {
+            return DeleteManagedDocumentResult.Failure(writeAccessError);
+        }
+
+        var (brain, brainError) = await GetManagedContentBrainAsync(tokenContext.CustomerId, brain_id, cancellationToken);
+        if (brain is null)
+        {
+            return DeleteManagedDocumentResult.Failure(brainError!);
+        }
+
+        var deleted = await managedDocumentStore.SoftDeleteManagedDocumentAsync(
+            tokenContext.CustomerId,
+            brain.BrainId,
+            managed_document_id,
+            tokenContext.UserId,
+            cancellationToken);
+
+        if (!deleted)
+        {
+            return DeleteManagedDocumentResult.Failure($"Document '{managed_document_id}' was not found in brain '{brain.BrainId}'.");
+        }
+
+        var indexRun = await managedContentBrainIndexingService.ReindexAsync(
+            tokenContext.CustomerId,
+            brain.BrainId,
+            "mcp-document-delete",
+            cancellationToken);
+
+        await SyncActiveDocumentCounterAsync(tokenContext.CustomerId, cancellationToken);
+
+        return DeleteManagedDocumentResult.Success(managed_document_id, indexRun);
+    }
+
+    // -----------------------------------------------------------------------
+    // reindex_brain
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Force a managed-content brain reindex. " +
+        "Requires mcp:write scope and an MCP-write-enabled plan. " +
+        "Use this after coordinated content changes that need retrieval to refresh immediately.")]
+    public async Task<ReindexBrainResult> reindex_brain(
+        [Description("The managed-content brain ID to reindex.")] string brain_id,
+        CancellationToken cancellationToken)
+    {
+        var tokenContext = GetRequiredTokenContext();
+
+        if (string.IsNullOrWhiteSpace(brain_id))
+        {
+            return ReindexBrainResult.Failure("brain_id is required.");
+        }
+
+        var writeAccessError = await ValidateWriteAccessAsync(tokenContext, cancellationToken);
+        if (writeAccessError is not null)
+        {
+            return ReindexBrainResult.Failure(writeAccessError);
+        }
+
+        var (brain, brainError) = await GetManagedContentBrainAsync(tokenContext.CustomerId, brain_id, cancellationToken);
+        if (brain is null)
+        {
+            return ReindexBrainResult.Failure(brainError!);
+        }
+
+        var indexRun = await managedContentBrainIndexingService.ReindexAsync(
+            tokenContext.CustomerId,
+            brain.BrainId,
+            "mcp-reindex",
+            cancellationToken);
+
+        await SyncActiveDocumentCounterAsync(tokenContext.CustomerId, cancellationToken);
+
+        return ReindexBrainResult.Success(indexRun);
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    private static List<string> ExtractBrainIds(string oql)
+    {
+        var ids = new List<string>();
+        var span = oql.AsSpan();
+        const string marker = "brain(\"";
+        int pos = 0;
+        while (true)
+        {
+            var idx = span[pos..].IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+            {
+                break;
+            }
+
+            var start = pos + idx + marker.Length;
+            var end = oql.IndexOf('"', start);
+            if (end < 0)
+            {
+                break;
+            }
+
+            ids.Add(oql[start..end]);
+            pos = end + 1;
+        }
+
+        return ids;
+    }
+
+    private McpTokenContext GetRequiredTokenContext() =>
+        httpContextAccessor.HttpContext.GetMcpTokenContext()
+        ?? throw new InvalidOperationException("MCP token context is not available for this request.");
+
+    private PlanEntitlements ResolvePlanEntitlements(string? planId)
+    {
+        if (!string.IsNullOrWhiteSpace(planId)
+            && options.Billing.Plans.TryGetValue(planId, out var configuredPlan))
+        {
+            return configuredPlan;
+        }
+
+        return options.Billing.Plans["free"];
+    }
+
+    private async Task<(EffectiveBillingState BillingState, PlanEntitlements Plan)> GetBillingContextAsync(
+        string customerId,
+        CancellationToken cancellationToken)
+    {
+        var subscription = await subscriptionStore.GetSubscriptionAsync(customerId, cancellationToken)
+            ?? await subscriptionStore.EnsureFreeSubscriptionAsync(customerId, cancellationToken);
+        var billingState = HostedBillingStateResolver.Resolve(subscription, DateTimeOffset.UtcNow);
+        return (billingState, ResolvePlanEntitlements(billingState.PlanId));
+    }
+
+    private async Task<string?> ValidateWriteAccessAsync(McpTokenContext tokenContext, CancellationToken cancellationToken)
+    {
+        if (!tokenContext.Scopes.Contains("mcp:write", StringComparer.OrdinalIgnoreCase))
+        {
+            return "Token scope 'mcp:write' is required for MCP write tools.";
+        }
+
+        var (billingState, plan) = await GetBillingContextAsync(tokenContext.CustomerId, cancellationToken);
+        return plan.McpWrite
+            ? null
+            : $"Plan '{billingState.PlanId}' does not allow MCP write tools. Upgrade to continue.";
+    }
+
+    private async Task<(BrainDetail? Brain, string? Error)> GetManagedContentBrainAsync(
+        string customerId,
+        string brainId,
+        CancellationToken cancellationToken)
+    {
+        var brain = await brainCatalogStore.GetBrainByCustomerAsync(customerId, brainId, cancellationToken);
+        if (brain is null)
+        {
+            return (null, $"Brain '{brainId}' was not found in this workspace.");
+        }
+
+        if (!string.Equals(brain.Mode, "managed-content", StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, $"Brain '{brainId}' is not a managed-content brain.");
+        }
+
+        return (brain, null);
+    }
+
+    private async Task<UsageCounterRecord> SyncActiveDocumentCounterAsync(string customerId, CancellationToken cancellationToken)
+    {
+        var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(customerId, cancellationToken);
+        return await usageCounterStore.SetCounterAsync(
+            new UsageCounterSetRequest(
+                customerId,
+                DocumentsActiveCounterKey,
+                activeDocuments,
+                null),
+            cancellationToken);
+    }
+
+    private static string BuildMonthlyQueryCounterKey(DateTimeOffset nowUtc) => $"mcp.queries.{nowUtc:yyyy-MM}";
+
+    private static DateTimeOffset BuildMonthlyQueryCounterResetAt(DateTimeOffset nowUtc) =>
+        new DateTimeOffset(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, TimeSpan.Zero).AddMonths(1);
+
+    private async Task<string?> ConsumeQueryQuotaAsync(string customerId, CancellationToken cancellationToken)
+    {
+        var (billingState, plan) = await GetBillingContextAsync(customerId, cancellationToken);
+        if (plan.McpQueriesPerMonth < 0)
+        {
+            return null;
+        }
+
+        var nowUtc = DateTimeOffset.UtcNow;
+        var counter = await usageCounterStore.IncrementCounterAsync(
+            new UsageCounterIncrementRequest(
+                customerId,
+                BuildMonthlyQueryCounterKey(nowUtc),
+                1,
+                BuildMonthlyQueryCounterResetAt(nowUtc)),
+            cancellationToken);
+
+        return counter.Value > plan.McpQueriesPerMonth
+            ? $"Monthly MCP query limit reached for plan '{billingState.PlanId}'. Upgrade to continue."
+            : null;
+    }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -229,3 +622,91 @@ public sealed record SourceRootItem(
     bool IsWritable,
     IReadOnlyList<string> IncludePatterns,
     IReadOnlyList<string> ExcludePatterns);
+
+public sealed record ManagedDocumentResult(
+    ManagedDocumentItem? Document,
+    IndexRunItem? IndexRun,
+    string? Error)
+{
+    public static ManagedDocumentResult Success(ManagedDocumentDetail document, IndexRunRecord indexRun) =>
+        new(OpenCortexToolResultMapper.MapManagedDocument(document), OpenCortexToolResultMapper.MapIndexRun(indexRun), null);
+
+    public static ManagedDocumentResult Failure(string message) =>
+        new(null, null, message);
+}
+
+public sealed record DeleteManagedDocumentResult(
+    string? ManagedDocumentId,
+    IndexRunItem? IndexRun,
+    string? Error)
+{
+    public static DeleteManagedDocumentResult Success(string managedDocumentId, IndexRunRecord indexRun) =>
+        new(managedDocumentId, OpenCortexToolResultMapper.MapIndexRun(indexRun), null);
+
+    public static DeleteManagedDocumentResult Failure(string message) =>
+        new(null, null, message);
+}
+
+public sealed record ReindexBrainResult(
+    IndexRunItem? IndexRun,
+    string? Error)
+{
+    public static ReindexBrainResult Success(IndexRunRecord indexRun) =>
+        new(OpenCortexToolResultMapper.MapIndexRun(indexRun), null);
+
+    public static ReindexBrainResult Failure(string message) =>
+        new(null, message);
+}
+
+public sealed record ManagedDocumentItem(
+    string ManagedDocumentId,
+    string BrainId,
+    string Title,
+    string Slug,
+    string CanonicalPath,
+    string Status,
+    string Content,
+    IReadOnlyDictionary<string, string> Frontmatter,
+    int WordCount,
+    DateTimeOffset UpdatedAt);
+
+public sealed record IndexRunItem(
+    string IndexRunId,
+    string BrainId,
+    string TriggerType,
+    string Status,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? CompletedAt,
+    int DocumentsSeen,
+    int DocumentsIndexed,
+    int DocumentsFailed,
+    string? ErrorSummary);
+
+internal static class OpenCortexToolResultMapper
+{
+    public static ManagedDocumentItem MapManagedDocument(ManagedDocumentDetail document) =>
+        new(
+            document.ManagedDocumentId,
+            document.BrainId,
+            document.Title,
+            document.Slug,
+            document.CanonicalPath,
+            document.Status,
+            document.Content,
+            new Dictionary<string, string>(document.Frontmatter, StringComparer.OrdinalIgnoreCase),
+            document.WordCount,
+            document.UpdatedAt);
+
+    public static IndexRunItem MapIndexRun(IndexRunRecord indexRun) =>
+        new(
+            indexRun.IndexRunId,
+            indexRun.BrainId,
+            indexRun.TriggerType,
+            indexRun.Status,
+            indexRun.StartedAt,
+            indexRun.CompletedAt,
+            indexRun.DocumentsSeen,
+            indexRun.DocumentsIndexed,
+            indexRun.DocumentsFailed,
+            indexRun.ErrorSummary);
+}

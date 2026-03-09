@@ -68,6 +68,8 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 - admin console surfaces per-brain health chips, Create Brain form, inline Add Source Root form with Retire button, and OQL smoke-test
 - dedicated `opencortex` Kubernetes namespace with pgvector-capable Postgres and SMB NAS volume mounted
 - SaaS architecture established: Firebase Auth, Stripe billing, personal API tokens for MCP
+- Phase 10 bootstrap started in code: migration `0002`, Firebase JWT configuration, lazy tenant provisioning, and initial `/tenant/*` routes
+- managed-content foundation started in code: billing and managed-content schema migrations plus tenant document CRUD bootstrap routes
 
 ## Phases
 
@@ -157,6 +159,23 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 - operator/admin surface separated from tenant surface at the routing layer
 - role model: owner, admin, editor, viewer
 
+Current bootstrap status:
+
+- migration `0002_identity_and_tenancy.sql` added
+- hosted auth config added under `OpenCortex:HostedAuth`
+- `GET /tenant/me` lazily provisions `users`, personal `customers`, memberships, and default managed-content brain
+- `GET /tenant/brains`, `GET /tenant/brains/{id}`, and `POST /tenant/query` now enforce tenant brain ownership
+- migration `0003_billing_schema.sql` added for `subscriptions`, `subscription_events`, and `usage_counters`
+- migration `0004_managed_content.sql` added for `managed_documents`
+- `GET /tenant/brains/{brainId}/documents`, `GET /tenant/brains/{brainId}/documents/{managedDocumentId}`, `POST /tenant/brains/{brainId}/documents`, `PUT /tenant/brains/{brainId}/documents/{managedDocumentId}`, and `DELETE /tenant/brains/{brainId}/documents/{managedDocumentId}` now provide the first tenant managed-document API slice
+- managed-content brains are reindexed inline on create, update, and delete so saved documents become queryable through OQL immediately
+- `GET /tenant/billing/plan` returns plan and usage summary, and document create now enforces `maxDocuments` with a structured `402`
+- hosted tenant bootstrap now ensures a mirrored free subscription row, and billing summary resolves plan/status from `subscriptions`
+- `POST /tenant/billing/upgrade`, `POST /tenant/billing/portal`, and `POST /webhooks/stripe` are now wired for Stripe Checkout, Customer Portal, and signed webhook ingestion
+- Stripe-backed plan/status mirroring is active, including persisted billing period dates and effective downgrade-to-free quota handling after paid access ends
+- `usage_counters` is now active for `documents.active` reconciliation and monthly hosted query metering via `POST /tenant/query`
+- standalone MCP metering and write access are now active via Phase 12 token-based customer resolution
+
 See `docs/architecture/auth-and-identity.md` for full design.
 
 ### Phase 11: Billing And Quotas
@@ -179,6 +198,17 @@ See `docs/architecture/billing-and-quotas.md` for full design.
 - token management UI: create, label, revoke from account settings
 - free plan: `mcp:read` scope only; pro plan: `mcp:read mcp:write`
 - MCP endpoint exposed over HTTPS via Traefik
+
+Current bootstrap status:
+
+- migration `0005_api_tokens.sql` added for `api_tokens`
+- tenant token routes now exist: `GET /tenant/tokens`, `POST /tenant/tokens`, and `DELETE /tenant/tokens/{apiTokenId}`
+- MCP is now mapped explicitly at `/mcp` and requires bearer `oct_` tokens
+- MCP middleware resolves `customer_id`, updates `last_used_at`, and restricts all existing tools to customer-owned brains
+- `query_brain` now increments the shared monthly `mcp.queries.YYYY-MM` counter after token-based customer resolution
+- managed-content MCP write tools now exist: `create_document`, `update_document`, `delete_document`, and `reindex_brain`
+- MCP write tools now require both `mcp:write` scope and a plan with `mcpWrite = true`, and document create reuses the same effective `maxDocuments` enforcement as the tenant API
+- transport-level MCP `429` responses and token management UI are still pending
 
 See `docs/architecture/mcp-security.md` for full design.
 
@@ -220,9 +250,9 @@ See `docs/architecture/mcp-security.md` for full design.
 - [x] M7: admin API and UI support brain management, per-brain health, and CRUD
 - [x] M8: cluster infrastructure: dedicated pgvector Postgres, SMB NAS mount, app secrets
 - [ ] M9: authoring surface supports managed-content Markdown creation and editing in browser
-- [ ] M10: auth and identity: Firebase Auth, user provisioning, tenant-scoped API
-- [ ] M11: billing: Stripe subscriptions, free/pro quota enforcement
-- [ ] M12: secure MCP: personal API tokens, scoped access, token management UI
+- [~] M10: auth and identity: Firebase Auth, user provisioning, tenant-scoped API
+- [~] M11: billing: Stripe subscriptions, free/pro quota enforcement
+- [~] M12: secure MCP: personal API tokens, scoped access, token management UI
 - [ ] M13: teams: shared brains, workspace membership, roles
 - [ ] M14: hosted SaaS publicly available
 
@@ -231,5 +261,5 @@ See `docs/architecture/mcp-security.md` for full design.
 - harden MCP tool contracts around OQL execution, brain scoping, and result formatting
 - implement managed-content document CRUD and browser Markdown editor (Phase 9)
 - add Firebase Auth JWT middleware and user/workspace provisioning (Phase 10)
-- add Stripe billing and document quota enforcement (Phase 11)
-- add personal API token system for secure MCP access (Phase 12)
+- finish Stripe billing state polish and complete hosted billing UX (Phase 11)
+- finish MCP token hardening and add token management UI (Phase 12)

@@ -15,51 +15,58 @@ public sealed class PostgresBrainCatalogStore : IBrainCatalogStore
     public async Task<IReadOnlyList<BrainSummary>> ListBrainsAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            SELECT
-                b.brain_id,
-                b.name,
-                b.slug,
-                b.mode,
-                b.status,
-                COUNT(sr.source_root_id)::int AS source_root_count
-            FROM {_connectionFactory.Schema}.brains b
-            LEFT JOIN {_connectionFactory.Schema}.source_roots sr ON sr.brain_id = b.brain_id
-            GROUP BY b.brain_id, b.name, b.slug, b.mode, b.status
-            ORDER BY b.name;
-            """;
+        return await ListBrainsAsync(connection, null, cancellationToken);
+    }
 
-        var brains = new List<BrainSummary>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            brains.Add(new BrainSummary(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetString(4),
-                reader.GetInt32(5)));
-        }
-
-        return brains;
+    public async Task<IReadOnlyList<BrainSummary>> ListBrainsByCustomerAsync(string customerId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        return await ListBrainsAsync(connection, customerId, cancellationToken);
     }
 
     public async Task<BrainDetail?> GetBrainAsync(string brainId, CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        return await GetBrainAsync(connection, null, brainId, cancellationToken);
+    }
 
+    public async Task<BrainDetail?> GetBrainByCustomerAsync(string customerId, string brainId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        return await GetBrainAsync(connection, customerId, brainId, cancellationToken);
+    }
+
+    private async Task<BrainDetail?> GetBrainAsync(
+        Npgsql.NpgsqlConnection connection,
+        string? customerId,
+        string brainId,
+        CancellationToken cancellationToken)
+    {
         BrainDetail? brain = null;
 
         await using (var brainCommand = connection.CreateCommand())
         {
-            brainCommand.CommandText = $"""
+            var sql = $"""
                 SELECT brain_id, name, slug, mode, status, description, customer_id
                 FROM {_connectionFactory.Schema}.brains
-                WHERE brain_id = @brain_id;
+                WHERE brain_id = @brain_id
                 """;
+
+            if (!string.IsNullOrWhiteSpace(customerId))
+            {
+                sql += """
+                     AND customer_id = @customer_id
+                     AND status != 'retired'
+                    """;
+            }
+
+            sql += ";";
+
+            brainCommand.CommandText = sql;
+            if (!string.IsNullOrWhiteSpace(customerId))
+            {
+                brainCommand.Parameters.AddWithValue("customer_id", customerId);
+            }
             brainCommand.Parameters.AddWithValue("brain_id", brainId);
 
             await using var reader = await brainCommand.ExecuteReaderAsync(cancellationToken);
@@ -84,6 +91,57 @@ public sealed class PostgresBrainCatalogStore : IBrainCatalogStore
 
         var sourceRoots = await GetSourceRootsAsync(connection, brainId, cancellationToken);
         return brain with { SourceRoots = sourceRoots };
+    }
+
+    private async Task<IReadOnlyList<BrainSummary>> ListBrainsAsync(
+        Npgsql.NpgsqlConnection connection,
+        string? customerId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        var sql = $"""
+            SELECT
+                b.brain_id,
+                b.name,
+                b.slug,
+                b.mode,
+                b.status,
+                COUNT(sr.source_root_id)::int AS source_root_count
+            FROM {_connectionFactory.Schema}.brains b
+            LEFT JOIN {_connectionFactory.Schema}.source_roots sr ON sr.brain_id = b.brain_id
+            """;
+
+        if (!string.IsNullOrWhiteSpace(customerId))
+        {
+            sql += """
+                WHERE b.customer_id = @customer_id
+                  AND b.status != 'retired'
+                """;
+            command.Parameters.AddWithValue("customer_id", customerId);
+        }
+
+        sql += """
+            GROUP BY b.brain_id, b.name, b.slug, b.mode, b.status
+            ORDER BY b.name;
+            """;
+
+        command.CommandText = sql;
+
+        var brains = new List<BrainSummary>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            brains.Add(new BrainSummary(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetInt32(5)));
+        }
+
+        return brains;
     }
 
     public async Task<BrainDetail> CreateBrainAsync(BrainDefinition brain, CancellationToken cancellationToken = default)

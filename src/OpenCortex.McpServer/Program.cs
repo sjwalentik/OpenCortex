@@ -2,6 +2,8 @@ using ModelContextProtocol.AspNetCore;
 using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Embeddings;
 using OpenCortex.Core.Persistence;
+using OpenCortex.Core.Security;
+using OpenCortex.Indexer.Indexing;
 using OpenCortex.McpServer;
 using OpenCortex.Persistence.Postgres;
 using OpenCortex.Retrieval.Execution;
@@ -30,11 +32,36 @@ var connectionFactory = new PostgresConnectionFactory(new PostgresConnectionSett
 
 var embeddingProvider = EmbeddingProviderFactory.Create(options.Embeddings);
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton(options);
+
 builder.Services.AddSingleton<IBrainCatalogStore>(_ =>
     new PostgresBrainCatalogStore(connectionFactory));
 
 builder.Services.AddSingleton<OqlQueryExecutor>(_ =>
     new OqlQueryExecutor(new PostgresDocumentQueryStore(connectionFactory, embeddingProvider)));
+
+builder.Services.AddSingleton<IApiTokenStore>(_ =>
+    new PostgresApiTokenStore(connectionFactory));
+
+builder.Services.AddSingleton<IManagedDocumentStore>(_ =>
+    new PostgresManagedDocumentStore(connectionFactory));
+
+builder.Services.AddSingleton<ISubscriptionStore>(_ =>
+    new PostgresSubscriptionStore(connectionFactory));
+
+builder.Services.AddSingleton<IUsageCounterStore>(_ =>
+    new PostgresUsageCounterStore(connectionFactory));
+
+builder.Services.AddSingleton<IManagedContentBrainIndexingService>(_ =>
+    new ManagedContentBrainIndexingService(
+        new PostgresManagedDocumentStore(connectionFactory),
+        new PostgresDocumentCatalogStore(connectionFactory),
+        new PostgresChunkStore(connectionFactory),
+        new PostgresLinkGraphStore(connectionFactory),
+        new PostgresIndexRunStore(connectionFactory),
+        new PostgresEmbeddingStore(connectionFactory),
+        embeddingProvider));
 
 // ---------------------------------------------------------------------------
 // MCP server — registers OpenCortexTools via McpServerToolType attribute
@@ -64,10 +91,94 @@ app.MapGet("/health", () => Results.Ok(new
     validationErrors,
 }));
 
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (string.Equals(path, "/", StringComparison.Ordinal)
+        || string.Equals(path, "/health", StringComparison.Ordinal))
+    {
+        await next();
+        return;
+    }
+
+    var authorization = context.Request.Headers.Authorization.ToString();
+    if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            type = "unauthorized",
+            title = "API token required",
+        });
+        return;
+    }
+
+    var rawToken = authorization["Bearer ".Length..].Trim();
+    if (!PersonalApiToken.IsValidFormat(rawToken))
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            type = "unauthorized",
+            title = "Invalid or expired token",
+        });
+        return;
+    }
+
+    var apiTokenStore = context.RequestServices.GetRequiredService<IApiTokenStore>();
+    var token = await apiTokenStore.GetActiveTokenByHashAsync(
+        PersonalApiToken.ComputeHash(rawToken),
+        context.RequestAborted);
+
+    if (token is null || token.ExpiresAt.HasValue && token.ExpiresAt.Value <= DateTimeOffset.UtcNow)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            type = "unauthorized",
+            title = "Invalid or expired token",
+        });
+        return;
+    }
+
+    if (token.RevokedAt.HasValue)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            type = "unauthorized",
+            title = "Token has been revoked",
+        });
+        return;
+    }
+
+    if (!token.Scopes.Contains("mcp:read", StringComparer.OrdinalIgnoreCase))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            type = "forbidden",
+            title = "Insufficient token scope",
+            requiredScope = "mcp:read",
+        });
+        return;
+    }
+
+    await apiTokenStore.TouchLastUsedAsync(token.ApiTokenId, context.RequestAborted);
+    context.SetMcpTokenContext(new McpTokenContext(
+        token.ApiTokenId,
+        token.UserId,
+        token.CustomerId,
+        token.Scopes,
+        token.TokenPrefix));
+
+    await next();
+});
+
 // ---------------------------------------------------------------------------
 // MCP protocol routes
 // ---------------------------------------------------------------------------
 
-app.MapMcp();
+app.MapMcp("/mcp");
 
 app.Run();

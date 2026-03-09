@@ -2,7 +2,7 @@
 
 ## Overview
 
-OpenCortex uses Stripe for all payment processing and subscription management. The app mirrors Stripe state into its own database so quota and access decisions can be made without live Stripe API calls on every request.
+OpenCortex uses Stripe for payment processing and subscription management. The app mirrors Stripe state into Postgres so quota and access decisions can be made without a live Stripe API call on every request.
 
 ## Plans
 
@@ -10,7 +10,7 @@ OpenCortex uses Stripe for all payment processing and subscription management. T
 |---|---|---|---|---|---|
 | Free | 10 | 1 | Read-only, 100 queries/month | None | $0 |
 | Pro | 500 | 3 | Full (read + write), unlimited | None | ~$12/month |
-| Teams | 2000+ | 10+ | Full, unlimited | Per seat | ~$10–15/seat/month |
+| Teams | 2000+ | 10+ | Full, unlimited | Per seat | ~$10-15/seat/month |
 | Enterprise | Custom | Custom | Custom | Custom | Negotiated |
 
 ## Stripe Integration
@@ -19,9 +19,9 @@ OpenCortex uses Stripe for all payment processing and subscription management. T
 
 1. user clicks upgrade in the app
 2. backend creates a Stripe Checkout Session
-3. user redirected to Stripe-hosted Checkout
+3. user is redirected to Stripe-hosted Checkout
 4. on success, Stripe redirects to `/billing/success`
-5. backend waits for webhook to confirm and update subscription state
+5. backend waits for the webhook to confirm and update subscription state
 
 Never trust the redirect alone. Always wait for the webhook.
 
@@ -29,26 +29,26 @@ Never trust the redirect alone. Always wait for the webhook.
 
 - user opens billing settings
 - backend creates a Stripe Billing Portal session
-- user redirected to Stripe-hosted portal for self-service: update payment method, view invoices, downgrade, cancel
+- user is redirected to the Stripe-hosted portal for self-service billing management
 
 ### Webhook Events
 
-All events hit `POST /webhooks/stripe`, verified via `Stripe-Signature` header.
+All events hit `POST /webhooks/stripe` and are verified via the `Stripe-Signature` header.
 
 | Event | Action |
 |---|---|
 | `checkout.session.completed` | Link Stripe customer to app customer; activate subscription |
-| `customer.subscription.created` | Create/update subscription record; lift document quota |
-| `customer.subscription.updated` | Update plan, status, current period end |
-| `customer.subscription.deleted` | Mark cancelled; revert to free limits at period end |
-| `invoice.payment_succeeded` | Extend current period end |
-| `invoice.payment_failed` | Mark `past_due`; trigger dunning notification |
+| `customer.subscription.created` | Create or update subscription record; lift document quota |
+| `customer.subscription.updated` | Update plan, status, cancellation flag, and billing period dates |
+| `customer.subscription.deleted` | Mark cancelled; revert to free limits once paid access ends |
+| `invoice.payment_succeeded` | Confirm active status and extend billing period dates |
+| `invoice.payment_failed` | Mark `past_due` and preserve billing period dates for downgrade evaluation |
 
 All webhook handlers are idempotent. Deduplicate on `stripe_event_id`.
 
 ## Subscription Table
 
-Mirrors Stripe state. Read by every quota check.
+Mirrors Stripe state and is read by every quota check.
 
 ```sql
 CREATE TABLE opencortex.subscriptions (
@@ -69,7 +69,7 @@ CREATE TABLE opencortex.subscriptions (
 
 ## Usage Counters
 
-Tracked per customer via upsert on every billable action.
+Tracked per customer via upsert on billable actions and reconciliations.
 
 ```sql
 CREATE TABLE opencortex.usage_counters (
@@ -83,21 +83,31 @@ CREATE TABLE opencortex.usage_counters (
 ```
 
 Counter key examples:
-- `documents.active` — current live document count
-- `mcp.queries.2026-03` — MCP query count for the month
-- `indexing.runs.2026-03-08` — index runs for the day
+- `documents.active` - current live document count
+- `mcp.queries.2026-03` - hosted query count for the month
+- `indexing.runs.2026-03-08` - index runs for the day
 
 ## Quota Enforcement
 
-### Check Flow
+### Document Check Flow
 
-Before any document create or import:
+Before any hosted document create:
 
-1. resolve `planId` from subscription record
+1. resolve the effective `planId` from mirrored subscription state
 2. load plan limits from config
-3. read `documents.active` counter for `customerId`
-4. if `counter >= limit`: return `402` with structured error
-5. else: proceed, then increment counter atomically
+3. compare the active managed-document count against the plan limit
+4. if usage is at or above the limit, return `402` with a structured upgrade response
+5. on success, create the document and reconcile `documents.active`
+
+### Hosted Query Check Flow
+
+Before any hosted tenant query:
+
+1. resolve the effective `planId` from mirrored subscription state
+2. load `mcpQueriesPerMonth` from config
+3. increment `mcp.queries.YYYY-MM` atomically for capped plans
+4. if usage exceeds the limit, return `402` with a structured upgrade response
+5. otherwise execute the query
 
 ### Quota Error Response (HTTP 402)
 
@@ -115,7 +125,7 @@ Before any document create or import:
 
 ### Plan Entitlements (Config-Backed)
 
-Stored as config in v1, not a DB table. Simpler to reason about and change.
+Stored in config for v1 rather than a DB table.
 
 ```json
 {
@@ -129,26 +139,41 @@ Stored as config in v1, not a DB table. Simpler to reason about and change.
 
 `-1` means unlimited.
 
+Current repo status:
+
+- plan entitlements are config-backed under `OpenCortex:Billing:Plans`
+- hosted tenant bootstrap ensures a mirrored `subscriptions` row exists for every personal workspace
+- `GET /tenant/billing/plan` returns the workspace's effective plan, subscription mirror details, active document usage, and monthly hosted query usage
+- effective quota resolution now handles grace-period cancellation and expired paid-plan downgrade behavior
+- `POST /tenant/billing/upgrade` creates a Stripe Checkout session for the configured Pro price and reuses the linked Stripe customer when one exists
+- `POST /tenant/billing/portal` creates a Stripe Customer Portal session for linked workspaces
+- `POST /webhooks/stripe` verifies the `Stripe-Signature` header, deduplicates via `subscription_events`, and mirrors checkout, subscription, and invoice events into `subscriptions`
+- Stripe subscription and invoice webhook handlers persist `current_period_start` and `current_period_end`
+- `POST /tenant/brains/{brainId}/documents` enforces `maxDocuments` and reconciles `documents.active`
+- `POST /tenant/query` increments `mcp.queries.YYYY-MM` and enforces `mcpQueriesPerMonth` on capped plans
+- authenticated MCP `query_brain` calls now increment the same monthly counter after token-based customer resolution
+- managed-content MCP write tools now reuse the same effective-plan checks for `mcp:write`, enforce `maxDocuments` on document create, and reconcile `documents.active` after create and delete
+- MCP overage is enforced in the tool layer today; custom transport-level `429` shaping is still pending
+
 ## Grace Period On Cancellation
 
 - cancellation uses Stripe `cancel_at_period_end = true`
 - access continues through the end of the paid billing period
-- at period end: subscription status set to `cancelled`, plan reverts to `free`
-- excess documents above free limit are soft-archived (not deleted)
-- user sees a list of documents to prune; no automatic hard deletion
+- once the paid period ends, effective quota falls back to `free`
+- excess documents above free limit are soft-archived later rather than hard-deleted automatically
 
 ## Downgrade Handling
 
-- excess documents marked `archived` status: visible to user, not queryable via OQL
-- user can prune to get back under free limit
-- background job recalculates `documents.active` counter after archival
+- expired `cancelled`, `incomplete_expired`, `past_due`, and `unpaid` paid subscriptions fall back to free-plan quota enforcement once paid access has ended
+- excess documents should be archived rather than deleted
+- standalone MCP access will use the same effective billing state once token-based identity exists
 
 ## Security
 
-- `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` stored in Kubernetes Secrets
-- never committed to git or embedded in container images
-- Stripe Restricted Keys used in production (least privilege)
-- webhook endpoint not protected by JWT, only by `Stripe-Signature` HMAC verification
+- `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are stored in Kubernetes Secrets
+- secrets are never committed to git or embedded in container images
+- production should use least-privilege Stripe keys
+- the webhook endpoint is protected by `Stripe-Signature` HMAC verification, not JWT
 
 ## Test Mode
 

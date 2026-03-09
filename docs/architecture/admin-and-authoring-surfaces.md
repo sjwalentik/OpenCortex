@@ -113,6 +113,21 @@ All `/admin/*` and `/indexing/*` routes must require an elevated operator role, 
 
 The tenant API is distinct from the operator/admin surface. All routes are authenticated via Firebase Auth JWT and scoped to the requesting user's workspace.
 
+Current bootstrap slice:
+
+- `GET /tenant/me` resolves the authenticated Firebase user into OpenCortex tenant context and lazily provisions a personal workspace plus brain on first use
+- `GET /tenant/brains` lists brains for the resolved workspace only
+- `GET /tenant/brains/{id}` returns a brain only when it belongs to the resolved workspace
+- `POST /tenant/query` parses OQL, verifies the referenced brain belongs to the resolved workspace, then executes retrieval
+- `GET /tenant/billing/plan` returns the resolved workspace's plan and document-usage summary
+- `GET /tenant/brains/{brainId}/documents` lists managed documents for a managed-content brain in the resolved workspace
+- `GET /tenant/brains/{brainId}/documents/{managedDocumentId}` returns a managed document only when it belongs to the resolved workspace and brain
+- `POST /tenant/brains/{brainId}/documents` creates a managed document in Postgres for a managed-content brain
+- `PUT /tenant/brains/{brainId}/documents/{managedDocumentId}` updates a managed document in Postgres for a managed-content brain
+- `DELETE /tenant/brains/{brainId}/documents/{managedDocumentId}` soft-deletes a managed document for a managed-content brain
+- create, update, and delete currently trigger an inline full-brain managed-content reindex; background queueing is still pending
+- document create currently enforces the workspace document cap and returns `402` when the plan limit is reached
+
 ### Document Routes
 
 | Route | Method | Description |
@@ -155,6 +170,11 @@ The tenant API is distinct from the operator/admin surface. All routes are authe
 | `/tokens` | GET | List user's API tokens (name, prefix, scopes, last used) |
 | `/tokens` | POST | Create a new API token (shown once at creation) |
 | `/tokens/:id` | DELETE | Revoke a token immediately |
+
+Current repo status:
+- tenant token routes are now implemented under `/tenant/tokens`
+- the backing UI is still pending; current support is API-first
+- MCP write tools now exist for managed-content brains, so token-based agents can create, update, delete, and reindex content before the browser UI lands
 
 See `docs/architecture/mcp-security.md` for full MCP token design.
 

@@ -108,6 +108,20 @@ Located at `/app/settings/tokens`.
 - revoke: immediate, no grace period
 - no way to view the full token after creation
 
+Current repo status:
+
+- migration `0005_api_tokens.sql` now creates `api_tokens`
+- tenant token management routes are live at `GET /tenant/tokens`, `POST /tenant/tokens`, and `DELETE /tenant/tokens/{apiTokenId}`
+- raw tokens are generated with the `oct_` prefix, SHA-256 hashed before storage, and returned only once on creation
+- MCP is now mapped explicitly at `/mcp` and requires `Authorization: Bearer oct_...`
+- MCP middleware validates token hash, expiry, revocation, and `mcp:read`, updates `last_used_at`, and attaches resolved `customer_id` to the request
+- `list_brains`, `get_brain`, and `query_brain` are now scoped to the authenticated customer's brains instead of the global catalog
+- `query_brain` now consumes the same monthly `mcp.queries.YYYY-MM` usage counter used by hosted tenant queries
+- managed-content MCP write tools now exist: `create_document`, `update_document`, `delete_document`, and `reindex_brain`
+- MCP write tools require both token scope `mcp:write` and an effective plan with `mcpWrite = true`
+- MCP document create enforces the same effective `maxDocuments` limit as the hosted tenant API, and MCP create/delete/reindex reconcile `documents.active`
+- MCP overage currently surfaces as a tool error message; transport-level `429` shaping is still pending
+
 ## Rate Limiting
 
 | Plan | MCP queries/month | Enforcement |
@@ -116,7 +130,7 @@ Located at `/app/settings/tokens`.
 | Pro | Unlimited | No limit |
 | Teams | Unlimited | No limit |
 
-Rate limit exceeded returns `429` with a structured response including `upgradeUrl`.
+Target behavior is `429` with a structured upgrade response. Current repo behavior enforces overage in the tool layer and returns a query error message until custom MCP transport error shaping is added.
 
 ## Security Properties
 
@@ -125,7 +139,7 @@ Rate limit exceeded returns `429` with a structured response including `upgradeU
 - prefix display: users can identify tokens without the full value
 - `last_used_at`: helps detect stale or unexpected token usage
 - revocation is immediate: hash lookup fails instantly for revoked tokens
-- scope enforcement: free plan tokens cannot trigger indexing or writes
+- scope and plan enforcement: read-only or free-plan tokens cannot trigger indexing or writes
 
 ## Error Responses
 

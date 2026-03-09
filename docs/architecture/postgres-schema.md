@@ -211,11 +211,15 @@ The following tables are added in later migrations to support the hosted cloud p
 
 **`usage_counters`** — keyed by `(customer_id, counter_key)`. Counter keys: `documents.active`, `mcp.queries.YYYY-MM`, `indexing.runs.YYYY-MM-DD`. Upserted atomically on every billable action.
 
+Current repo status: migration `0003_billing_schema.sql` exists and creates these tables, but Stripe webhook and quota-enforcement application logic is still pending.
+
 ### Migration 0004: Managed Content
 
 **`managed_documents`** — canonical document storage for hosted cloud brains. Fields: `brain_id`, `customer_id`, `title`, `slug`, `content` (Markdown text), `content_hash`, `word_count`, `frontmatter` (jsonb), `status` (draft/published/archived), `created_by`, `updated_by`, `is_deleted`. Unique index on `(brain_id, slug)` where `is_deleted = false`.
 
 Indexing pipeline reads from `managed_documents` instead of filesystem for managed-content brains. `source_root_id` is null on resulting `documents` records.
+
+Current repo status: migration `0004_managed_content.sql` exists and the API now has tenant-scoped list/get/create/update/delete routes backed directly by `managed_documents`. Save-triggered indexing currently runs inline as a full managed-brain rebuild; background queueing is still pending.
 
 ### Migration 0005: API Tokens
 

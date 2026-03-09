@@ -18,6 +18,44 @@ public sealed class OpenCortexOptionsValidator
             errors.Add("OpenCortex:Embeddings:Dimensions must be greater than zero.");
         }
 
+        if (options.HostedAuth.Enabled
+            && string.IsNullOrWhiteSpace(options.HostedAuth.FirebaseProjectId))
+        {
+            errors.Add("OpenCortex:HostedAuth:FirebaseProjectId is required when hosted auth is enabled.");
+        }
+
+        if (!options.Billing.Plans.TryGetValue("free", out var freePlan))
+        {
+            errors.Add("OpenCortex:Billing:Plans must include a 'free' plan.");
+        }
+        else if (freePlan.MaxDocuments <= 0)
+        {
+            errors.Add("OpenCortex:Billing:Plans:free:MaxDocuments must be greater than zero.");
+        }
+
+        if (options.Billing.Stripe.Enabled)
+        {
+            if (string.IsNullOrWhiteSpace(options.Billing.Stripe.SecretKey))
+            {
+                errors.Add("OpenCortex:Billing:Stripe:SecretKey is required when Stripe billing is enabled.");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.Billing.Stripe.WebhookSecret))
+            {
+                errors.Add("OpenCortex:Billing:Stripe:WebhookSecret is required when Stripe billing is enabled.");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.Billing.Stripe.AppBaseUrl))
+            {
+                errors.Add("OpenCortex:Billing:Stripe:AppBaseUrl is required when Stripe billing is enabled.");
+            }
+
+            if (!options.Billing.Stripe.PriceIds.ContainsKey("pro"))
+            {
+                errors.Add("OpenCortex:Billing:Stripe:PriceIds must include a 'pro' entry when Stripe billing is enabled.");
+            }
+        }
+
         if (string.Equals(options.Embeddings.Provider, "openai-compatible", StringComparison.OrdinalIgnoreCase)
             && string.IsNullOrWhiteSpace(options.Embeddings.Endpoint))
         {

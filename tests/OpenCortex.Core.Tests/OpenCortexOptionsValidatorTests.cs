@@ -50,4 +50,69 @@ public sealed class OpenCortexOptionsValidatorTests
 
         Assert.DoesNotContain(errors, error => error.Contains("source root", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void Validate_RequiresFirebaseProjectIdWhenHostedAuthEnabled()
+    {
+        var options = new OpenCortexOptions
+        {
+            Database = new DatabaseOptions { ConnectionString = "Host=localhost" },
+            HostedAuth = new() { Enabled = true },
+        };
+
+        var errors = new OpenCortexOptionsValidator().Validate(options);
+
+        Assert.Contains(errors, error => error.Contains("OpenCortex:HostedAuth:FirebaseProjectId", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_AcceptsHostedAuthWhenFirebaseProjectIdIsPresent()
+    {
+        var options = new OpenCortexOptions
+        {
+            Database = new DatabaseOptions { ConnectionString = "Host=localhost" },
+            HostedAuth = new() { Enabled = true, FirebaseProjectId = "demo-project" },
+        };
+
+        var errors = new OpenCortexOptionsValidator().Validate(options);
+
+        Assert.DoesNotContain(errors, error => error.Contains("OpenCortex:HostedAuth", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_RequiresFreeBillingPlan()
+    {
+        var options = new OpenCortexOptions
+        {
+            Database = new DatabaseOptions { ConnectionString = "Host=localhost" },
+            Billing = new BillingOptions
+            {
+                Plans = new Dictionary<string, PlanEntitlements>(StringComparer.OrdinalIgnoreCase),
+            },
+        };
+
+        var errors = new OpenCortexOptionsValidator().Validate(options);
+
+        Assert.Contains(errors, error => error.Contains("Billing:Plans must include a 'free' plan", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_RequiresStripeSettingsWhenStripeEnabled()
+    {
+        var options = new OpenCortexOptions
+        {
+            Database = new DatabaseOptions { ConnectionString = "Host=localhost" },
+            Billing = new BillingOptions
+            {
+                Stripe = new StripeBillingOptions { Enabled = true },
+            },
+        };
+
+        var errors = new OpenCortexOptionsValidator().Validate(options);
+
+        Assert.Contains(errors, error => error.Contains("Billing:Stripe:SecretKey", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("Billing:Stripe:WebhookSecret", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("Billing:Stripe:AppBaseUrl", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("Billing:Stripe:PriceIds", StringComparison.Ordinal));
+    }
 }

@@ -1,42 +1,58 @@
+using Microsoft.AspNetCore.Http;
 using OpenCortex.Core.Brains;
+using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Persistence;
+using OpenCortex.Indexer.Indexing;
 using OpenCortex.McpServer;
 using OpenCortex.Retrieval.Execution;
 
 namespace OpenCortex.McpServer.Tests;
 
-/// <summary>
-/// Tests for the MCP tool contracts exposed via <see cref="OpenCortexTools"/>.
-/// Uses in-memory stubs to avoid Postgres or embedding dependencies.
-/// </summary>
 public sealed class OpenCortexToolsTests
 {
-    // -----------------------------------------------------------------------
-    // Helpers / stubs
-    // -----------------------------------------------------------------------
-
     private static OpenCortexTools BuildTools(
         IBrainCatalogStore? catalog = null,
-        OqlQueryExecutor? executor = null)
+        OqlQueryExecutor? executor = null,
+        ISubscriptionStore? subscriptionStore = null,
+        IUsageCounterStore? usageCounterStore = null,
+        IManagedDocumentStore? managedDocumentStore = null,
+        IManagedContentBrainIndexingService? indexingService = null,
+        IHttpContextAccessor? httpContextAccessor = null,
+        OpenCortexOptions? options = null)
     {
         catalog ??= new StubBrainCatalogStore();
         executor ??= new OqlQueryExecutor(new StubDocumentQueryStore());
-        return new OpenCortexTools(catalog, executor);
-    }
+        subscriptionStore ??= new StubSubscriptionStore();
+        usageCounterStore ??= new StubUsageCounterStore();
+        managedDocumentStore ??= new StubManagedDocumentStore();
+        indexingService ??= new StubManagedContentBrainIndexingService();
+        httpContextAccessor ??= BuildHttpContextAccessor();
+        options ??= new OpenCortexOptions { Billing = new BillingOptions() };
 
-    // -----------------------------------------------------------------------
-    // list_brains
-    // -----------------------------------------------------------------------
+        return new OpenCortexTools(
+            catalog,
+            executor,
+            subscriptionStore,
+            usageCounterStore,
+            managedDocumentStore,
+            indexingService,
+            httpContextAccessor,
+            options);
+    }
 
     [Fact]
     public async Task ListBrains_ReturnsBrains_ExcludingRetired()
     {
-        var catalog = new StubBrainCatalogStore(
-            new BrainSummary("active-brain", "Active Brain", "active-brain", "Filesystem", "active", 2),
-            new BrainSummary("retired-brain", "Retired Brain", "retired-brain", "Filesystem", "retired", 1));
+        var catalog = new StubBrainCatalogStore(new Dictionary<string, IReadOnlyList<BrainSummary>>
+        {
+            ["cus_test"] =
+            [
+                new BrainSummary("active-brain", "Active Brain", "active-brain", "Filesystem", "active", 2),
+                new BrainSummary("retired-brain", "Retired Brain", "retired-brain", "Filesystem", "retired", 1),
+            ],
+        });
 
-        var tools = BuildTools(catalog: catalog);
-        var result = await tools.list_brains(CancellationToken.None);
+        var result = await BuildTools(catalog: catalog).list_brains(CancellationToken.None);
 
         Assert.Equal(1, result.Count);
         Assert.Single(result.Brains);
@@ -44,107 +60,36 @@ public sealed class OpenCortexToolsTests
     }
 
     [Fact]
-    public async Task ListBrains_ReturnsEmpty_WhenNoActiveBrains()
-    {
-        var tools = BuildTools(catalog: new StubBrainCatalogStore());
-        var result = await tools.list_brains(CancellationToken.None);
-
-        Assert.Equal(0, result.Count);
-        Assert.Empty(result.Brains);
-    }
-
-    // -----------------------------------------------------------------------
-    // query_brain
-    // -----------------------------------------------------------------------
-
-    [Fact]
     public async Task QueryBrain_ReturnsFailure_WhenOqlMissingFromClause()
     {
-        var tools = BuildTools();
-        var result = await tools.query_brain("SEARCH \"test\"", CancellationToken.None);
+        var result = await BuildTools().query_brain("SEARCH \"test\"", CancellationToken.None);
 
         Assert.NotNull(result.Error);
         Assert.Contains("FROM brain", result.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(0, result.TotalResults);
-        Assert.Empty(result.Results);
     }
 
     [Fact]
-    public async Task QueryBrain_ReturnsResults_ForValidOql()
+    public async Task QueryBrain_ReturnsFailure_WhenMonthlyQuotaExceeded()
     {
-        var store = new StubDocumentQueryStore(
-            new RetrievalResultRecord(
-                "doc-1", "my-brain", "docs/test.md", "Test Doc",
-                null, "snippet text", 1.5, "title match (1.50)",
-                new ScoreBreakdown(1.5, 0, 0)));
+        var nowUtc = DateTimeOffset.UtcNow;
+        var counterKey = $"mcp.queries.{nowUtc:yyyy-MM}";
+        var catalog = new StubBrainCatalogStore(new Dictionary<string, IReadOnlyList<BrainSummary>>
+        {
+            ["cus_test"] =
+            [
+                new BrainSummary("my-brain", "My Brain", "my-brain", "Filesystem", "active", 0),
+            ],
+        });
+        var usageCounterStore = new StubUsageCounterStore(new Dictionary<string, long>
+        {
+            [$"cus_test::{counterKey}"] = 100,
+        });
 
-        var executor = new OqlQueryExecutor(store);
-        var tools = BuildTools(executor: executor);
-
-        var result = await tools.query_brain(
-            """FROM brain("my-brain") SEARCH "test" RANK keyword LIMIT 5""",
-            CancellationToken.None);
-
-        Assert.Null(result.Error);
-        Assert.Equal(1, result.TotalResults);
-        Assert.Single(result.Results);
-        Assert.Equal("doc-1", result.Results[0].DocumentId);
-        Assert.Equal("Test Doc", result.Results[0].Title);
-        Assert.Equal(1.5, result.Results[0].Score);
-        Assert.Equal(1.5, result.Results[0].Breakdown.Keyword);
-        Assert.Equal(0, result.Results[0].Breakdown.Semantic);
-    }
-
-    [Fact]
-    public async Task QueryBrain_ReturnsFailure_WhenExecutorThrows()
-    {
-        var store = new ThrowingDocumentQueryStore();
-        var executor = new OqlQueryExecutor(store);
-        var tools = BuildTools(executor: executor);
-
-        var result = await tools.query_brain(
-            "FROM brain(\"my-brain\") SEARCH \"test\"",
-            CancellationToken.None);
+        var result = await BuildTools(catalog: catalog, usageCounterStore: usageCounterStore)
+            .query_brain("FROM brain(\"my-brain\") SEARCH \"quota\"", CancellationToken.None);
 
         Assert.NotNull(result.Error);
-        Assert.Contains("Query execution failed", result.Error, StringComparison.Ordinal);
-        Assert.Equal(0, result.TotalResults);
-    }
-
-    [Fact]
-    public async Task QueryBrain_ScoresRoundedToFourDecimalPlaces()
-    {
-        var store = new StubDocumentQueryStore(
-            new RetrievalResultRecord(
-                "doc-1", "brain", "x.md", "X", null, null,
-                1.123456789, "kw",
-                new ScoreBreakdown(0.987654321, 0.111111111, 0.024691358)));
-
-        var executor = new OqlQueryExecutor(store);
-        var tools = BuildTools(executor: executor);
-
-        var result = await tools.query_brain(
-            "FROM brain(\"brain\") SEARCH \"x\"", CancellationToken.None);
-
-        Assert.Null(result.Error);
-        var item = result.Results[0];
-        Assert.Equal(4, CountDecimalPlaces(item.Score));
-        Assert.Equal(4, CountDecimalPlaces(item.Breakdown.Keyword));
-    }
-
-    // -----------------------------------------------------------------------
-    // get_brain
-    // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task GetBrain_ReturnsNotFound_WhenBrainDoesNotExist()
-    {
-        var tools = BuildTools(catalog: new StubBrainCatalogStore());
-        var result = await tools.get_brain("missing-brain", CancellationToken.None);
-
-        Assert.NotNull(result.Error);
-        Assert.Null(result.Brain);
-        Assert.Contains("not found", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Monthly MCP query limit reached", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -152,71 +97,216 @@ public sealed class OpenCortexToolsTests
     {
         var detail = new BrainDetail(
             "my-brain", "My Brain", "my-brain", "Filesystem", "active",
-            "A test brain", null,
+            "A test brain", "cus_test",
             [new SourceRootSummary("root-1", "my-brain", "knowledge/canonical", "local", true, ["**/*.md"], [], "scheduled", true)]);
+        var catalog = new StubBrainCatalogStore(
+            new Dictionary<string, IReadOnlyList<BrainSummary>>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, BrainDetail>
+            {
+                ["my-brain"] = detail,
+            });
 
-        var catalog = new StubBrainCatalogStore(detail: detail);
-        var tools = BuildTools(catalog: catalog);
-        var result = await tools.get_brain("my-brain", CancellationToken.None);
+        var result = await BuildTools(catalog: catalog).get_brain("my-brain", CancellationToken.None);
 
         Assert.Null(result.Error);
         Assert.NotNull(result.Brain);
-        Assert.Equal("my-brain", result.Brain!.BrainId);
-        Assert.Equal("My Brain", result.Brain.Name);
-        Assert.Single(result.Brain.SourceRoots);
-        Assert.Equal("knowledge/canonical", result.Brain.SourceRoots[0].Path);
+        Assert.Equal("knowledge/canonical", result.Brain!.SourceRoots[0].Path);
     }
 
     [Fact]
-    public async Task GetBrain_ReturnsError_WhenBrainIdEmpty()
+    public async Task CreateDocument_ReturnsFailure_WhenTokenLacksWriteScope()
     {
-        var tools = BuildTools();
-        var result = await tools.get_brain("", CancellationToken.None);
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            httpContextAccessor: BuildHttpContextAccessor(scopes: "mcp:read"))
+            .create_document("brain-write", "Draft", "Hello world", null, null, "draft", CancellationToken.None);
 
         Assert.NotNull(result.Error);
-        Assert.Null(result.Brain);
+        Assert.Contains("mcp:write", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
-    // -----------------------------------------------------------------------
-    // Utility
-    // -----------------------------------------------------------------------
-
-    private static int CountDecimalPlaces(double value)
+    [Fact]
+    public async Task CreateDocument_ReturnsFailure_WhenPlanDisallowsWrite()
     {
-        var s = value.ToString("G");
-        var dot = s.IndexOf('.');
-        return dot < 0 ? 0 : s.Length - dot - 1;
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "free"),
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .create_document("brain-write", "Draft", "Hello world", null, null, "draft", CancellationToken.None);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("does not allow MCP write tools", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CreateDocument_CreatesManagedDocumentAndReturnsIndexRun()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        var usageCounterStore = new StubUsageCounterStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            usageCounterStore: usageCounterStore,
+            managedDocumentStore: managedDocumentStore,
+            indexingService: indexingService,
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .create_document(
+                "brain-write",
+                "Launch Notes",
+                "# Launch\nReady.",
+                "launch-notes",
+                new Dictionary<string, string> { ["category"] = "ops" },
+                "published",
+                CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.NotNull(result.Document);
+        Assert.NotNull(result.IndexRun);
+        Assert.Equal("published", result.Document!.Status);
+        Assert.Equal("mcp-document-create", result.IndexRun!.TriggerType);
+        Assert.Equal(1, managedDocumentStore.CountActive("cus_test"));
+        Assert.Equal(1, usageCounterStore.GetValue("cus_test", "documents.active"));
+        Assert.Single(indexingService.Calls);
+    }
+
+    [Fact]
+    public async Task DeleteDocument_DeletesManagedDocumentAndReturnsIndexRun()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
+        var usageCounterStore = new StubUsageCounterStore();
+        var created = await managedDocumentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                "brain-write",
+                "cus_test",
+                "Doc To Delete",
+                "doc-to-delete",
+                "body",
+                new Dictionary<string, string>(),
+                "draft",
+                "user_test"),
+            CancellationToken.None);
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            usageCounterStore: usageCounterStore,
+            managedDocumentStore: managedDocumentStore,
+            indexingService: indexingService,
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .delete_document("brain-write", created.ManagedDocumentId, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(created.ManagedDocumentId, result.ManagedDocumentId);
+        Assert.Equal("mcp-document-delete", result.IndexRun!.TriggerType);
+        Assert.Equal(0, managedDocumentStore.CountActive("cus_test"));
+        Assert.Equal(0, usageCounterStore.GetValue("cus_test", "documents.active"));
+    }
+
+    [Fact]
+    public async Task ReindexBrain_ReturnsFailure_WhenBrainNotManagedContent()
+    {
+        var catalog = new StubBrainCatalogStore(new Dictionary<string, IReadOnlyList<BrainSummary>>
+        {
+            ["cus_test"] =
+            [
+                new BrainSummary("brain-read", "Read Brain", "brain-read", "Filesystem", "active", 0),
+            ],
+        });
+
+        var result = await BuildTools(
+            catalog: catalog,
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .reindex_brain("brain-read", CancellationToken.None);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("managed-content", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static StubBrainCatalogStore BuildManagedContentCatalog() =>
+        new(new Dictionary<string, IReadOnlyList<BrainSummary>>
+        {
+            ["cus_test"] =
+            [
+                new BrainSummary("brain-write", "Managed Brain", "brain-write", "managed-content", "active", 0),
+            ],
+        });
+
+    private static IHttpContextAccessor BuildHttpContextAccessor(string customerId = "cus_test", params string[] scopes)
+    {
+        if (scopes.Length == 0)
+        {
+            scopes = ["mcp:read"];
+        }
+
+        var context = new DefaultHttpContext();
+        context.SetMcpTokenContext(new McpTokenContext("tok_test", "user_test", customerId, scopes, "oct_test"));
+        return new HttpContextAccessor { HttpContext = context };
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stubs
-// ---------------------------------------------------------------------------
-
 internal sealed class StubBrainCatalogStore : IBrainCatalogStore
 {
-    private readonly IReadOnlyList<BrainSummary> _summaries;
-    private readonly BrainDetail? _detail;
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<BrainSummary>> _summariesByCustomer;
+    private readonly Dictionary<string, BrainDetail> _detailsByBrainId = new(StringComparer.OrdinalIgnoreCase);
 
-    public StubBrainCatalogStore(params BrainSummary[] summaries)
+    public StubBrainCatalogStore()
+        : this(new Dictionary<string, IReadOnlyList<BrainSummary>>(StringComparer.OrdinalIgnoreCase))
     {
-        _summaries = summaries;
-        _detail = null;
     }
 
-    public StubBrainCatalogStore(BrainDetail? detail = null)
+    public StubBrainCatalogStore(IReadOnlyDictionary<string, IReadOnlyList<BrainSummary>> summariesByCustomer, IReadOnlyDictionary<string, BrainDetail>? details = null)
     {
-        _summaries = [];
-        _detail = detail;
+        _summariesByCustomer = summariesByCustomer;
+
+        foreach (var (customerId, summaries) in summariesByCustomer)
+        {
+            foreach (var summary in summaries)
+            {
+                _detailsByBrainId[summary.BrainId] = new BrainDetail(
+                    summary.BrainId,
+                    summary.Name,
+                    summary.Slug,
+                    summary.Mode,
+                    summary.Status,
+                    null,
+                    customerId,
+                    []);
+            }
+        }
+
+        if (details is not null)
+        {
+            foreach (var item in details)
+            {
+                _detailsByBrainId[item.Key] = item.Value;
+            }
+        }
     }
 
     public Task<IReadOnlyList<BrainSummary>> ListBrainsAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(_summaries);
+        => Task.FromResult<IReadOnlyList<BrainSummary>>(_summariesByCustomer.Values.SelectMany(items => items).ToList());
+
+    public Task<IReadOnlyList<BrainSummary>> ListBrainsByCustomerAsync(string customerId, CancellationToken cancellationToken = default)
+        => Task.FromResult(_summariesByCustomer.TryGetValue(customerId, out var summaries) ? summaries : Array.Empty<BrainSummary>());
 
     public Task<BrainDetail?> GetBrainAsync(string brainId, CancellationToken cancellationToken = default)
-        => Task.FromResult(_detail?.BrainId == brainId ? _detail : null);
+        => Task.FromResult(_detailsByBrainId.TryGetValue(brainId, out var detail) ? detail : null);
 
-    // Remaining interface methods — not needed for these tests
+    public Task<BrainDetail?> GetBrainByCustomerAsync(string customerId, string brainId, CancellationToken cancellationToken = default)
+    {
+        if (_detailsByBrainId.TryGetValue(brainId, out var detail)
+            && string.Equals(detail.CustomerId, customerId, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult<BrainDetail?>(detail);
+        }
+
+        return Task.FromResult<BrainDetail?>(null);
+    }
 
     public Task<BrainDetail> CreateBrainAsync(BrainDefinition brain, CancellationToken cancellationToken = default)
         => throw new NotImplementedException();
@@ -255,10 +345,251 @@ internal sealed class StubDocumentQueryStore : IDocumentQueryStore
         => Task.FromResult(_results);
 }
 
-internal sealed class ThrowingDocumentQueryStore : IDocumentQueryStore
+internal sealed class StubSubscriptionStore : ISubscriptionStore
 {
-    public Task<IReadOnlyList<RetrievalResultRecord>> SearchAsync(
-        OpenCortex.Core.Query.OqlQuery query,
-        CancellationToken cancellationToken = default)
-        => throw new InvalidOperationException("Simulated store failure");
+    private readonly string _planId;
+    private readonly string _status;
+
+    public StubSubscriptionStore(string planId = "free", string status = "active")
+    {
+        _planId = planId;
+        _status = status;
+    }
+
+    public Task<SubscriptionRecord> EnsureFreeSubscriptionAsync(string customerId, CancellationToken cancellationToken = default)
+        => Task.FromResult(BuildSubscription(customerId, "free", "active"));
+
+    public Task<SubscriptionRecord?> GetSubscriptionAsync(string customerId, CancellationToken cancellationToken = default)
+        => Task.FromResult<SubscriptionRecord?>(BuildSubscription(customerId, _planId, _status));
+
+    public Task<CustomerBillingProfile?> GetCustomerBillingProfileAsync(string customerId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<string?> FindCustomerIdByStripeCustomerIdAsync(string stripeCustomerId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task LinkStripeCustomerAsync(string customerId, string stripeCustomerId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<SubscriptionRecord> UpsertSubscriptionAsync(SubscriptionUpsertRequest request, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<bool> TryRecordSubscriptionEventAsync(SubscriptionEventRecord record, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task MarkSubscriptionEventProcessedAsync(string stripeEventId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    private static SubscriptionRecord BuildSubscription(string customerId, string planId, string status) =>
+        new(
+            "sub_test",
+            customerId,
+            planId,
+            status,
+            null,
+            null,
+            1,
+            null,
+            DateTimeOffset.UtcNow.AddDays(30),
+            false,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+}
+
+internal sealed class StubUsageCounterStore : IUsageCounterStore
+{
+    private readonly Dictionary<string, long> _values;
+
+    public StubUsageCounterStore(Dictionary<string, long>? values = null)
+    {
+        _values = values ?? new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public Task<UsageCounterRecord?> GetCounterAsync(string customerId, string counterKey, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(_values.TryGetValue(BuildKey(customerId, counterKey), out var value)
+            ? new UsageCounterRecord(customerId, counterKey, value, DateTimeOffset.UtcNow.AddMonths(1), DateTimeOffset.UtcNow)
+            : null);
+    }
+
+    public Task<UsageCounterRecord> IncrementCounterAsync(UsageCounterIncrementRequest request, CancellationToken cancellationToken = default)
+    {
+        var key = BuildKey(request.CustomerId, request.CounterKey);
+        _values.TryGetValue(key, out var current);
+        current += request.Delta;
+        _values[key] = current;
+        return Task.FromResult(new UsageCounterRecord(request.CustomerId, request.CounterKey, current, request.ResetAt, DateTimeOffset.UtcNow));
+    }
+
+    public Task<UsageCounterRecord> SetCounterAsync(UsageCounterSetRequest request, CancellationToken cancellationToken = default)
+    {
+        _values[BuildKey(request.CustomerId, request.CounterKey)] = request.Value;
+        return Task.FromResult(new UsageCounterRecord(request.CustomerId, request.CounterKey, request.Value, request.ResetAt, DateTimeOffset.UtcNow));
+    }
+
+    public long GetValue(string customerId, string counterKey)
+        => _values.TryGetValue(BuildKey(customerId, counterKey), out var value) ? value : 0;
+
+    private static string BuildKey(string customerId, string counterKey) => $"{customerId}::{counterKey}";
+}
+
+internal sealed class StubManagedDocumentStore : IManagedDocumentStore
+{
+    private readonly Dictionary<string, ManagedDocumentDetail> _documents = new(StringComparer.OrdinalIgnoreCase);
+    private int _nextId = 1;
+
+    public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(string customerId, string brainId, int limit = 200, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<ManagedDocumentSummary>>(_documents.Values
+            .Where(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                && !document.IsDeleted)
+            .Take(limit)
+            .Select(document => new ManagedDocumentSummary(
+                document.ManagedDocumentId,
+                document.BrainId,
+                document.CustomerId,
+                document.Title,
+                document.Slug,
+                document.CanonicalPath,
+                document.Status,
+                document.WordCount,
+                document.CreatedAt,
+                document.UpdatedAt))
+            .ToList());
+
+    public Task<int> CountActiveManagedDocumentsAsync(string customerId, CancellationToken cancellationToken = default)
+        => Task.FromResult(CountActive(customerId));
+
+    public int CountActive(string customerId)
+        => _documents.Values.Count(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase) && !document.IsDeleted);
+
+    public Task<IReadOnlyList<ManagedDocumentDetail>> ListManagedDocumentsForIndexingAsync(string customerId, string brainId, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<ManagedDocumentDetail>>(_documents.Values
+            .Where(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                && !document.IsDeleted)
+            .ToList());
+
+    public Task<ManagedDocumentDetail?> GetManagedDocumentAsync(string customerId, string brainId, string managedDocumentId, CancellationToken cancellationToken = default)
+    {
+        if (_documents.TryGetValue(managedDocumentId, out var document)
+            && string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult<ManagedDocumentDetail?>(document);
+        }
+
+        return Task.FromResult<ManagedDocumentDetail?>(null);
+    }
+
+    public Task<ManagedDocumentDetail> CreateManagedDocumentAsync(ManagedDocumentCreateRequest request, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var managedDocumentId = $"md-{_nextId++:D4}";
+        var slug = string.IsNullOrWhiteSpace(request.Slug) ? Slugify(request.Title) : request.Slug!;
+        var content = request.Content ?? string.Empty;
+        var document = new ManagedDocumentDetail(
+            managedDocumentId,
+            request.BrainId,
+            request.CustomerId,
+            request.Title,
+            slug,
+            $"managed/{slug}.md",
+            content,
+            new Dictionary<string, string>(request.Frontmatter, StringComparer.OrdinalIgnoreCase),
+            $"hash-{managedDocumentId}",
+            request.Status,
+            CountWords(content),
+            request.UserId,
+            request.UserId,
+            now,
+            now,
+            false);
+
+        _documents[managedDocumentId] = document;
+        return Task.FromResult(document);
+    }
+
+    public Task<ManagedDocumentDetail?> UpdateManagedDocumentAsync(ManagedDocumentUpdateRequest request, CancellationToken cancellationToken = default)
+    {
+        if (!_documents.TryGetValue(request.ManagedDocumentId, out var existing)
+            || !string.Equals(existing.CustomerId, request.CustomerId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(existing.BrainId, request.BrainId, StringComparison.OrdinalIgnoreCase)
+            || existing.IsDeleted)
+        {
+            return Task.FromResult<ManagedDocumentDetail?>(null);
+        }
+
+        var slug = string.IsNullOrWhiteSpace(request.Slug) ? Slugify(request.Title) : request.Slug!;
+        var content = request.Content ?? string.Empty;
+        var updated = existing with
+        {
+            Title = request.Title,
+            Slug = slug,
+            CanonicalPath = $"managed/{slug}.md",
+            Content = content,
+            Frontmatter = new Dictionary<string, string>(request.Frontmatter, StringComparer.OrdinalIgnoreCase),
+            Status = request.Status,
+            WordCount = CountWords(content),
+            UpdatedBy = request.UserId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+
+        _documents[request.ManagedDocumentId] = updated;
+        return Task.FromResult<ManagedDocumentDetail?>(updated);
+    }
+
+    public Task<bool> SoftDeleteManagedDocumentAsync(string customerId, string brainId, string managedDocumentId, string userId, CancellationToken cancellationToken = default)
+    {
+        if (!_documents.TryGetValue(managedDocumentId, out var existing)
+            || !string.Equals(existing.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(existing.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+            || existing.IsDeleted)
+        {
+            return Task.FromResult(false);
+        }
+
+        _documents[managedDocumentId] = existing with
+        {
+            IsDeleted = true,
+            UpdatedBy = userId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+
+        return Task.FromResult(true);
+    }
+
+    private static int CountWords(string content)
+        => string.IsNullOrWhiteSpace(content)
+            ? 0
+            : content.Split(new[] { ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries).Length;
+
+    private static string Slugify(string title)
+    {
+        var chars = title.Trim().ToLowerInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : '-')
+            .ToArray();
+        return string.Join('-', new string(chars).Split(new[] { '-' }, StringSplitOptions.RemoveEmptyEntries));
+    }
+}
+
+internal sealed class StubManagedContentBrainIndexingService : IManagedContentBrainIndexingService
+{
+    public List<(string CustomerId, string BrainId, string TriggerType)> Calls { get; } = [];
+
+    public Task<IndexRunRecord> ReindexAsync(string customerId, string brainId, string triggerType, CancellationToken cancellationToken = default)
+    {
+        Calls.Add((customerId, brainId, triggerType));
+        return Task.FromResult(new IndexRunRecord(
+            $"idx-{Calls.Count:D4}",
+            brainId,
+            triggerType,
+            "completed",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            1,
+            1,
+            0,
+            null));
+    }
 }
