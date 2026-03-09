@@ -19,6 +19,7 @@ var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOpt
 builder.AddProject("api", "../OpenCortex.Api/OpenCortex.Api.csproj");
 builder.AddProject("mcp", "../OpenCortex.McpServer/OpenCortex.McpServer.csproj");
 builder.AddProject("workers", "../OpenCortex.Workers/OpenCortex.Workers.csproj");
+builder.AddProject("portal", "../OpenCortex.Portal/OpenCortex.Portal.csproj");
 
 if (!string.Equals(Environment.GetEnvironmentVariable("OPENCORTEX_APPHOST_OPEN_BROWSER"), "false", StringComparison.OrdinalIgnoreCase))
 {

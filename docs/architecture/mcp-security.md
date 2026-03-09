@@ -112,6 +112,9 @@ Current repo status:
 
 - migration `0005_api_tokens.sql` now creates `api_tokens`
 - tenant token management routes are live at `GET /tenant/tokens`, `POST /tenant/tokens`, and `DELETE /tenant/tokens/{apiTokenId}`
+- a separate `OpenCortex.Portal` project now hosts the first customer-facing token settings bootstrap instead of reusing the admin/debug console
+- the portal now handles Firebase email/password browser sign-in and refreshes its session before calling the tenant token routes
+- the current portal still covers only the token-settings slice; broader account UI and Google sign-in are still pending
 - raw tokens are generated with the `oct_` prefix, SHA-256 hashed before storage, and returned only once on creation
 - MCP is now mapped explicitly at `/mcp` and requires `Authorization: Bearer oct_...`
 - MCP middleware validates token hash, expiry, revocation, and `mcp:read`, updates `last_used_at`, and attaches resolved `customer_id` to the request
@@ -120,7 +123,7 @@ Current repo status:
 - managed-content MCP write tools now exist: `create_document`, `update_document`, `delete_document`, and `reindex_brain`
 - MCP write tools require both token scope `mcp:write` and an effective plan with `mcpWrite = true`
 - MCP document create enforces the same effective `maxDocuments` limit as the hosted tenant API, and MCP create/delete/reindex reconcile `documents.active`
-- MCP overage currently surfaces as a tool error message; transport-level `429` shaping is still pending
+- MCP overage currently surfaces as a tool error message; transport-level `429` shaping, broader portal coverage, and Google sign-in are still pending
 
 ## Rate Limiting
 

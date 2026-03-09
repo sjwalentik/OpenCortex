@@ -7,6 +7,7 @@ OpenCortex has three human-facing surfaces in addition to MCP:
 - an **operator/admin surface** for infrastructure operators managing brains and customers
 - an **authoring surface** for editing and curating Markdown knowledge in the browser
 - a **tenant API** for hosted cloud users managing their documents, brains, billing, and API tokens
+- a **tenant portal** for hosted customer-facing settings and account workflows
 
 These must be clearly separated in routing, auth middleware, and deployment topology.
 
@@ -44,6 +45,8 @@ The API exposes operator-facing endpoints including:
 | `POST /query` | Execute an OQL query |
 
 A lightweight admin console is served from `/admin/`. Navigation to `/admin` (no trailing slash) redirects to `/admin/` cleanly without a redirect loop.
+
+This surface is intentionally an operator/debug area, not the long-term customer-facing SaaS UI.
 
 The current console supports:
 - browsing all registered brains with per-brain health chips (Healthy / Indexing / Needs Attention / Not Indexed / Retired)
@@ -173,7 +176,9 @@ Current bootstrap slice:
 
 Current repo status:
 - tenant token routes are now implemented under `/tenant/tokens`
-- the backing UI is still pending; current support is API-first
+- a separate `OpenCortex.Portal` project now exists for customer-facing token settings bootstrap
+- the portal now owns a native browser auth bootstrap for Firebase email/password sign-in and refresh-token renewal
+- the portal still requires configured `Portal:ApiBaseUrl`, `Portal:Auth:FirebaseProjectId`, and `Portal:Auth:FirebaseApiKey`
 - MCP write tools now exist for managed-content brains, so token-based agents can create, update, delete, and reindex content before the browser UI lands
 
 See `docs/architecture/mcp-security.md` for full MCP token design.

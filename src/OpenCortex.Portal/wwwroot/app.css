@@ -1,0 +1,423 @@
+:root {
+  --bg: #f3eadc;
+  --surface: rgba(255, 251, 244, 0.92);
+  --surface-strong: #fffaf2;
+  --text: #221913;
+  --muted: #6d5c4f;
+  --line: rgba(71, 50, 31, 0.14);
+  --primary: #8a4b24;
+  --primary-strong: #6b3818;
+  --success: #2c6d49;
+  --danger: #962f2f;
+  --warning: #9e6600;
+  --shadow: 0 22px 50px rgba(88, 60, 25, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  background:
+    radial-gradient(circle at top left, rgba(180, 132, 73, 0.18), transparent 30%),
+    radial-gradient(circle at 85% 10%, rgba(55, 106, 81, 0.12), transparent 20%),
+    linear-gradient(180deg, var(--bg) 0%, #eee1cd 100%);
+}
+
+.page-shell {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 22px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p,
+dl,
+dd,
+dt,
+fieldset,
+legend {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2.1rem, 5vw, 3.8rem);
+  line-height: 0.98;
+}
+
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1rem; }
+
+.lede,
+.summary-detail,
+.empty-state,
+.session-status {
+  color: var(--muted);
+}
+
+.notice-strip,
+.summary-grid,
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.notice-strip {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.grid {
+  grid-template-columns: 1.05fr 0.95fr;
+}
+
+.panel,
+.summary-card,
+.notice-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.panel {
+  padding: 22px;
+}
+
+.panel-wide {
+  grid-column: 1 / -1;
+}
+
+.notice-card,
+.summary-card {
+  padding: 16px 18px;
+}
+
+.notice-label,
+.summary-label {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.summary-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 1.28rem;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.compact-header {
+  margin-bottom: 10px;
+}
+
+.field,
+.scope-fieldset,
+.fact-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field span,
+.scope-fieldset legend {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.session-form,
+.create-token-form {
+  display: grid;
+  gap: 14px;
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  color: var(--text);
+  background: var(--surface-strong);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+  font-family: "Consolas", "SFMono-Regular", "Courier New", monospace;
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
+input:focus,
+textarea:focus {
+  outline: 2px solid rgba(138, 75, 36, 0.22);
+  outline-offset: 2px;
+  border-color: rgba(138, 75, 36, 0.36);
+}
+
+.button {
+  border: 1px solid rgba(138, 75, 36, 0.2);
+  border-radius: 12px;
+  padding: 10px 14px;
+  color: var(--text);
+  background: #f8f0e2;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: #f1e3ca;
+}
+
+.button-primary {
+  color: #fff9f3;
+  background: linear-gradient(180deg, #a35a2e, var(--primary));
+  border-color: transparent;
+}
+
+.button-primary:hover {
+  background: linear-gradient(180deg, #8f4c25, var(--primary-strong));
+}
+
+.button-danger {
+  color: var(--danger);
+  background: rgba(150, 47, 47, 0.08);
+  border-color: rgba(150, 47, 47, 0.24);
+}
+
+.button-danger:hover {
+  background: rgba(150, 47, 47, 0.16);
+}
+
+.action-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.session-status {
+  margin-top: 12px;
+  font-size: 0.9rem;
+}
+
+.status-banner {
+  margin-bottom: 18px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+}
+
+.status-info {
+  color: var(--success);
+  background: rgba(44, 109, 73, 0.08);
+  border-color: rgba(44, 109, 73, 0.2);
+}
+
+.status-error {
+  color: var(--danger);
+  background: rgba(150, 47, 47, 0.08);
+  border-color: rgba(150, 47, 47, 0.2);
+}
+
+.status-warn {
+  color: var(--warning);
+  background: rgba(158, 102, 0, 0.09);
+  border-color: rgba(158, 102, 0, 0.2);
+}
+
+.scope-fieldset {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(255, 250, 242, 0.72);
+}
+
+.scope-option {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+}
+
+.scope-option + .scope-option {
+  margin-top: 10px;
+}
+
+.created-token-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(44, 109, 73, 0.2);
+  background: rgba(44, 109, 73, 0.07);
+}
+
+.facts-list {
+  display: grid;
+  gap: 10px;
+}
+
+.fact-row {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.fact-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.fact-row dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fact-row dd {
+  font-size: 0.95rem;
+}
+
+.empty-state {
+  padding: 28px 16px;
+  text-align: center;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.token-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.token-table th,
+.token-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.token-table th {
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.token-table tbody tr:hover {
+  background: rgba(138, 75, 36, 0.04);
+}
+
+.scope-chip,
+.status-chip {
+  display: inline-flex;
+  margin-right: 6px;
+  margin-bottom: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.scope-chip {
+  background: rgba(138, 75, 36, 0.1);
+  color: var(--primary);
+}
+
+.status-chip-active {
+  color: var(--success);
+  background: rgba(44, 109, 73, 0.1);
+}
+
+.status-chip-expired,
+.status-chip-revoked {
+  color: var(--danger);
+  background: rgba(150, 47, 47, 0.1);
+}
+
+.status-chip-pending {
+  color: var(--warning);
+  background: rgba(158, 102, 0, 0.11);
+}
+
+.token-name {
+  font-weight: 700;
+}
+
+.token-prefix {
+  font-family: "Consolas", "SFMono-Regular", "Courier New", monospace;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+code {
+  font-family: "Consolas", "SFMono-Regular", "Courier New", monospace;
+  font-size: 0.88em;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (max-width: 980px) {
+  .notice-strip,
+  .summary-grid,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    flex-direction: column;
+    align-items: start;
+  }
+}

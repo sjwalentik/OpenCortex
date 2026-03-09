@@ -94,7 +94,9 @@ Filesystem indexing now reconciles deletions per source root, so Markdown files 
 
 During each index run, stale chunks, link edges, and embeddings for rescanned documents are also cleaned up so changed documents do not leave old retrieval artifacts behind.
 
-The API now serves a lightweight admin console at `/admin/` for browsing brains, triggering indexing, inspecting run history/errors, and smoke-testing OQL queries from the browser.
+The API now serves a lightweight admin console at `/admin/` for operator/debug workflows such as browsing brains, triggering indexing, inspecting run history/errors, and smoke-testing OQL queries from the browser.
+
+Customer-facing token settings now live in the separate `OpenCortex.Portal` project, which owns the hosted browser auth bootstrap for Firebase email/password sign-in.
 
 ## Licensing
 

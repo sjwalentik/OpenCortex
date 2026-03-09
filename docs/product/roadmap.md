@@ -203,12 +203,14 @@ Current bootstrap status:
 
 - migration `0005_api_tokens.sql` added for `api_tokens`
 - tenant token routes now exist: `GET /tenant/tokens`, `POST /tenant/tokens`, and `DELETE /tenant/tokens/{apiTokenId}`
+- a separate `OpenCortex.Portal` project now exists for customer/user-facing token settings instead of extending the admin/debug console
+- the portal now owns a native Firebase email/password browser auth bootstrap with refresh-token renewal for token settings
 - MCP is now mapped explicitly at `/mcp` and requires bearer `oct_` tokens
 - MCP middleware resolves `customer_id`, updates `last_used_at`, and restricts all existing tools to customer-owned brains
 - `query_brain` now increments the shared monthly `mcp.queries.YYYY-MM` counter after token-based customer resolution
 - managed-content MCP write tools now exist: `create_document`, `update_document`, `delete_document`, and `reindex_brain`
 - MCP write tools now require both `mcp:write` scope and a plan with `mcpWrite = true`, and document create reuses the same effective `maxDocuments` enforcement as the tenant API
-- transport-level MCP `429` responses and token management UI are still pending
+- the portal still requires configured API/Firebase settings, and broader account UI, Google sign-in, and transport-level MCP `429` responses are still pending
 
 See `docs/architecture/mcp-security.md` for full design.
 
@@ -262,4 +264,4 @@ See `docs/architecture/mcp-security.md` for full design.
 - implement managed-content document CRUD and browser Markdown editor (Phase 9)
 - add Firebase Auth JWT middleware and user/workspace provisioning (Phase 10)
 - finish Stripe billing state polish and complete hosted billing UX (Phase 11)
-- finish MCP token hardening and add token management UI (Phase 12)
+- finish MCP token hardening, broaden the portal beyond token settings, add Google sign-in, and add transport-level MCP quota shaping (Phase 12)

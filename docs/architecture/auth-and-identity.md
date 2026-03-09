@@ -17,12 +17,19 @@ Reasons:
 
 ## Authentication Flow
 
-1. user signs up or logs in via Firebase Auth (browser SDK)
+1. user signs up or logs in via Firebase Auth
 2. Firebase issues a short-lived ID token (JWT, 1-hour TTL)
 3. browser sends `Authorization: Bearer <firebase-id-token>` on every API request
 4. ASP.NET Core JWT middleware validates against Firebase's JWKS endpoint
 5. middleware extracts `sub` (Firebase UID) and attaches to request context
 6. request handler resolves `user_id`, `customer_id`, `role`, `plan_id` from DB
+
+Current repo status:
+
+- `OpenCortex.Api` validates Firebase ID tokens server-side for all `/tenant/*` routes
+- `OpenCortex.Portal` now owns the first browser auth flow for hosted customer settings
+- the current portal auth slice uses Firebase email/password login plus refresh-token renewal through portal-backed REST endpoints
+- Google sign-in and a richer hosted account shell are still pending
 
 ## User Provisioning
 

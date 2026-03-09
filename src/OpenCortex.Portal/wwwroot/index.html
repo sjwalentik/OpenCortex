@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCortex Portal</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">OpenCortex Portal</p>
+        <h1>Token Settings</h1>
+        <p class="lede">Customer-facing MCP token management now lives in its own portal instead of the admin debug surface.</p>
+      </div>
+    </header>
+
+    <section id="statusBanner" class="status-banner hidden" aria-live="polite"></section>
+
+    <section class="notice-strip">
+      <article class="notice-card">
+        <p class="notice-label">Native Auth</p>
+        <p>The portal now owns browser sign-in for Firebase email/password accounts and refreshes sessions automatically.</p>
+      </article>
+      <article class="notice-card">
+        <p class="notice-label">API Wiring</p>
+        <p>Set <code>Portal:ApiBaseUrl</code>, <code>Portal:Auth:FirebaseProjectId</code>, and <code>Portal:Auth:FirebaseApiKey</code> before using hosted customer settings.</p>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Browser Session</h2>
+          <p>Email/password sign-in is handled through the portal. Google sign-in is still pending.</p>
+        </div>
+      </div>
+      <form id="authForm" class="session-form">
+        <label class="field">
+          <span>Email</span>
+          <input id="authEmailInput" type="email" autocomplete="email" placeholder="you@example.com" required>
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="authPasswordInput" type="password" autocomplete="current-password" placeholder="Password" required>
+        </label>
+        <div class="action-row">
+          <button type="submit" class="button button-primary">Sign In</button>
+          <button type="button" id="createAccountButton" class="button">Create Account</button>
+          <button type="button" id="refreshSessionButton" class="button">Refresh</button>
+          <button type="button" id="signOutButton" class="button button-danger">Sign Out</button>
+        </div>
+      </form>
+      <p id="sessionStatus" class="session-status">No browser session loaded.</p>
+    </section>
+
+    <section class="summary-grid">
+      <article class="summary-card">
+        <p class="summary-label">Workspace</p>
+        <strong id="workspaceName">Disconnected</strong>
+        <p id="workspaceDetail" class="summary-detail">Sign in to load workspace context.</p>
+      </article>
+      <article class="summary-card">
+        <p class="summary-label">Plan</p>
+        <strong id="planName">Unknown</strong>
+        <p id="planDetail" class="summary-detail">Billing state appears after sign-in.</p>
+      </article>
+      <article class="summary-card">
+        <p class="summary-label">MCP Access</p>
+        <strong id="mcpAccess">Unknown</strong>
+        <p id="mcpAccessDetail" class="summary-detail">Scope and write posture appear after sign-in.</p>
+      </article>
+      <article class="summary-card">
+        <p class="summary-label">Tokens</p>
+        <strong id="tokenCount">0</strong>
+        <p id="tokenCountDetail" class="summary-detail">No token records loaded.</p>
+      </article>
+    </section>
+
+    <main class="grid">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Create Token</h2>
+            <p>New token values are shown once. Save them before dismissing the panel.</p>
+          </div>
+        </div>
+        <form id="createTokenForm" class="create-token-form">
+          <label class="field">
+            <span>Name</span>
+            <input id="tokenNameInput" type="text" placeholder="Claude Desktop" required>
+          </label>
+          <label class="field">
+            <span>Expires At</span>
+            <input id="expiresAtInput" type="datetime-local">
+          </label>
+          <fieldset class="scope-fieldset">
+            <legend>Scopes</legend>
+            <label class="scope-option">
+              <input type="checkbox" checked disabled>
+              <span><code>mcp:read</code> is always included.</span>
+            </label>
+            <label class="scope-option">
+              <input id="scopeWriteInput" type="checkbox">
+              <span>Request <code>mcp:write</code> when the effective plan allows it.</span>
+            </label>
+          </fieldset>
+          <button type="submit" class="button button-primary">Create Token</button>
+        </form>
+
+        <section id="createdTokenPanel" class="created-token-panel hidden">
+          <div class="panel-header compact-header">
+            <div>
+              <h3>New Token</h3>
+              <p id="createdTokenMeta" class="summary-detail"></p>
+            </div>
+            <button type="button" id="dismissCreatedTokenButton" class="button">Dismiss</button>
+          </div>
+          <textarea id="createdTokenValue" rows="4" readonly></textarea>
+          <div class="action-row">
+            <button type="button" id="copyCreatedTokenButton" class="button button-primary">Copy Token</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Workspace Context</h2>
+            <p>Live tenant identity and quota posture for the authenticated browser session.</p>
+          </div>
+        </div>
+        <dl id="workspaceFacts" class="facts-list">
+          <div class="fact-row"><dt>User</dt><dd>Not loaded</dd></div>
+          <div class="fact-row"><dt>Email</dt><dd>Not loaded</dd></div>
+          <div class="fact-row"><dt>Role</dt><dd>Not loaded</dd></div>
+          <div class="fact-row"><dt>Customer</dt><dd>Not loaded</dd></div>
+          <div class="fact-row"><dt>Brain</dt><dd>Not loaded</dd></div>
+          <div class="fact-row"><dt>Documents</dt><dd>Not loaded</dd></div>
+          <div class="fact-row"><dt>MCP Queries</dt><dd>Not loaded</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <div>
+            <h2>Issued Tokens</h2>
+            <p>Revocation is immediate. Expired or revoked entries stay visible for audit.</p>
+          </div>
+        </div>
+        <div id="tokensEmptyState" class="empty-state">Sign in to load tokens.</div>
+        <div id="tokensTableWrap" class="table-wrap hidden">
+          <table class="token-table" aria-label="API token list">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Prefix</th>
+                <th>Scopes</th>
+                <th>Created</th>
+                <th>Last Used</th>
+                <th>Expires</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tokensTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
