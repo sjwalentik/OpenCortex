@@ -31,14 +31,14 @@ public static class TenantSlugGenerator
         return slug;
     }
 
-    public static string GetStableSuffix(string value) =>
-        value.Length <= 8 ? value : value[^8..];
+    public static string GetStableSuffix(string value, int maxLength = 8) =>
+        value.Length <= maxLength ? value : value[^maxLength..];
 
     public static string BuildCustomerSlug(string slugSeed, string stableId) =>
         $"personal-{slugSeed}-{GetStableSuffix(stableId)}";
 
     public static string BuildBrainSlug(string slugSeed, string stableId) =>
-        $"personal-{slugSeed}-{GetStableSuffix(stableId)}";
+        $"personal-brain-{slugSeed}-{GetStableSuffix(stableId, 12)}";
 
     public static string BuildWorkspaceName(string? displayName, string email)
     {

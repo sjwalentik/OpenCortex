@@ -43,6 +43,7 @@ OpenCortex/
 - solution scaffold: `OpenCortex.sln`
 - local Postgres compose: `infra/compose/docker-compose.yml`
 - manual Postgres setup guide: `docs/operations/manual-postgres-setup.md`
+- hosted workspace local setup guide: `docs/operations/hosted-local-setup.md`
 
 ## Initial Architecture Direction
 
@@ -88,6 +89,8 @@ For secret-backed or cluster-managed databases, keep the real connection string 
 
 Embedding provider settings also live under `OpenCortex:Embeddings`. The default open source setup uses the deterministic provider, while hosted or operator-managed deployments can switch to an `openai-compatible` endpoint with secrets stored outside the repo.
 
+If you switch embedding models, keep `OpenCortex:Embeddings:Dimensions` aligned with the Postgres `pgvector` column size. The initial migration creates `opencortex.embeddings.vector` as `vector(1536)`, so `768`-dimension models such as `nomic-embed-text` require a matching schema change before indexing.
+
 Once the API is running, you can inspect indexing operations through `GET /indexing/runs`, `GET /indexing/runs?brainId=<brainId>`, `GET /indexing/runs/<indexRunId>`, and `GET /indexing/runs/<indexRunId>/errors`.
 
 Filesystem indexing now reconciles deletions per source root, so Markdown files removed from the configured knowledge roots are marked deleted in Postgres and excluded from retrieval.
@@ -96,7 +99,7 @@ During each index run, stale chunks, link edges, and embeddings for rescanned do
 
 The API now serves a lightweight admin console at `/admin/` for operator/debug workflows such as browsing brains, triggering indexing, inspecting run history/errors, and smoke-testing OQL queries from the browser.
 
-Customer-facing token settings now live in the separate `OpenCortex.Portal` project, which owns the hosted browser auth bootstrap for Firebase email/password sign-in.
+Customer-facing workspace flows now live in the separate `OpenCortex.Portal` project, which owns the hosted browser auth bootstrap for Firebase email/password sign-in plus managed-content document authoring, preview, version history, and MCP token settings.
 
 ## Licensing
 

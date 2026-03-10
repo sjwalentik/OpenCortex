@@ -93,6 +93,12 @@ public sealed class ManagedContentBrainIndexingServiceTests
         public Task<ManagedDocumentDetail?> GetManagedDocumentAsync(string customerId, string brainId, string managedDocumentId, CancellationToken cancellationToken = default)
             => Task.FromResult(_documents.FirstOrDefault(document => document.ManagedDocumentId == managedDocumentId));
 
+        public Task<IReadOnlyList<ManagedDocumentVersionSummary>> ListManagedDocumentVersionsAsync(string customerId, string brainId, string managedDocumentId, int limit = 50, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ManagedDocumentVersionSummary>>([]);
+
+        public Task<ManagedDocumentVersionDetail?> GetManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, CancellationToken cancellationToken = default)
+            => Task.FromResult<ManagedDocumentVersionDetail?>(null);
+
         public Task<ManagedDocumentDetail> CreateManagedDocumentAsync(ManagedDocumentCreateRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
@@ -100,6 +106,9 @@ public sealed class ManagedContentBrainIndexingServiceTests
             => throw new NotImplementedException();
 
         public Task<bool> SoftDeleteManagedDocumentAsync(string customerId, string brainId, string managedDocumentId, string userId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<ManagedDocumentDetail?> RestoreManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, string userId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
     }
 

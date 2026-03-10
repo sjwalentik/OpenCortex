@@ -436,6 +436,7 @@ internal sealed class StubUsageCounterStore : IUsageCounterStore
 internal sealed class StubManagedDocumentStore : IManagedDocumentStore
 {
     private readonly Dictionary<string, ManagedDocumentDetail> _documents = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<ManagedDocumentVersionDetail> _versions = [];
     private int _nextId = 1;
 
     public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(string customerId, string brainId, int limit = 200, CancellationToken cancellationToken = default)
@@ -482,6 +483,36 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
         return Task.FromResult<ManagedDocumentDetail?>(null);
     }
 
+    public Task<IReadOnlyList<ManagedDocumentVersionSummary>> ListManagedDocumentVersionsAsync(string customerId, string brainId, string managedDocumentId, int limit = 50, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<ManagedDocumentVersionSummary>>(_versions
+            .Where(version => string.Equals(version.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(version.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(version.ManagedDocumentId, managedDocumentId, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(version => version.CreatedAt)
+            .Take(limit)
+            .Select(version => new ManagedDocumentVersionSummary(
+                version.ManagedDocumentVersionId,
+                version.ManagedDocumentId,
+                version.BrainId,
+                version.CustomerId,
+                version.Title,
+                version.Slug,
+                version.CanonicalPath,
+                version.Status,
+                version.ContentHash,
+                version.WordCount,
+                version.SnapshotKind,
+                version.SnapshotBy,
+                version.CreatedAt))
+            .ToList());
+
+    public Task<ManagedDocumentVersionDetail?> GetManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, CancellationToken cancellationToken = default)
+        => Task.FromResult<ManagedDocumentVersionDetail?>(_versions.FirstOrDefault(version =>
+            string.Equals(version.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(version.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(version.ManagedDocumentId, managedDocumentId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(version.ManagedDocumentVersionId, managedDocumentVersionId, StringComparison.OrdinalIgnoreCase)));
+
     public Task<ManagedDocumentDetail> CreateManagedDocumentAsync(ManagedDocumentCreateRequest request, CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;
@@ -507,6 +538,7 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
             false);
 
         _documents[managedDocumentId] = document;
+        AddVersion(document, "created", request.UserId);
         return Task.FromResult(document);
     }
 
@@ -536,6 +568,7 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
         };
 
         _documents[request.ManagedDocumentId] = updated;
+        AddVersion(updated, "updated", request.UserId);
         return Task.FromResult<ManagedDocumentDetail?>(updated);
     }
 
@@ -549,6 +582,8 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
             return Task.FromResult(false);
         }
 
+        AddVersion(existing, "deleted", userId);
+
         _documents[managedDocumentId] = existing with
         {
             IsDeleted = true,
@@ -557,6 +592,82 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
         };
 
         return Task.FromResult(true);
+    }
+
+    public Task<ManagedDocumentDetail?> RestoreManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, string userId, CancellationToken cancellationToken = default)
+    {
+        var version = _versions.FirstOrDefault(snapshot =>
+            string.Equals(snapshot.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(snapshot.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(snapshot.ManagedDocumentId, managedDocumentId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(snapshot.ManagedDocumentVersionId, managedDocumentVersionId, StringComparison.OrdinalIgnoreCase));
+
+        if (version is null)
+        {
+            return Task.FromResult<ManagedDocumentDetail?>(null);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (!_documents.TryGetValue(managedDocumentId, out var existing))
+        {
+            existing = new ManagedDocumentDetail(
+                managedDocumentId,
+                brainId,
+                customerId,
+                version.Title,
+                version.Slug,
+                version.CanonicalPath,
+                version.Content,
+                new Dictionary<string, string>(version.Frontmatter, StringComparer.OrdinalIgnoreCase),
+                version.ContentHash,
+                version.Status,
+                version.WordCount,
+                userId,
+                userId,
+                now,
+                now,
+                false);
+        }
+
+        var restored = existing with
+        {
+            Title = version.Title,
+            Slug = version.Slug,
+            CanonicalPath = version.CanonicalPath,
+            Content = version.Content,
+            Frontmatter = new Dictionary<string, string>(version.Frontmatter, StringComparer.OrdinalIgnoreCase),
+            ContentHash = version.ContentHash,
+            Status = version.Status,
+            WordCount = version.WordCount,
+            UpdatedBy = userId,
+            UpdatedAt = now,
+            IsDeleted = false,
+        };
+
+        _documents[managedDocumentId] = restored;
+        AddVersion(restored, "restored", userId);
+        return Task.FromResult<ManagedDocumentDetail?>(restored);
+    }
+
+    private void AddVersion(ManagedDocumentDetail document, string snapshotKind, string snapshotBy)
+    {
+        var timestamp = DateTimeOffset.UtcNow;
+        _versions.Add(new ManagedDocumentVersionDetail(
+            $"mdver-{_versions.Count + 1:D4}",
+            document.ManagedDocumentId,
+            document.BrainId,
+            document.CustomerId,
+            document.Title,
+            document.Slug,
+            document.CanonicalPath,
+            document.Content,
+            new Dictionary<string, string>(document.Frontmatter, StringComparer.OrdinalIgnoreCase),
+            document.ContentHash,
+            document.Status,
+            document.WordCount,
+            snapshotKind,
+            snapshotBy,
+            timestamp));
     }
 
     private static int CountWords(string content)

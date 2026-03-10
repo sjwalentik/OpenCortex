@@ -176,10 +176,12 @@ Current bootstrap slice:
 
 Current repo status:
 - tenant token routes are now implemented under `/tenant/tokens`
-- a separate `OpenCortex.Portal` project now exists for customer-facing token settings bootstrap
+- a separate `OpenCortex.Portal` project now exists for customer-facing workspace and token settings
 - the portal now owns a native browser auth bootstrap for Firebase email/password sign-in and refresh-token renewal
+- the portal now lists managed-content brains, filters managed documents, and supports create, edit, save, revert, and delete through the tenant API
+- the portal now renders a live Markdown preview and saved version history for managed-content documents, with restore wired through the tenant API
 - the portal still requires configured `Portal:ApiBaseUrl`, `Portal:Auth:FirebaseProjectId`, and `Portal:Auth:FirebaseApiKey`
-- MCP write tools now exist for managed-content brains, so token-based agents can create, update, delete, and reindex content before the browser UI lands
+- MCP write tools now exist for managed-content brains, so token-based agents and the browser portal now share the same managed-content CRUD surface
 
 See `docs/architecture/mcp-security.md` for full MCP token design.
 
@@ -195,7 +197,7 @@ See `docs/architecture/mcp-security.md` for full MCP token design.
 - runtime and storage: complete
 - OQL and MCP: complete (hardening in progress)
 - operator admin API and UI: complete
-- managed-content authoring surface: Phase 9 (next)
+- managed-content authoring surface: implemented (polish and collaboration features pending)
 - auth and tenant API: Phase 10
 - billing and quotas: Phase 11
 - secure MCP tokens: Phase 12
@@ -205,7 +207,6 @@ See `docs/architecture/mcp-security.md` for full MCP token design.
 - collaborative real-time editing
 - wiki-link autocomplete in editor
 - backlinks panel and graph navigation
-- document version history and restore
 - review and publishing workflows
 - customer-scoped branding
 - public read-only brain sharing

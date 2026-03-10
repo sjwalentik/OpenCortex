@@ -5,14 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenCortex Portal</title>
   <link rel="stylesheet" href="/app.css">
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 </head>
 <body>
   <div class="page-shell">
     <header class="hero">
       <div>
         <p class="eyebrow">OpenCortex Portal</p>
-        <h1>Token Settings</h1>
-        <p class="lede">Customer-facing MCP token management now lives in its own portal instead of the admin debug surface.</p>
+        <h1>Workspace</h1>
+        <p class="lede">Hosted customer workspace for managed-content browsing, token settings, and account-level MCP access.</p>
       </div>
     </header>
 
@@ -21,11 +23,11 @@
     <section class="notice-strip">
       <article class="notice-card">
         <p class="notice-label">Native Auth</p>
-        <p>The portal now owns browser sign-in for Firebase email/password accounts and refreshes sessions automatically.</p>
+        <p>The portal owns browser sign-in for Firebase email/password accounts and refreshes sessions automatically.</p>
       </article>
       <article class="notice-card">
-        <p class="notice-label">API Wiring</p>
-        <p>Set <code>Portal:ApiBaseUrl</code>, <code>Portal:Auth:FirebaseProjectId</code>, and <code>Portal:Auth:FirebaseApiKey</code> before using hosted customer settings.</p>
+        <p class="notice-label">Current Scope</p>
+        <p>This slice adds managed-content authoring, live preview, version history, and token settings in one customer workspace.</p>
       </article>
     </section>
 
@@ -33,7 +35,7 @@
       <div class="panel-header">
         <div>
           <h2>Browser Session</h2>
-          <p>Email/password sign-in is handled through the portal. Google sign-in is still pending.</p>
+          <p>Email/password sign-in is handled through the portal. Google sign-in uses the Firebase Authentication provider configuration for this project.</p>
         </div>
       </div>
       <form id="authForm" class="session-form">
@@ -52,6 +54,10 @@
           <button type="button" id="signOutButton" class="button button-danger">Sign Out</button>
         </div>
       </form>
+      <div class="google-auth-panel">
+        <p id="googleAuthStatus" class="summary-detail">Google sign-in is available when the Google provider is enabled in Firebase Authentication.</p>
+        <button type="button" id="googleSignInButton" class="button google-signin-button">Continue with Google</button>
+      </div>
       <p id="sessionStatus" class="session-status">No browser session loaded.</p>
     </section>
 
@@ -79,6 +85,135 @@
     </section>
 
     <main class="grid">
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <div>
+            <h2>Documents</h2>
+            <p>Browse managed-content brains and inspect indexed document content.</p>
+          </div>
+        </div>
+        <div class="browser-controls">
+          <label class="field">
+            <span>Brain</span>
+            <select id="brainSelect">
+              <option value="">Sign in to load brains</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Filter</span>
+            <input id="documentFilterInput" type="search" placeholder="Filter by title, slug, or path">
+          </label>
+          <div class="action-row">
+            <button type="button" id="createDocumentButton" class="button button-primary">New Document</button>
+            <button type="button" id="refreshDocumentsButton" class="button">Refresh Documents</button>
+          </div>
+        </div>
+        <div class="document-browser">
+          <section class="document-list-panel">
+            <div id="documentsEmptyState" class="empty-state">Sign in to load documents.</div>
+            <div id="documentsTableWrap" class="table-wrap hidden">
+              <table class="token-table" aria-label="Managed document list">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Status</th>
+                    <th>Slug</th>
+                    <th>Words</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody id="documentsTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="document-detail-panel">
+            <div class="panel-header compact-header">
+              <div>
+                <h3 id="documentDetailTitle">Document Editor</h3>
+                <p id="documentDetailMeta" class="summary-detail">Select a document to inspect or edit its content.</p>
+              </div>
+              <div class="action-row">
+                <button type="button" id="saveDocumentButton" class="button button-primary">Save Document</button>
+                <button type="button" id="revertDocumentButton" class="button">Revert</button>
+                <button type="button" id="deleteDocumentButton" class="button button-danger">Delete</button>
+              </div>
+            </div>
+            <p id="documentSaveStatus" class="document-save-status">Make a change to enable save.</p>
+            <div class="document-editor-grid">
+              <label class="field">
+                <span>Title</span>
+                <input id="documentTitleInput" type="text" placeholder="Untitled document">
+              </label>
+              <label class="field">
+                <span>Slug</span>
+                <input id="documentSlugInput" type="text" placeholder="optional-custom-slug">
+              </label>
+              <label class="field">
+                <span>Status</span>
+                <select id="documentStatusSelect">
+                  <option value="draft">draft</option>
+                  <option value="published">published</option>
+                  <option value="archived">archived</option>
+                </select>
+              </label>
+            </div>
+            <label class="field">
+              <span>Frontmatter</span>
+              <textarea id="documentFrontmatterInput" class="document-frontmatter" rows="6" placeholder="category: reference&#10;owner: steph"></textarea>
+            </label>
+            <label class="field">
+              <span>Markdown Content</span>
+              <textarea id="documentContentEditor" class="document-preview" placeholder="Write Markdown content here."></textarea>
+            </label>
+            <div class="panel-header compact-header">
+              <div>
+                <h3>Preview</h3>
+                <p class="summary-detail">Live browser rendering of the current Markdown draft.</p>
+              </div>
+            </div>
+            <div id="documentPreviewSurface" class="markdown-preview">Start typing to preview this document.</div>
+            <div class="panel-header compact-header">
+              <div>
+                <h3>Version History</h3>
+                <p class="summary-detail">Saved snapshots for this document. Restore any saved version back into the active document.</p>
+              </div>
+              <div class="action-row">
+                <button type="button" id="refreshVersionsButton" class="button">Refresh Versions</button>
+                <button type="button" id="restoreVersionButton" class="button">Restore Selected</button>
+              </div>
+            </div>
+            <div class="version-history-grid">
+              <section class="document-list-panel">
+                <div id="versionsEmptyState" class="empty-state">Select a document to load version history.</div>
+                <div id="versionsTableWrap" class="table-wrap hidden">
+                  <table class="token-table" aria-label="Managed document version list">
+                    <thead>
+                      <tr>
+                        <th>Saved</th>
+                        <th>Kind</th>
+                        <th>Status</th>
+                        <th>Words</th>
+                        <th>By</th>
+                      </tr>
+                    </thead>
+                    <tbody id="versionsTableBody"></tbody>
+                  </table>
+                </div>
+              </section>
+              <section class="document-detail-panel">
+                <div class="panel-header compact-header">
+                  <div>
+                    <h3>Version Preview</h3>
+                    <p id="versionDetailMeta" class="summary-detail">Select a saved version to inspect it.</p>
+                  </div>
+                </div>
+                <div id="versionPreviewSurface" class="markdown-preview">Select a saved version to preview it here.</div>
+              </section>
+            </div>
+          </section>
+        </div>
+      </section>
+
       <section class="panel">
         <div class="panel-header">
           <div>

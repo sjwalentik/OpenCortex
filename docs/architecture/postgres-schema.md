@@ -122,6 +122,13 @@ Indexes:
 - `vector`
 - `created_at`
 
+Current migration status:
+
+- `0001_initial_schema.sql` creates `vector` as `vector(1536)`
+- the application also persists the logical embedding size in `dimensions`
+- operators must keep the embedding provider output size, `OpenCortex:Embeddings:Dimensions`, and the `pgvector` column definition aligned
+- if an operator changes providers from a `1536`-dimension model to a `768`-dimension model, the `opencortex.embeddings.vector` column and vector index must be rebuilt to the new size before further indexing
+
 Indexes:
 
 - index on `brain_id`
@@ -220,6 +227,10 @@ Current repo status: migration `0003_billing_schema.sql` exists and creates thes
 Indexing pipeline reads from `managed_documents` instead of filesystem for managed-content brains. `source_root_id` is null on resulting `documents` records.
 
 Current repo status: migration `0004_managed_content.sql` exists and the API now has tenant-scoped list/get/create/update/delete routes backed directly by `managed_documents`. Save-triggered indexing currently runs inline as a full managed-brain rebuild; background queueing is still pending.
+
+**`managed_document_versions`** — immutable snapshots for managed-content document history and restore. Fields: `managed_document_version_id`, `managed_document_id`, `brain_id`, `customer_id`, `title`, `slug`, `content`, `frontmatter`, `content_hash`, `status`, `word_count`, `snapshot_kind` (`created`/`updated`/`deleted`/`restored`), `snapshot_by`, `created_at`.
+
+Current repo status: migration `0006_managed_document_versions.sql` exists and the tenant API now supports list/get/restore routes for managed-document versions. Every managed-content create, update, delete, and restore persists a snapshot row before the request returns.
 
 ### Migration 0005: API Tokens
 

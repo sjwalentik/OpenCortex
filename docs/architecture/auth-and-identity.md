@@ -27,9 +27,9 @@ Reasons:
 Current repo status:
 
 - `OpenCortex.Api` validates Firebase ID tokens server-side for all `/tenant/*` routes
-- `OpenCortex.Portal` now owns the first browser auth flow for hosted customer settings
-- the current portal auth slice uses Firebase email/password login plus refresh-token renewal through portal-backed REST endpoints
-- Google sign-in and a richer hosted account shell are still pending
+- `OpenCortex.Portal` now owns the browser auth flow for the hosted customer workspace
+- the current portal auth slice uses portal-backed Firebase email/password login, Firebase-native Google popup sign-in, and refresh-token renewal
+- a richer hosted account shell is still pending
 
 ## User Provisioning
 

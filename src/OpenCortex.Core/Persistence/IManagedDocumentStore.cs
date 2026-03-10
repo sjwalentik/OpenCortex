@@ -23,6 +23,20 @@ public interface IManagedDocumentStore
         string managedDocumentId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<ManagedDocumentVersionSummary>> ListManagedDocumentVersionsAsync(
+        string customerId,
+        string brainId,
+        string managedDocumentId,
+        int limit = 50,
+        CancellationToken cancellationToken = default);
+
+    Task<ManagedDocumentVersionDetail?> GetManagedDocumentVersionAsync(
+        string customerId,
+        string brainId,
+        string managedDocumentId,
+        string managedDocumentVersionId,
+        CancellationToken cancellationToken = default);
+
     Task<ManagedDocumentDetail> CreateManagedDocumentAsync(
         ManagedDocumentCreateRequest request,
         CancellationToken cancellationToken = default);
@@ -35,6 +49,14 @@ public interface IManagedDocumentStore
         string customerId,
         string brainId,
         string managedDocumentId,
+        string userId,
+        CancellationToken cancellationToken = default);
+
+    Task<ManagedDocumentDetail?> RestoreManagedDocumentVersionAsync(
+        string customerId,
+        string brainId,
+        string managedDocumentId,
+        string managedDocumentVersionId,
         string userId,
         CancellationToken cancellationToken = default);
 }
@@ -71,6 +93,38 @@ public sealed record ManagedDocumentSummary(
     int WordCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record ManagedDocumentVersionSummary(
+    string ManagedDocumentVersionId,
+    string ManagedDocumentId,
+    string BrainId,
+    string CustomerId,
+    string Title,
+    string Slug,
+    string CanonicalPath,
+    string Status,
+    string ContentHash,
+    int WordCount,
+    string SnapshotKind,
+    string SnapshotBy,
+    DateTimeOffset CreatedAt);
+
+public sealed record ManagedDocumentVersionDetail(
+    string ManagedDocumentVersionId,
+    string ManagedDocumentId,
+    string BrainId,
+    string CustomerId,
+    string Title,
+    string Slug,
+    string CanonicalPath,
+    string Content,
+    IReadOnlyDictionary<string, string> Frontmatter,
+    string ContentHash,
+    string Status,
+    int WordCount,
+    string SnapshotKind,
+    string SnapshotBy,
+    DateTimeOffset CreatedAt);
 
 public sealed record ManagedDocumentDetail(
     string ManagedDocumentId,

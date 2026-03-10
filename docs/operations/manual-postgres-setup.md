@@ -41,11 +41,18 @@ OpenAI-compatible setup:
 ```bash
 dotnet user-secrets set "OpenCortex:Embeddings:Provider" "openai-compatible" --project src/OpenCortex.Api
 dotnet user-secrets set "OpenCortex:Embeddings:Model" "text-embedding-3-small" --project src/OpenCortex.Api
+dotnet user-secrets set "OpenCortex:Embeddings:Dimensions" "1536" --project src/OpenCortex.Api
 dotnet user-secrets set "OpenCortex:Embeddings:Endpoint" "https://your-provider/v1/embeddings" --project src/OpenCortex.Api
 dotnet user-secrets set "OpenCortex:Embeddings:ApiKey" "your-secret" --project src/OpenCortex.Api
 ```
 
 Repeat the same settings for `src/OpenCortex.McpServer` and `src/OpenCortex.Workers`.
+
+Dimension alignment matters:
+
+- `infra/postgres/migrations/0001_initial_schema.sql` creates `opencortex.embeddings.vector` as `vector(1536)`
+- your configured `OpenCortex:Embeddings:Dimensions` must match the actual embedding size returned by your provider and the `pgvector` column dimension
+- if you use a `768`-dimension model, for example `nomic-embed-text`, alter the `opencortex.embeddings.vector` column to `vector(768)` and recreate `ix_embeddings_vector` before indexing content
 
 ## Applying Migrations
 
@@ -64,6 +71,11 @@ psql "postgresql://user:password@host:5432/opencortex" -v ON_ERROR_STOP=1 -f inf
 ## Current Migration Set
 
 - `infra/postgres/migrations/0001_initial_schema.sql`
+- `infra/postgres/migrations/0002_identity_and_tenancy.sql`
+- `infra/postgres/migrations/0003_billing_schema.sql`
+- `infra/postgres/migrations/0004_managed_content.sql`
+- `infra/postgres/migrations/0005_api_tokens.sql`
+- `infra/postgres/migrations/0006_managed_document_versions.sql`
 
 ## Notes
 

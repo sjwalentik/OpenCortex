@@ -99,7 +99,18 @@ public sealed class PostgresBrainCatalogStore : IBrainCatalogStore
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        var sql = $"""
+        var whereClause = string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(customerId))
+        {
+            whereClause = """
+                WHERE b.customer_id = @customer_id
+                  AND b.status != 'retired'
+                """;
+            command.Parameters.AddWithValue("customer_id", customerId);
+        }
+
+        command.CommandText = $"""
             SELECT
                 b.brain_id,
                 b.name,
@@ -109,23 +120,10 @@ public sealed class PostgresBrainCatalogStore : IBrainCatalogStore
                 COUNT(sr.source_root_id)::int AS source_root_count
             FROM {_connectionFactory.Schema}.brains b
             LEFT JOIN {_connectionFactory.Schema}.source_roots sr ON sr.brain_id = b.brain_id
-            """;
-
-        if (!string.IsNullOrWhiteSpace(customerId))
-        {
-            sql += """
-                WHERE b.customer_id = @customer_id
-                  AND b.status != 'retired'
-                """;
-            command.Parameters.AddWithValue("customer_id", customerId);
-        }
-
-        sql += """
+            {whereClause}
             GROUP BY b.brain_id, b.name, b.slug, b.mode, b.status
             ORDER BY b.name;
             """;
-
-        command.CommandText = sql;
 
         var brains = new List<BrainSummary>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

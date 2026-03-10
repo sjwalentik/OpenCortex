@@ -1,4 +1,5 @@
 using Npgsql;
+using PostgresException = Npgsql.PostgresException;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Tenancy;
 
@@ -17,6 +18,8 @@ public sealed class PostgresTenantCatalogStore : ITenantCatalogStore
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        await AcquireTenantBootstrapLockAsync(connection, transaction, profile.ExternalId, cancellationToken);
 
         var user = await UpsertUserAsync(connection, transaction, profile, cancellationToken);
         var customer = await EnsurePersonalCustomerAsync(connection, transaction, user, profile, cancellationToken);
@@ -225,44 +228,75 @@ public sealed class PostgresTenantCatalogStore : ITenantCatalogStore
         }
 
         var slugSeed = TenantSlugGenerator.CreateSlugSeed(profile.DisplayName, profile.Email, customerId);
-        var brainSlug = TenantSlugGenerator.BuildBrainSlug(slugSeed, customerId);
+        var brainName = TenantSlugGenerator.BuildBrainName(profile.DisplayName, profile.Email);
 
-        await using var insert = connection.CreateCommand();
-        insert.Transaction = transaction;
-        insert.CommandText = $"""
-            INSERT INTO {_connectionFactory.Schema}.brains (
-                brain_id,
-                customer_id,
-                slug,
-                name,
-                mode,
-                status,
-                description
-            )
-            VALUES (
-                @brain_id,
-                @customer_id,
-                @slug,
-                @name,
-                'managed-content',
-                'active',
-                @description
-            )
-            RETURNING brain_id, slug, name;
-            """;
-        insert.Parameters.AddWithValue("brain_id", CreateId("brain"));
-        insert.Parameters.AddWithValue("customer_id", customerId);
-        insert.Parameters.AddWithValue("slug", brainSlug);
-        insert.Parameters.AddWithValue("name", TenantSlugGenerator.BuildBrainName(profile.DisplayName, profile.Email));
-        insert.Parameters.AddWithValue("description", "Default personal brain provisioned for hosted SaaS users.");
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var brainId = CreateId("brain");
+            var brainSlug = TenantSlugGenerator.BuildBrainSlug(slugSeed, brainId);
 
-        await using var inserted = await insert.ExecuteReaderAsync(cancellationToken);
-        await inserted.ReadAsync(cancellationToken);
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = $"""
+                INSERT INTO {_connectionFactory.Schema}.brains (
+                    brain_id,
+                    customer_id,
+                    slug,
+                    name,
+                    mode,
+                    status,
+                    description
+                )
+                VALUES (
+                    @brain_id,
+                    @customer_id,
+                    @slug,
+                    @name,
+                    'managed-content',
+                    'active',
+                    @description
+                )
+                RETURNING brain_id, slug, name;
+                """;
+            insert.Parameters.AddWithValue("brain_id", brainId);
+            insert.Parameters.AddWithValue("customer_id", customerId);
+            insert.Parameters.AddWithValue("slug", brainSlug);
+            insert.Parameters.AddWithValue("name", brainName);
+            insert.Parameters.AddWithValue("description", "Default personal brain provisioned for hosted SaaS users.");
 
-        return new BrainRow(
-            inserted.GetString(0),
-            inserted.GetString(1),
-            inserted.GetString(2));
+            try
+            {
+                await using var inserted = await insert.ExecuteReaderAsync(cancellationToken);
+                await inserted.ReadAsync(cancellationToken);
+
+                return new BrainRow(
+                    inserted.GetString(0),
+                    inserted.GetString(1),
+                    inserted.GetString(2));
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505" && ex.ConstraintName == "brains_slug_key")
+            {
+                if (attempt == 4)
+                {
+                    throw;
+                }
+            }
+        }
+
+        throw new InvalidOperationException("Failed to provision a unique personal brain slug.");
+    }
+
+    private static async Task AcquireTenantBootstrapLockAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string externalId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT pg_advisory_xact_lock(hashtext(@lock_key), 0);";
+        command.Parameters.AddWithValue("lock_key", externalId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async Task<SubscriptionRow> EnsureSubscriptionAsync(

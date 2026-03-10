@@ -3,7 +3,7 @@ using OpenCortex.Core.Tenancy;
 
 namespace OpenCortex.Api;
 
-internal static class HostedTenantClaims
+public static class HostedTenantClaims
 {
     public static bool TryCreateProfile(ClaimsPrincipal principal, out AuthenticatedUserProfile? profile, out string? error)
     {

@@ -30,7 +30,12 @@ app.MapGet("/portal-config", (IConfiguration configuration) =>
     {
         apiBaseUrlConfigured = settings.HasApiBaseUrl,
         hostedAuthConfigured = settings.HasHostedAuth,
-        authMode = "firebase-email-password",
+        firebaseProjectId = settings.FirebaseProjectId,
+        firebaseApiKey = settings.FirebaseApiKey,
+        firebaseAuthDomain = settings.FirebaseAuthDomain,
+        authMode = settings.HasHostedAuth
+            ? "firebase-email-password-google"
+            : "disabled",
         notes = BuildPortalNotes(settings),
     });
 });
@@ -140,7 +145,7 @@ app.MapPost("/portal-auth/refresh", async (
     });
 });
 
-app.MapMethods("/portal-api/{**path}", ["GET", "POST", "DELETE"], async (
+app.MapMethods("/portal-api/{**path}", ["GET", "POST", "PUT", "DELETE"], async (
     string path,
     HttpContext httpContext,
     IHttpClientFactory httpClientFactory,
@@ -157,7 +162,7 @@ app.MapMethods("/portal-api/{**path}", ["GET", "POST", "DELETE"], async (
     {
         return Results.Problem(
             title: "Portal API base URL is not configured",
-            detail: "Set Portal:ApiBaseUrl for OpenCortex.Portal before using tenant token settings.",
+            detail: "Set Portal:ApiBaseUrl for OpenCortex.Portal before using tenant workspace routes.",
             statusCode: StatusCodes.Status500InternalServerError);
     }
 
@@ -200,8 +205,13 @@ static string[] BuildPortalNotes(PortalSettings settings)
     var notes = new List<string>();
 
     notes.Add(settings.HasHostedAuth
-        ? "Portal browser auth is configured for Firebase email/password sign-in."
+        ? "Portal browser auth is configured for Firebase email/password plus Firebase-native Google popup sign-in."
         : "Configure Portal:Auth:FirebaseProjectId and Portal:Auth:FirebaseApiKey to enable browser auth.");
+
+    if (settings.HasHostedAuth)
+    {
+        notes.Add("Enable the Google provider in Firebase Authentication to use Google sign-in in the portal.");
+    }
 
     notes.Add(settings.HasApiBaseUrl
         ? "Portal API proxy is configured."
@@ -283,11 +293,48 @@ static bool IsAllowedPortalApiPath(string path, string method)
 
     return normalizedMethod switch
     {
-        "GET" => normalizedPath is "tenant/me" or "tenant/billing/plan" or "tenant/tokens",
-        "POST" => normalizedPath is "tenant/tokens",
-        "DELETE" => normalizedPath.StartsWith("tenant/tokens/", StringComparison.OrdinalIgnoreCase),
+        "GET" =>
+            normalizedPath is "tenant/me" or "tenant/brains" or "tenant/billing/plan" or "tenant/tokens"
+            || normalizedPath.StartsWith("tenant/brains/", StringComparison.OrdinalIgnoreCase),
+        "POST" =>
+            normalizedPath is "tenant/tokens"
+            || IsTenantBrainDocumentCollectionPath(normalizedPath)
+            || IsTenantBrainDocumentRestorePath(normalizedPath),
+        "PUT" => IsTenantBrainDocumentItemPath(normalizedPath),
+        "DELETE" =>
+            normalizedPath.StartsWith("tenant/tokens/", StringComparison.OrdinalIgnoreCase)
+            || IsTenantBrainDocumentItemPath(normalizedPath),
         _ => false,
     };
+}
+
+static bool IsTenantBrainDocumentCollectionPath(string normalizedPath)
+{
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 4
+        && string.Equals(segments[0], "tenant", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "brains", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[3], "documents", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsTenantBrainDocumentItemPath(string normalizedPath)
+{
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 5
+        && string.Equals(segments[0], "tenant", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "brains", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[3], "documents", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsTenantBrainDocumentRestorePath(string normalizedPath)
+{
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 8
+        && string.Equals(segments[0], "tenant", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "brains", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[3], "documents", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[5], "versions", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[7], "restore", StringComparison.OrdinalIgnoreCase);
 }
 
 internal sealed record PortalLoginRequest(string Email, string Password);
@@ -322,6 +369,10 @@ internal sealed class PortalSettings
     public Uri? ApiBaseUri { get; init; }
     public string FirebaseProjectId { get; init; } = string.Empty;
     public string FirebaseApiKey { get; init; } = string.Empty;
+    public string FirebaseAuthDomain =>
+        string.IsNullOrWhiteSpace(FirebaseProjectId)
+            ? string.Empty
+            : $"{FirebaseProjectId}.firebaseapp.com";
 
     public bool HasApiBaseUrl => ApiBaseUri is not null;
     public bool HasHostedAuth =>

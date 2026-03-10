@@ -140,13 +140,15 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 - run reindex jobs and inspect status, health, and failures
 - per-brain health dashboard with health chips, run history, and error inspection
 
-### Phase 9: Authoring Surface (next)
+### Phase 9: Authoring Surface
 
 - browser Markdown editor using TipTap (WYSIWYG with source mode toggle)
 - managed-content document storage: create, edit, delete documents entirely in the browser
 - `managed_documents` table stores canonical content in Postgres
 - indexing triggered automatically on document save
 - document browser: list, filter, open documents within a brain
+- browser-side Markdown preview for the active draft
+- persisted version history and restore backed by `managed_document_versions`
 - import single `.md` file
 - export single document as `.md`
 
@@ -203,14 +205,16 @@ Current bootstrap status:
 
 - migration `0005_api_tokens.sql` added for `api_tokens`
 - tenant token routes now exist: `GET /tenant/tokens`, `POST /tenant/tokens`, and `DELETE /tenant/tokens/{apiTokenId}`
-- a separate `OpenCortex.Portal` project now exists for customer/user-facing token settings instead of extending the admin/debug console
-- the portal now owns a native Firebase email/password browser auth bootstrap with refresh-token renewal for token settings
+- a separate `OpenCortex.Portal` project now exists for the customer/user-facing workspace instead of extending the admin/debug console
+- the portal now owns a native Firebase email/password and Firebase-authenticated Google browser auth bootstrap with refresh-token renewal for workspace and token flows
+- the portal now lists managed-content brains, filters managed documents, and supports browser-side create/edit/save/delete through existing tenant APIs
+- managed-content authoring now includes browser-side Markdown preview plus persisted document version history and restore
 - MCP is now mapped explicitly at `/mcp` and requires bearer `oct_` tokens
 - MCP middleware resolves `customer_id`, updates `last_used_at`, and restricts all existing tools to customer-owned brains
 - `query_brain` now increments the shared monthly `mcp.queries.YYYY-MM` counter after token-based customer resolution
 - managed-content MCP write tools now exist: `create_document`, `update_document`, `delete_document`, and `reindex_brain`
 - MCP write tools now require both `mcp:write` scope and a plan with `mcpWrite = true`, and document create reuses the same effective `maxDocuments` enforcement as the tenant API
-- the portal still requires configured API/Firebase settings, and broader account UI, Google sign-in, and transport-level MCP `429` responses are still pending
+- the portal still requires configured API/Firebase settings, and broader account UI and transport-level MCP `429` responses are still pending
 
 See `docs/architecture/mcp-security.md` for full design.
 
@@ -251,7 +255,7 @@ See `docs/architecture/mcp-security.md` for full design.
 - [~] M6: MCP server exposes stable brain-scoped tools
 - [x] M7: admin API and UI support brain management, per-brain health, and CRUD
 - [x] M8: cluster infrastructure: dedicated pgvector Postgres, SMB NAS mount, app secrets
-- [ ] M9: authoring surface supports managed-content Markdown creation and editing in browser
+- [~] M9: authoring surface supports managed-content Markdown creation and editing in browser
 - [~] M10: auth and identity: Firebase Auth, user provisioning, tenant-scoped API
 - [~] M11: billing: Stripe subscriptions, free/pro quota enforcement
 - [~] M12: secure MCP: personal API tokens, scoped access, token management UI
@@ -261,7 +265,7 @@ See `docs/architecture/mcp-security.md` for full design.
 ## Near-Term Deliverables
 
 - harden MCP tool contracts around OQL execution, brain scoping, and result formatting
-- implement managed-content document CRUD and browser Markdown editor (Phase 9)
+- finish Phase 9 polish: richer Markdown editing, import/export, and authoring UX around the now-live browser authoring surface
 - add Firebase Auth JWT middleware and user/workspace provisioning (Phase 10)
 - finish Stripe billing state polish and complete hosted billing UX (Phase 11)
-- finish MCP token hardening, broaden the portal beyond token settings, add Google sign-in, and add transport-level MCP quota shaping (Phase 12)
+- finish MCP token hardening, broaden the portal beyond token settings, and add transport-level MCP quota shaping (Phase 12)

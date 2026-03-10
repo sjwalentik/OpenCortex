@@ -1223,6 +1223,83 @@ if (hostedAuthConfigured)
             : Results.Ok(document);
     });
 
+    tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}/versions", async (
+        string brainId,
+        string managedDocumentId,
+        int? limit,
+        System.Security.Claims.ClaimsPrincipal user,
+        ITenantCatalogStore catalogStore,
+        CancellationToken cancellationToken) =>
+    {
+        var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, brainId, cancellationToken);
+        if (brain is null)
+        {
+            return Results.NotFound(new { message = $"Brain '{brainId}' was not found in your workspace." });
+        }
+
+        if (!string.Equals(brain.Mode, "managed-content", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new { message = $"Brain '{brainId}' is not a managed-content brain." });
+        }
+
+        var versions = await managedDocumentStore.ListManagedDocumentVersionsAsync(
+            context.CustomerId,
+            brainId,
+            managedDocumentId,
+            limit.GetValueOrDefault(25),
+            cancellationToken);
+
+        return Results.Ok(new
+        {
+            managedDocumentId,
+            count = versions.Count,
+            versions,
+        });
+    });
+
+    tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}/versions/{managedDocumentVersionId}", async (
+        string brainId,
+        string managedDocumentId,
+        string managedDocumentVersionId,
+        System.Security.Claims.ClaimsPrincipal user,
+        ITenantCatalogStore catalogStore,
+        CancellationToken cancellationToken) =>
+    {
+        var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, brainId, cancellationToken);
+        if (brain is null)
+        {
+            return Results.NotFound(new { message = $"Brain '{brainId}' was not found in your workspace." });
+        }
+
+        if (!string.Equals(brain.Mode, "managed-content", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new { message = $"Brain '{brainId}' is not a managed-content brain." });
+        }
+
+        var version = await managedDocumentStore.GetManagedDocumentVersionAsync(
+            context.CustomerId,
+            brainId,
+            managedDocumentId,
+            managedDocumentVersionId,
+            cancellationToken);
+
+        return version is null
+            ? Results.NotFound(new { message = $"Version '{managedDocumentVersionId}' was not found for document '{managedDocumentId}'." })
+            : Results.Ok(version);
+    });
+
     tenantRoutes.MapPost("/brains/{brainId}/documents", async (
         string brainId,
         CreateManagedDocumentRequest request,
@@ -1403,6 +1480,62 @@ if (hostedAuthConfigured)
 
         return Results.Ok(new { message = $"Document '{managedDocumentId}' was deleted." });
     });
+
+    tenantRoutes.MapPost("/brains/{brainId}/documents/{managedDocumentId}/versions/{managedDocumentVersionId}/restore", async (
+        string brainId,
+        string managedDocumentId,
+        string managedDocumentVersionId,
+        System.Security.Claims.ClaimsPrincipal user,
+        ITenantCatalogStore catalogStore,
+        CancellationToken cancellationToken) =>
+    {
+        var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, brainId, cancellationToken);
+        if (brain is null)
+        {
+            return Results.NotFound(new { message = $"Brain '{brainId}' was not found in your workspace." });
+        }
+
+        if (!string.Equals(brain.Mode, "managed-content", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new { message = $"Brain '{brainId}' is not a managed-content brain." });
+        }
+
+        try
+        {
+            var restored = await managedDocumentStore.RestoreManagedDocumentVersionAsync(
+                context.CustomerId,
+                brainId,
+                managedDocumentId,
+                managedDocumentVersionId,
+                context.UserId,
+                cancellationToken);
+
+            if (restored is null)
+            {
+                return Results.NotFound(new { message = $"Version '{managedDocumentVersionId}' was not found for document '{managedDocumentId}'." });
+            }
+
+            await BuildManagedContentIndexingService().ReindexAsync(
+                context.CustomerId,
+                brainId,
+                "managed-document-restore",
+                cancellationToken);
+
+            await SyncActiveDocumentCounterAsync(context.CustomerId, cancellationToken);
+
+            return Results.Ok(restored);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Conflict(new { message = ex.Message });
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1500,3 +1633,6 @@ internal sealed record BrainHealthSummary(
     int RunningRunCount,
     int CompletedRunCount,
     string? LatestErrorSummary);
+
+// Enables WebApplicationFactory access for integration tests
+public partial class Program { }
