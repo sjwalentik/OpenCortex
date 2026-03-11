@@ -1,4 +1,6 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using OpenCortex.Api;
 using OpenCortex.Core.Configuration;
@@ -497,6 +499,45 @@ if (hostedAuthConfigured)
     builder.Services.AddSingleton<ITenantCatalogStore>(tenantCatalogStore);
 }
 
+// ---------------------------------------------------------------------------
+// Rate limiting policies
+// ---------------------------------------------------------------------------
+
+builder.Services.AddRateLimiter(rateLimiter =>
+{
+    rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    // Strict limit for token creation (5 per minute per user)
+    rateLimiter.AddPolicy("token-creation", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    // Moderate limit for tenant API (100 per minute per user)
+    rateLimiter.AddPolicy("tenant-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    // Webhook limit (50 per minute - defensive against replay)
+    rateLimiter.AddPolicy("webhooks", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 50,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+});
+
 var app = builder.Build();
 
 app.Use(async (context, next) =>
@@ -526,6 +567,8 @@ if (hostedAuthConfigured)
     app.UseAuthorization();
 }
 
+app.UseRateLimiter();
+
 app.MapGet("/", () => Results.Ok(new
 {
     service = "OpenCortex.Api",
@@ -548,9 +591,21 @@ app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken ca
             statusCode: StatusCodes.Status501NotImplemented);
     }
 
+    // Limit webhook payload to 64KB (Stripe payloads are typically small)
+    const int maxPayloadSize = 64 * 1024;
+    if (request.ContentLength > maxPayloadSize)
+    {
+        return Results.BadRequest(new { message = "Webhook payload too large." });
+    }
+
     request.EnableBuffering();
     using var reader = new StreamReader(request.Body, leaveOpen: true);
     var payload = await reader.ReadToEndAsync(cancellationToken);
+
+    if (payload.Length > maxPayloadSize)
+    {
+        return Results.BadRequest(new { message = "Webhook payload too large." });
+    }
     request.Body.Position = 0;
 
     var signature = request.Headers["Stripe-Signature"].ToString();
@@ -571,7 +626,7 @@ app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken ca
 
     await ProcessStripeEventAsync(stripeEvent, payload, cancellationToken);
     return Results.Ok(new { received = true, eventId = stripeEvent.Id, eventType = stripeEvent.Type });
-});
+}).RequireRateLimiting("webhooks");
 
 app.MapGet("/brains", async (CancellationToken cancellationToken) =>
 {
@@ -825,7 +880,8 @@ app.MapPost("/query", async (OqlQueryRequest request, CancellationToken cancella
 if (hostedAuthConfigured)
 {
     var tenantRoutes = app.MapGroup("/tenant")
-        .RequireAuthorization();
+        .RequireAuthorization()
+        .RequireRateLimiting("tenant-api");
 
     tenantRoutes.MapGet("/me", async (
         System.Security.Claims.ClaimsPrincipal user,
@@ -1094,7 +1150,7 @@ if (hostedAuthConfigured)
                 createdToken.CreatedAt,
                 token = generatedToken.RawToken,
             });
-    });
+    }).RequireRateLimiting("token-creation");
 
     tenantRoutes.MapDelete("/tokens/{apiTokenId}", async (
         string apiTokenId,
