@@ -13,8 +13,24 @@ public static partial class ManagedDocumentText
             return "document";
         }
 
-        var slug = NonSlugCharactersRegex().Replace(value.Trim().ToLowerInvariant(), "-").Trim('-');
-        return string.IsNullOrWhiteSpace(slug) ? "document" : slug;
+        var normalizedPath = value
+            .Trim()
+            .Replace('\\', '/');
+
+        if (normalizedPath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedPath = normalizedPath[..^3];
+        }
+
+        var segments = normalizedPath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeSlugSegment)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .ToArray();
+
+        return segments.Length == 0
+            ? "document"
+            : string.Join('/', segments);
     }
 
     public static string BuildCanonicalPath(string slug) => $"{NormalizeSlug(slug)}.md";
@@ -34,6 +50,9 @@ public static partial class ManagedDocumentText
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content ?? string.Empty));
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
+
+    private static string NormalizeSlugSegment(string value) =>
+        NonSlugCharactersRegex().Replace(value.Trim().ToLowerInvariant(), "-").Trim('-');
 
     [GeneratedRegex("[^a-z0-9]+", RegexOptions.Compiled)]
     private static partial Regex NonSlugCharactersRegex();

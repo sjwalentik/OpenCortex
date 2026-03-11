@@ -21,6 +21,22 @@ public sealed class ManagedDocumentTextTests
     }
 
     [Fact]
+    public void NormalizeSlug_PreservesDirectoryStructure()
+    {
+        var slug = ManagedDocumentText.NormalizeSlug(@"Projects\OpenCortex\Portal Notes");
+
+        Assert.Equal("projects/opencortex/portal-notes", slug);
+    }
+
+    [Fact]
+    public void NormalizeSlug_StripsMarkdownExtensionFromFilenamePaths()
+    {
+        var slug = ManagedDocumentText.NormalizeSlug("workspace/WhoAmI.md");
+
+        Assert.Equal("workspace/whoami", slug);
+    }
+
+    [Fact]
     public void CountWords_CountsNonWhitespaceTokens()
     {
         var count = ManagedDocumentText.CountWords("One two\nthree\tfour");

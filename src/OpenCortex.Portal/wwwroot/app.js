@@ -1830,15 +1830,15 @@ function deriveImportedDocumentTitle(content, frontmatter, fileName) {
 function deriveImportedDocumentSlug(frontmatter, title, fileName) {
   const explicitSlug = String(frontmatter.slug || '').trim();
   if (explicitSlug) {
-    return explicitSlug;
+    return normalizeDocumentPath(explicitSlug);
   }
 
-  const titleSlug = slugifyValue(title);
+  const titleSlug = normalizeDocumentPath(title);
   if (titleSlug) {
     return titleSlug;
   }
 
-  return slugifyValue(String(fileName || '').replace(/\.[^.]+$/, ''));
+  return normalizeDocumentPath(String(fileName || '').replace(/\.[^.]+$/, ''));
 }
 
 function buildMarkdownExport(draft) {
@@ -1857,15 +1857,29 @@ function buildMarkdownExport(draft) {
 }
 
 function buildDocumentExportFileName(draft) {
-  const slug = slugifyValue(draft.slug || draft.title || state.selectedDocument?.slug || state.selectedDocument?.title || 'document');
+  const slug = normalizeDocumentPath(draft.slug || draft.title || state.selectedDocument?.slug || state.selectedDocument?.title || 'document');
   return (slug || 'document') + '.md';
 }
 
-function slugifyValue(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+function normalizeDocumentPath(value) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\.md$/i, '');
+
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized
+    .split('/')
+    .map(segment => String(segment || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, ''))
+    .filter(Boolean)
+    .join('/');
 }
 
 function downloadTextFile(fileName, content, mimeType) {
@@ -2357,6 +2371,7 @@ function escapeHtml(value) {
 function escapeAttr(value) {
   return String(value ?? '').replace(/"/g, '&quot;');
 }
+
 
 
 
