@@ -142,11 +142,12 @@ Both models share the same runtime concepts, retrieval pipeline, and agent-facin
 
 ### Phase 9: Authoring Surface
 
-- browser Markdown editor using TipTap (WYSIWYG with source mode toggle)
+- browser Markdown editor with focused document editing, live preview, and version restore
 - managed-content document storage: create, edit, delete documents entirely in the browser
 - `managed_documents` table stores canonical content in Postgres
 - indexing triggered automatically on document save
 - document browser: list, filter, open documents within a brain
+- path-style document filenames such as `daily/2026-03-10` with folder-aware organization in the portal
 - browser-side Markdown preview for the active draft
 - persisted version history and restore backed by `managed_document_versions`
 - import single `.md` file
@@ -208,9 +209,11 @@ Current bootstrap status:
 - a separate `OpenCortex.Portal` project now exists for the customer/user-facing workspace instead of extending the admin/debug console
 - the portal now owns a native Firebase email/password and Firebase-authenticated Google browser auth bootstrap with refresh-token renewal for workspace and token flows
 - the portal now separates Sign In, Documents, Account, Usage, and Tools into distinct routed views
-- the portal now lists managed-content brains in a compact document rail and supports browser-side create/edit/save/delete through existing tenant APIs
+- the portal now keeps Documents as the main workspace view while Account, Usage, and Tools own the non-editor flows
+- the portal now lists managed-content brains in a compact folder-aware document rail and supports browser-side create/edit/save/delete through existing tenant APIs
 - managed-content authoring now includes browser-side Markdown preview plus persisted document version history and restore
 - the portal now supports single-document Markdown import/export for managed-content authoring
+- the portal now treats slugs as filename/path input so browser authoring, import/export, and saved document organization share the same path-style identity model
 - the portal now has a tenant-safe Tools page for OQL smoke tests, MCP setup guidance, and recent indexing activity for the active brain
 - MCP is now mapped explicitly at `/mcp` and requires bearer `oct_` tokens
 - MCP middleware resolves `customer_id`, updates `last_used_at`, and restricts all existing tools to customer-owned brains
@@ -269,7 +272,7 @@ See `docs/architecture/mcp-security.md` for full design.
 ## Near-Term Deliverables
 
 - harden MCP tool contracts around OQL execution, brain scoping, and result formatting
-- finish Phase 9 polish: richer Markdown editing, import/export, and authoring UX around the now-live browser authoring surface
+- finish Phase 9 polish: wiki-link navigation/search and richer authoring UX around the now-live browser authoring surface
 - add Firebase Auth JWT middleware and user/workspace provisioning (Phase 10)
 - finish Stripe billing state polish and complete hosted billing UX (Phase 11)
 - finish MCP token hardening, broaden the portal beyond token settings, and add transport-level MCP quota shaping (Phase 12)

@@ -79,6 +79,30 @@ Free plan tokens are issued with `mcp:read` only. Attempting a write operation w
 }
 ```
 
+For clients that support environment-variable interpolation, prefer storing the raw token in an environment variable and composing the `Bearer` header in config rather than committing the token itself.
+
+Example patterns used during local development:
+
+```toml
+[mcp_servers.OpenCortex]
+url = "http://localhost:5229/mcp"
+bearer_token_env_var = "OPENCORTEX_MCP_TOKEN"
+```
+
+```json
+{
+  "mcpServers": {
+    "OpenCortex-local": {
+      "type": "http",
+      "url": "http://localhost:5229/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OPENCORTEX_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
 3. MCP server middleware on every request:
    - extracts token from `Authorization: Bearer` header
    - computes `SHA-256(token)`
@@ -114,7 +138,8 @@ Current repo status:
 - tenant token management routes are live at `GET /tenant/tokens`, `POST /tenant/tokens`, and `DELETE /tenant/tokens/{apiTokenId}`
 - a separate `OpenCortex.Portal` project now hosts the first customer-facing workspace instead of reusing the admin/debug console
 - the portal now handles Firebase email/password browser sign-in and refreshes its session before calling the tenant token routes
-- the portal now covers token settings plus managed-content document browsing and browser-side CRUD, including Firebase-native Google sign-in when the Google provider is enabled in Firebase Authentication; broader account UI is still pending
+- the portal now covers token settings plus managed-content document browsing and browser-side CRUD, including Firebase-native Google sign-in when the Google provider is enabled in Firebase Authentication
+- the portal now separates Sign In, Documents, Account, Usage, and Tools so token creation and MCP setup guidance live outside the main editor page
 - raw tokens are generated with the `oct_` prefix, SHA-256 hashed before storage, and returned only once on creation
 - MCP is now mapped explicitly at `/mcp` and requires `Authorization: Bearer oct_...`
 - MCP middleware validates token hash, expiry, revocation, and `mcp:read`, updates `last_used_at`, and attaches resolved `customer_id` to the request

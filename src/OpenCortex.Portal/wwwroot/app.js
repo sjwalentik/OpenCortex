@@ -1508,25 +1508,88 @@ function renderDocuments() {
     return;
   }
 
+  const groups = buildDocumentDirectoryGroups(state.filteredDocuments);
+
   documentsEmptyState.classList.add('hidden');
   documentsTableWrap.classList.remove('hidden');
-  documentsTableBody.innerHTML = state.filteredDocuments.map(document => {
-    const isSelected = !state.isCreatingDocument
-      && document.managedDocumentId === state.selectedDocument?.managedDocumentId;
-    return `
-      <button type="button" class="document-list-item ${isSelected ? 'selected-row' : ''}" data-document-id="${escapeAttr(document.managedDocumentId)}">
-        <span class="document-list-title">${escapeHtml(document.title || '(untitled)')}</span>
-        <span class="document-list-meta">
-          <span>${escapeHtml(document.status || 'draft')}</span>
-          <span>${escapeHtml(document.slug || '')}</span>
-          <span>${escapeHtml(formatDateTime(document.updatedAt))}</span>
-        </span>
-      </button>`;
+  documentsTableBody.innerHTML = groups.map(group => {
+    const header = group.directoryPath
+      ? `<div class="document-folder-header" style="padding-left:${group.depth * 16}px">
+          <span class="document-folder-name">${escapeHtml(group.label)}</span>
+          <span class="document-folder-count">${escapeHtml(String(group.documents.length))}</span>
+        </div>`
+      : `<div class="document-folder-header root-folder">
+          <span class="document-folder-name">Root</span>
+          <span class="document-folder-count">${escapeHtml(String(group.documents.length))}</span>
+        </div>`;
+
+    const items = group.documents.map(document => {
+      const isSelected = !state.isCreatingDocument
+        && document.managedDocumentId === state.selectedDocument?.managedDocumentId;
+      const fileName = getDocumentFileName(document);
+      const pathDisplay = document.canonicalPath || `${document.slug || fileName}.md`;
+      return `
+        <button type="button" class="document-list-item ${isSelected ? 'selected-row' : ''}" data-document-id="${escapeAttr(document.managedDocumentId)}" style="margin-left:${group.depth * 16}px">
+          <span class="document-list-title">${escapeHtml(fileName)}</span>
+          <span class="document-list-subtitle">${escapeHtml(document.title || '(untitled)')}</span>
+          <span class="document-list-meta">
+            <span>${escapeHtml(document.status || 'draft')}</span>
+            <span>${escapeHtml(pathDisplay)}</span>
+            <span>${escapeHtml(formatDateTime(document.updatedAt))}</span>
+          </span>
+        </button>`;
+    }).join('');
+
+    return `<section class="document-folder-group">${header}${items}</section>`;
   }).join('');
 
   document.querySelectorAll('#documentsTableBody [data-document-id]').forEach(row => {
     row.addEventListener('click', () => onSelectDocument(row.dataset.documentId));
   });
+}
+
+function buildDocumentDirectoryGroups(documents) {
+  const groups = new Map();
+
+  for (const document of documents) {
+    const directoryPath = getDocumentDirectoryPath(document);
+    if (!groups.has(directoryPath)) {
+      groups.set(directoryPath, []);
+    }
+
+    groups.get(directoryPath).push(document);
+  }
+
+  return Array.from(groups.entries())
+    .sort((left, right) => {
+      if (!left[0]) {
+        return -1;
+      }
+
+      if (!right[0]) {
+        return 1;
+      }
+
+      return left[0].localeCompare(right[0]);
+    })
+    .map(([directoryPath, docs]) => ({
+      directoryPath,
+      depth: directoryPath ? directoryPath.split('/').length : 0,
+      label: directoryPath ? directoryPath.split('/').at(-1) : 'Root',
+      documents: docs.sort((left, right) => getDocumentFileName(left).localeCompare(getDocumentFileName(right))),
+    }));
+}
+
+function getDocumentDirectoryPath(document) {
+  const slug = String(document.slug || '').replace(/\\/g, '/');
+  const lastSlash = slug.lastIndexOf('/');
+  return lastSlash <= 0 ? '' : slug.slice(0, lastSlash);
+}
+
+function getDocumentFileName(document) {
+  const slug = String(document.slug || document.title || 'document').replace(/\\/g, '/');
+  const baseName = slug.split('/').at(-1) || 'document';
+  return baseName || 'document';
 }
 
 function renderDocumentEditor() {
@@ -2371,6 +2434,7 @@ function escapeHtml(value) {
 function escapeAttr(value) {
   return String(value ?? '').replace(/"/g, '&quot;');
 }
+
 
 
 

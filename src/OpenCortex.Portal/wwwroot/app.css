@@ -395,7 +395,38 @@ h3 {
 
 .document-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+}
+
+.document-folder-group {
+  display: grid;
+  gap: 8px;
+}
+
+.document-folder-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.document-folder-header.root-folder {
+  padding-left: 0;
+}
+
+.document-folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-folder-count {
+  font-size: 0.76rem;
 }
 
 .document-list-item {
@@ -419,8 +450,15 @@ h3 {
 
 .document-list-title {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   font-weight: 700;
+}
+
+.document-list-subtitle {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .document-list-meta {
@@ -753,4 +791,5 @@ h3 {
     flex-wrap: wrap;
   }
 }
+
 

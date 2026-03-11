@@ -6,7 +6,7 @@ It is designed to turn human-maintained knowledge into an agent-accessible memor
 
 ## Status
 
-OpenCortex is in planning and bootstrap mode.
+OpenCortex is in active implementation. The core runtime, admin surface, hosted auth, tenant APIs, managed-content storage, MCP token auth, and the first customer portal slices are all live in-repo.
 
 The primary product and architecture plan now lives in-repo under `docs/product/` and `docs/architecture/`.
 
@@ -99,7 +99,17 @@ During each index run, stale chunks, link edges, and embeddings for rescanned do
 
 The API now serves a lightweight admin console at `/admin/` for operator/debug workflows such as browsing brains, triggering indexing, inspecting run history/errors, and smoke-testing OQL queries from the browser.
 
-Customer-facing workspace flows now live in the separate `OpenCortex.Portal` project, which owns the hosted browser auth bootstrap for Firebase email/password sign-in plus managed-content document authoring, preview, version history, and MCP token settings.
+Customer-facing workspace flows now live in the separate `OpenCortex.Portal` project, which owns hosted Firebase sign-in plus managed-content document authoring, preview, version history, import/export, MCP token settings, and tenant-safe tooling pages.
+
+The current portal is split into dedicated views for:
+
+- Sign In
+- Documents
+- Account
+- Usage
+- Tools
+
+Managed-content authoring is now path-aware, so documents can use filenames like `daily/2026-03-10` and render in a folder-style document rail instead of a flat list.
 
 ## Licensing
 
