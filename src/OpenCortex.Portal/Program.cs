@@ -33,6 +33,8 @@ app.MapGet("/portal-config", (IConfiguration configuration) =>
         firebaseProjectId = settings.FirebaseProjectId,
         firebaseApiKey = settings.FirebaseApiKey,
         firebaseAuthDomain = settings.FirebaseAuthDomain,
+        mcpBaseUrl = settings.McpBaseUrl,
+        operatorConsoleUrl = settings.OperatorConsoleUrl,
         authMode = settings.HasHostedAuth
             ? "firebase-email-password-google"
             : "disabled",
@@ -217,6 +219,10 @@ static string[] BuildPortalNotes(PortalSettings settings)
         ? "Portal API proxy is configured."
         : "Configure Portal:ApiBaseUrl to point at OpenCortex.Api before using tenant routes.");
 
+    notes.Add(string.IsNullOrWhiteSpace(settings.McpBaseUrl)
+        ? "Configure Portal:McpBaseUrl to surface copy-ready MCP connection details in the tools page."
+        : "Portal tools page includes copy-ready MCP connection details.");
+
     return notes.ToArray();
 }
 
@@ -295,11 +301,14 @@ static bool IsAllowedPortalApiPath(string path, string method)
     {
         "GET" =>
             normalizedPath is "tenant/me" or "tenant/brains" or "tenant/billing/plan" or "tenant/tokens"
-            || normalizedPath.StartsWith("tenant/brains/", StringComparison.OrdinalIgnoreCase),
+            || normalizedPath.StartsWith("tenant/brains/", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedPath, "tenant/query", StringComparison.OrdinalIgnoreCase),
         "POST" =>
             normalizedPath is "tenant/tokens"
+            || string.Equals(normalizedPath, "tenant/query", StringComparison.OrdinalIgnoreCase)
             || IsTenantBrainDocumentCollectionPath(normalizedPath)
-            || IsTenantBrainDocumentRestorePath(normalizedPath),
+            || IsTenantBrainDocumentRestorePath(normalizedPath)
+            || IsTenantBrainReindexPath(normalizedPath),
         "PUT" => IsTenantBrainDocumentItemPath(normalizedPath),
         "DELETE" =>
             normalizedPath.StartsWith("tenant/tokens/", StringComparison.OrdinalIgnoreCase)
@@ -337,6 +346,15 @@ static bool IsTenantBrainDocumentRestorePath(string normalizedPath)
         && string.Equals(segments[7], "restore", StringComparison.OrdinalIgnoreCase);
 }
 
+static bool IsTenantBrainReindexPath(string normalizedPath)
+{
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 4
+        && string.Equals(segments[0], "tenant", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "brains", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[3], "reindex", StringComparison.OrdinalIgnoreCase);
+}
+
 internal sealed record PortalLoginRequest(string Email, string Password);
 
 internal sealed record PortalRefreshRequest(string RefreshToken);
@@ -367,8 +385,13 @@ internal sealed class PortalSettings
     public const string FirebaseHttpClientName = "portal-firebase";
 
     public Uri? ApiBaseUri { get; init; }
+    public string McpBaseUrl { get; init; } = string.Empty;
     public string FirebaseProjectId { get; init; } = string.Empty;
     public string FirebaseApiKey { get; init; } = string.Empty;
+    public string OperatorConsoleUrl =>
+        ApiBaseUri is null
+            ? string.Empty
+            : new Uri(ApiBaseUri, "admin/").ToString();
     public string FirebaseAuthDomain =>
         string.IsNullOrWhiteSpace(FirebaseProjectId)
             ? string.Empty
@@ -387,6 +410,7 @@ internal sealed class PortalSettings
         return new PortalSettings
         {
             ApiBaseUri = hasApiBaseUri ? apiBaseUri : null,
+            McpBaseUrl = configuration["Portal:McpBaseUrl"] ?? string.Empty,
             FirebaseProjectId = configuration["Portal:Auth:FirebaseProjectId"] ?? string.Empty,
             FirebaseApiKey = configuration["Portal:Auth:FirebaseApiKey"] ?? string.Empty,
         };

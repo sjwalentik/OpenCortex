@@ -128,6 +128,7 @@ Current migration status:
 - the application also persists the logical embedding size in `dimensions`
 - operators must keep the embedding provider output size, `OpenCortex:Embeddings:Dimensions`, and the `pgvector` column definition aligned
 - if an operator changes providers from a `1536`-dimension model to a `768`-dimension model, the `opencortex.embeddings.vector` column and vector index must be rebuilt to the new size before further indexing
+- the API, MCP server, and workers now validate `OpenCortex:Embeddings:Dimensions` against `opencortex.embeddings.vector` at startup and refuse to start if they do not match
 
 Indexes:
 

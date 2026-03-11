@@ -19,7 +19,27 @@ public class Worker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var options = _configuration.GetSection(OpenCortexOptions.SectionName).Get<OpenCortexOptions>() ?? new OpenCortexOptions();
-        var validationErrors = new OpenCortexOptionsValidator().Validate(options);
+        var validationErrors = new OpenCortexOptionsValidator().Validate(options).ToList();
+
+        var plans = new BrainIndexingPlanner().BuildPlans(options);
+        var connectionFactory = new PostgresConnectionFactory(new PostgresConnectionSettings
+        {
+            ConnectionString = options.Database.ConnectionString,
+        });
+
+        if (!string.Equals(_configuration["ASPNETCORE_ENVIRONMENT"], "Testing", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(_configuration["DOTNET_ENVIRONMENT"], "Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                validationErrors.AddRange(await new PostgresEmbeddingSchemaValidator(connectionFactory)
+                    .ValidateAsync(options.Embeddings.Dimensions, stoppingToken));
+            }
+            catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException or InvalidOperationException)
+            {
+                validationErrors.Add($"Postgres schema validation failed: {ex.Message}");
+            }
+        }
 
         if (validationErrors.Count > 0)
         {
@@ -31,11 +51,6 @@ public class Worker : BackgroundService
             return;
         }
 
-        var plans = new BrainIndexingPlanner().BuildPlans(options);
-        var connectionFactory = new PostgresConnectionFactory(new PostgresConnectionSettings
-        {
-            ConnectionString = options.Database.ConnectionString,
-        });
         var brainCatalogStore = new PostgresBrainCatalogStore(connectionFactory);
         var embeddingProvider = EmbeddingProviderFactory.Create(options.Embeddings);
         var coordinator = new BrainIngestionPersistenceCoordinator(

@@ -102,6 +102,7 @@ Important:
 - `infra/postgres/migrations/0001_initial_schema.sql` creates `opencortex.embeddings.vector` as `vector(1536)`
 - your effective `OpenCortex:Embeddings:Dimensions` must match that column size
 - the deterministic local default is `1536`
+- the API, MCP server, and workers now validate that schema at startup and fail immediately if it does not match the configured embedding dimensions
 - if you switch to an `openai-compatible` model that returns `768` dimensions, such as `nomic-embed-text`, you must either:
   - keep the database aligned at `1536` by using a `1536`-dimension model instead
   - or alter `opencortex.embeddings.vector` to `vector(768)` and rebuild the vector index before indexing managed content or filesystem brains
@@ -150,6 +151,7 @@ Point the portal at the API and give it the Firebase browser-auth settings:
 
 ```powershell
 dotnet user-secrets set "Portal:ApiBaseUrl" "https://localhost:7092/" --project src/OpenCortex.Portal
+dotnet user-secrets set "Portal:McpBaseUrl" "https://localhost:7081/mcp" --project src/OpenCortex.Portal
 dotnet user-secrets set "Portal:Auth:FirebaseProjectId" "your-firebase-project-id" --project src/OpenCortex.Portal
 dotnet user-secrets set "Portal:Auth:FirebaseApiKey" "your-firebase-web-api-key" --project src/OpenCortex.Portal
 ```
@@ -157,6 +159,7 @@ dotnet user-secrets set "Portal:Auth:FirebaseApiKey" "your-firebase-web-api-key"
 Notes:
 
 - `Portal:ApiBaseUrl` must point at `OpenCortex.Api`
+- `Portal:McpBaseUrl` is optional but recommended if you want the portal Tools page to show copy-ready MCP connection details
 - the portal uses Firebase email/password REST endpoints for login/register/refresh
 - Google sign-in in the portal uses the Firebase browser SDK and only requires that Google is enabled in Firebase Authentication for the same project
 - if these settings are missing, the portal UI may load but sign-in and tenant routes will not work

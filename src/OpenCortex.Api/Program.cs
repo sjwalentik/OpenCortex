@@ -21,11 +21,29 @@ using CheckoutSessionService = Stripe.Checkout.SessionService;
 var builder = WebApplication.CreateBuilder(args);
 
 var options = builder.Configuration.GetSection(OpenCortexOptions.SectionName).Get<OpenCortexOptions>() ?? new OpenCortexOptions();
-var validationErrors = new OpenCortexOptionsValidator().Validate(options);
+var validationErrors = new OpenCortexOptionsValidator().Validate(options).ToList();
 var connectionFactory = new PostgresConnectionFactory(new PostgresConnectionSettings
 {
     ConnectionString = options.Database.ConnectionString,
 });
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    try
+    {
+        validationErrors.AddRange(await new PostgresEmbeddingSchemaValidator(connectionFactory)
+            .ValidateAsync(options.Embeddings.Dimensions));
+    }
+    catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException or InvalidOperationException)
+    {
+        validationErrors.Add($"Postgres schema validation failed: {ex.Message}");
+    }
+}
+
+if (validationErrors.Count > 0)
+{
+    throw new InvalidOperationException(string.Join(Environment.NewLine, validationErrors));
+}
+
 var brainCatalogStore = new PostgresBrainCatalogStore(connectionFactory);
 var tenantCatalogStore = new PostgresTenantCatalogStore(connectionFactory);
 var managedDocumentStore = new PostgresManagedDocumentStore(connectionFactory);
@@ -1153,6 +1171,80 @@ if (hostedAuthConfigured)
         var executor = new OqlQueryExecutor(new PostgresDocumentQueryStore(connectionFactory, embeddingProvider));
         var result = await executor.ExecuteAsync(request.Oql, cancellationToken);
         return Results.Ok(result);
+    });
+
+    tenantRoutes.MapGet("/brains/{brainId}/indexing/runs", async (
+        string brainId,
+        int? limit,
+        System.Security.Claims.ClaimsPrincipal user,
+        ITenantCatalogStore catalogStore,
+        CancellationToken cancellationToken) =>
+    {
+        var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, brainId, cancellationToken);
+        if (brain is null)
+        {
+            return Results.NotFound(new { message = $"Brain '{brainId}' was not found in your workspace." });
+        }
+
+        var runs = await indexRunStore.ListIndexRunsAsync(brainId, Math.Clamp(limit ?? 10, 1, 50), cancellationToken);
+        return Results.Ok(new
+        {
+            brainId,
+            count = runs.Count,
+            runs,
+        });
+    });
+
+    tenantRoutes.MapPost("/brains/{brainId}/reindex", async (
+        string brainId,
+        System.Security.Claims.ClaimsPrincipal user,
+        ITenantCatalogStore catalogStore,
+        CancellationToken cancellationToken) =>
+    {
+        var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, brainId, cancellationToken);
+        if (brain is null)
+        {
+            return Results.NotFound(new { message = $"Brain '{brainId}' was not found in your workspace." });
+        }
+
+        if (!string.Equals(brain.Mode, "managed-content", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new { message = $"Brain '{brainId}' is not a managed-content brain." });
+        }
+
+        var billingState = await GetEffectiveBillingStateAsync(context.CustomerId, cancellationToken);
+        var plan = ResolvePlanEntitlements(billingState.PlanId);
+        if (!plan.McpWrite)
+        {
+            return Results.Json(
+                new
+                {
+                    type = "forbidden",
+                    title = "Plan does not allow managed-content reindex from tenant tools",
+                    detail = $"Your {billingState.PlanId} plan does not allow reindex operations from the tenant workspace.",
+                },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var run = await BuildManagedContentIndexingService().ReindexAsync(
+            context.CustomerId,
+            brainId,
+            "tenant-reindex",
+            cancellationToken);
+
+        return Results.Ok(run);
     });
 
     tenantRoutes.MapGet("/brains/{brainId}/documents", async (

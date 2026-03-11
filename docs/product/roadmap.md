@@ -207,14 +207,17 @@ Current bootstrap status:
 - tenant token routes now exist: `GET /tenant/tokens`, `POST /tenant/tokens`, and `DELETE /tenant/tokens/{apiTokenId}`
 - a separate `OpenCortex.Portal` project now exists for the customer/user-facing workspace instead of extending the admin/debug console
 - the portal now owns a native Firebase email/password and Firebase-authenticated Google browser auth bootstrap with refresh-token renewal for workspace and token flows
-- the portal now lists managed-content brains, filters managed documents, and supports browser-side create/edit/save/delete through existing tenant APIs
+- the portal now separates Sign In, Documents, Account, Usage, and Tools into distinct routed views
+- the portal now lists managed-content brains in a compact document rail and supports browser-side create/edit/save/delete through existing tenant APIs
 - managed-content authoring now includes browser-side Markdown preview plus persisted document version history and restore
+- the portal now has a tenant-safe Tools page for OQL smoke tests, MCP setup guidance, and recent indexing activity for the active brain
 - MCP is now mapped explicitly at `/mcp` and requires bearer `oct_` tokens
 - MCP middleware resolves `customer_id`, updates `last_used_at`, and restricts all existing tools to customer-owned brains
 - `query_brain` now increments the shared monthly `mcp.queries.YYYY-MM` counter after token-based customer resolution
 - managed-content MCP write tools now exist: `create_document`, `update_document`, `delete_document`, and `reindex_brain`
 - MCP write tools now require both `mcp:write` scope and a plan with `mcpWrite = true`, and document create reuses the same effective `maxDocuments` enforcement as the tenant API
 - the portal still requires configured API/Firebase settings, and broader account UI and transport-level MCP `429` responses are still pending
+- embedding-schema validation now hard-fails the API, MCP server, and workers when `OpenCortex:Embeddings:Dimensions` does not match the pgvector column definition
 
 See `docs/architecture/mcp-security.md` for full design.
 

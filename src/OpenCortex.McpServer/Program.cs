@@ -19,7 +19,7 @@ var options = builder.Configuration
     .GetSection(OpenCortexOptions.SectionName)
     .Get<OpenCortexOptions>() ?? new OpenCortexOptions();
 
-var validationErrors = new OpenCortexOptionsValidator().Validate(options);
+var validationErrors = new OpenCortexOptionsValidator().Validate(options).ToList();
 
 // ---------------------------------------------------------------------------
 // Infrastructure services
@@ -29,6 +29,24 @@ var connectionFactory = new PostgresConnectionFactory(new PostgresConnectionSett
 {
     ConnectionString = options.Database.ConnectionString,
 });
+
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    try
+    {
+        validationErrors.AddRange(await new PostgresEmbeddingSchemaValidator(connectionFactory)
+            .ValidateAsync(options.Embeddings.Dimensions));
+    }
+    catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException or InvalidOperationException)
+    {
+        validationErrors.Add($"Postgres schema validation failed: {ex.Message}");
+    }
+}
+
+if (validationErrors.Count > 0)
+{
+    throw new InvalidOperationException(string.Join(Environment.NewLine, validationErrors));
+}
 
 var embeddingProvider = EmbeddingProviderFactory.Create(options.Embeddings);
 

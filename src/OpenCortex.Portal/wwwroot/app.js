@@ -6,6 +6,7 @@ const sessionRefreshSkewMs = 5 * 60 * 1000;
 const state = {
   config: null,
   authSession: null,
+  activeView: 'signin',
   context: null,
   billing: null,
   brains: [],
@@ -22,8 +23,42 @@ const state = {
   firebaseAuthInitialized: false,
   firebaseAuth: null,
   tokens: [],
+  indexingRuns: [],
 };
 
+const viewMetadata = {
+  signin: {
+    title: 'Sign In',
+    lead: 'Authenticate into the hosted customer workspace.',
+  },
+  documents: {
+    title: 'Documents',
+    lead: 'Edit managed-content documents with preview and version history on a dedicated authoring page.',
+  },
+  account: {
+    title: 'Account',
+    lead: 'Manage browser session posture, tenant settings, and MCP personal tokens.',
+  },
+  usage: {
+    title: 'Usage',
+    lead: 'Inspect workspace context, quotas, and MCP usage from a dedicated operational view.',
+  },
+  tools: {
+    title: 'Tools',
+    lead: 'Smoke-test retrieval, copy MCP setup, and inspect indexing activity for the active brain.',
+  },
+};
+
+const pageTitle = document.getElementById('pageTitle');
+const pageLead = document.getElementById('pageLead');
+const sessionChip = document.getElementById('sessionChip');
+const appNav = document.getElementById('appNav');
+const navLinks = Array.from(document.querySelectorAll('.app-nav-link'));
+const signinView = document.getElementById('signinView');
+const documentsView = document.getElementById('documentsView');
+const accountView = document.getElementById('accountView');
+const usageView = document.getElementById('usageView');
+const toolsView = document.getElementById('toolsView');
 const statusBanner = document.getElementById('statusBanner');
 const authForm = document.getElementById('authForm');
 const authEmailInput = document.getElementById('authEmailInput');
@@ -34,6 +69,11 @@ const signOutButton = document.getElementById('signOutButton');
 const googleAuthStatus = document.getElementById('googleAuthStatus');
 const googleSignInButton = document.getElementById('googleSignInButton');
 const sessionStatus = document.getElementById('sessionStatus');
+const accountEmailValue = document.getElementById('accountEmailValue');
+const accountDisplayNameValue = document.getElementById('accountDisplayNameValue');
+const accountWorkspaceValue = document.getElementById('accountWorkspaceValue');
+const accountSessionExpiryValue = document.getElementById('accountSessionExpiryValue');
+const accountAuthStatus = document.getElementById('accountAuthStatus');
 const workspaceName = document.getElementById('workspaceName');
 const workspaceDetail = document.getElementById('workspaceDetail');
 const planName = document.getElementById('planName');
@@ -66,6 +106,7 @@ const restoreVersionButton = document.getElementById('restoreVersionButton');
 const versionsEmptyState = document.getElementById('versionsEmptyState');
 const versionsTableWrap = document.getElementById('versionsTableWrap');
 const versionsTableBody = document.getElementById('versionsTableBody');
+const versionPreviewPanel = document.getElementById('versionPreviewPanel');
 const versionDetailMeta = document.getElementById('versionDetailMeta');
 const versionPreviewSurface = document.getElementById('versionPreviewSurface');
 const createTokenForm = document.getElementById('createTokenForm');
@@ -78,6 +119,32 @@ const createdTokenValue = document.getElementById('createdTokenValue');
 const dismissCreatedTokenButton = document.getElementById('dismissCreatedTokenButton');
 const copyCreatedTokenButton = document.getElementById('copyCreatedTokenButton');
 const workspaceFacts = document.getElementById('workspaceFacts');
+const usageDocumentsValue = document.getElementById('usageDocumentsValue');
+const usageDocumentsDetail = document.getElementById('usageDocumentsDetail');
+const usageQueriesValue = document.getElementById('usageQueriesValue');
+const usageQueriesDetail = document.getElementById('usageQueriesDetail');
+const usageBrainValue = document.getElementById('usageBrainValue');
+const usageBrainDetail = document.getElementById('usageBrainDetail');
+const usageSessionValue = document.getElementById('usageSessionValue');
+const usageSessionDetail = document.getElementById('usageSessionDetail');
+const toolQueryForm = document.getElementById('toolQueryForm');
+const toolQueryBrain = document.getElementById('toolQueryBrain');
+const toolQuerySearch = document.getElementById('toolQuerySearch');
+const toolQueryRank = document.getElementById('toolQueryRank');
+const toolQueryWhere = document.getElementById('toolQueryWhere');
+const toolQueryLimit = document.getElementById('toolQueryLimit');
+const toolQueryOql = document.getElementById('toolQueryOql');
+const toolQueryResult = document.getElementById('toolQueryResult');
+const mcpUrlValue = document.getElementById('mcpUrlValue');
+const mcpTokenHintValue = document.getElementById('mcpTokenHintValue');
+const operatorConsoleValue = document.getElementById('operatorConsoleValue');
+const mcpConfigSnippet = document.getElementById('mcpConfigSnippet');
+const copyMcpConfigButton = document.getElementById('copyMcpConfigButton');
+const refreshIndexingButton = document.getElementById('refreshIndexingButton');
+const reindexBrainButton = document.getElementById('reindexBrainButton');
+const indexingRunsEmptyState = document.getElementById('indexingRunsEmptyState');
+const indexingRunsWrap = document.getElementById('indexingRunsWrap');
+const indexingRunsBody = document.getElementById('indexingRunsBody');
 const tokensEmptyState = document.getElementById('tokensEmptyState');
 const tokensTableWrap = document.getElementById('tokensTableWrap');
 const tokensTableBody = document.getElementById('tokensTableBody');
@@ -85,11 +152,13 @@ const tokensTableBody = document.getElementById('tokensTableBody');
 init();
 
 async function init() {
+  window.addEventListener('hashchange', onHashChange);
   authForm.addEventListener('submit', onSignIn);
   createAccountButton.addEventListener('click', onCreateAccount);
   refreshSessionButton.addEventListener('click', () => refreshWorkspace());
   signOutButton.addEventListener('click', onSignOut);
   googleSignInButton.addEventListener('click', onGoogleSignIn);
+  navLinks.forEach(link => link.addEventListener('click', onNavClick));
 
   brainSelect.addEventListener('change', onBrainChange);
   documentFilterInput.addEventListener('input', onDocumentFilterChange);
@@ -109,6 +178,15 @@ async function init() {
   createTokenForm.addEventListener('submit', onCreateToken);
   dismissCreatedTokenButton.addEventListener('click', dismissCreatedToken);
   copyCreatedTokenButton.addEventListener('click', onCopyCreatedToken);
+  toolQueryForm.addEventListener('submit', onToolQuerySubmit);
+  toolQueryBrain.addEventListener('change', onToolQueryBuilderChanged);
+  toolQuerySearch.addEventListener('input', onToolQueryBuilderChanged);
+  toolQueryRank.addEventListener('change', onToolQueryBuilderChanged);
+  toolQueryWhere.addEventListener('input', onToolQueryBuilderChanged);
+  toolQueryLimit.addEventListener('input', onToolQueryBuilderChanged);
+  copyMcpConfigButton.addEventListener('click', onCopyMcpConfig);
+  refreshIndexingButton.addEventListener('click', onRefreshIndexingRuns);
+  reindexBrainButton.addEventListener('click', onTriggerBrainReindex);
 
   state.authSession = loadStoredAuthSession();
   if (state.authSession?.email) {
@@ -120,8 +198,107 @@ async function init() {
   if (state.authSession) {
     await refreshWorkspace();
   } else {
+    syncActiveViewFromLocation({ replace: true });
     renderAll();
   }
+}
+
+function onNavClick(event) {
+  const view = event.currentTarget?.dataset?.view;
+  if (!view) {
+    return;
+  }
+
+  event.preventDefault();
+  requestNavigation(view);
+}
+
+function onHashChange() {
+  const nextView = resolveActiveViewFromLocation();
+  if (!canNavigateToView(nextView)) {
+    setLocationHash(state.activeView || resolveDefaultView(), true);
+    return;
+  }
+
+  state.activeView = nextView;
+  renderAll();
+}
+
+function requestNavigation(view) {
+  const normalized = normalizeView(view);
+  if (!canNavigateToView(normalized)) {
+    return;
+  }
+
+  state.activeView = normalized;
+  setLocationHash(normalized, false);
+  renderAll();
+}
+
+function syncActiveViewFromLocation(options = {}) {
+  const nextView = resolveActiveViewFromLocation();
+  state.activeView = nextView;
+  setLocationHash(nextView, options.replace ?? true);
+}
+
+function resolveActiveViewFromLocation() {
+  const requested = normalizeView(window.location.hash.replace(/^#/, ''));
+  if (!state.authSession) {
+    return 'signin';
+  }
+
+  if (requested === 'signin') {
+    return resolveDefaultView();
+  }
+
+  return requested;
+}
+
+function resolveDefaultView() {
+  return 'documents';
+}
+
+function normalizeView(value) {
+  const candidate = String(value || '').trim().toLowerCase();
+  switch (candidate) {
+    case 'documents':
+    case 'account':
+    case 'usage':
+    case 'tools':
+    case 'signin':
+      return candidate;
+    default:
+      return state.authSession ? resolveDefaultView() : 'signin';
+  }
+}
+
+function setLocationHash(view, replace) {
+  const targetHash = `#${view}`;
+  if (window.location.hash === targetHash) {
+    return;
+  }
+
+  if (replace) {
+    window.history.replaceState(null, '', targetHash);
+  } else {
+    window.location.hash = targetHash;
+  }
+}
+
+function canNavigateToView(view) {
+  if (state.activeView !== 'documents') {
+    return true;
+  }
+
+  if (view === 'documents') {
+    return true;
+  }
+
+  return confirmDiscardDocumentChanges(`Leave Documents and discard unsaved changes before opening ${capitalize(view)}?`);
+}
+
+function capitalize(value) {
+  return String(value || '').slice(0, 1).toUpperCase() + String(value || '').slice(1);
 }
 
 async function loadConfig() {
@@ -166,6 +343,7 @@ async function authenticate(url) {
     state.authSession = buildStoredAuthSession(session);
     saveStoredAuthSession(state.authSession);
     authPasswordInput.value = '';
+    syncActiveViewFromLocation({ replace: true });
     sessionStatus.textContent = `Signed in as ${state.authSession.email}. Loading workspace...`;
     await refreshWorkspace();
   } catch (error) {
@@ -179,6 +357,7 @@ async function refreshWorkspace() {
 
   try {
     const session = await ensureValidSession();
+    syncActiveViewFromLocation({ replace: true });
     sessionStatus.textContent = `Refreshing workspace for ${session.email}...`;
 
     const [context, billing, brainResponse, tokenResponse] = await Promise.all([
@@ -197,11 +376,13 @@ async function refreshWorkspace() {
     state.activeBrainId = selectActiveBrainId();
 
     await loadDocumentsForActiveBrain(session.idToken, { preserveSelection: true });
+    await loadIndexingRunsForActiveBrain(session.idToken);
     renderAll();
     sessionStatus.textContent = `Connected to ${context.customerName} as ${context.displayName}. Session expires ${formatRelativeExpiry(session.expiresAt)}.`;
     showBanner('info', 'Workspace data refreshed.');
   } catch (error) {
     clearWorkspaceState();
+    syncActiveViewFromLocation({ replace: true });
     renderAll();
     sessionStatus.textContent = 'No active authenticated browser session.';
     showBanner('error', error.message);
@@ -223,6 +404,7 @@ function clearWorkspaceState() {
   state.documentVersions = [];
   state.selectedVersion = null;
   state.tokens = [];
+  state.indexingRuns = [];
 }
 
 function renderGoogleAuthSurface(attempt = 0) {
@@ -300,6 +482,7 @@ async function onGoogleSignIn() {
     saveStoredAuthSession(state.authSession);
     authEmailInput.value = state.authSession.email || authEmailInput.value;
     authPasswordInput.value = '';
+    syncActiveViewFromLocation({ replace: true });
     sessionStatus.textContent = `Signed in with Google as ${state.authSession.email}. Loading workspace...`;
     await refreshWorkspace();
   } catch (error) {
@@ -361,6 +544,7 @@ async function onSignOut() {
   localStorage.removeItem(storageKey);
   state.authSession = null;
   clearWorkspaceState();
+  syncActiveViewFromLocation({ replace: true });
 
   try {
     if (state.firebaseAuth) {
@@ -389,6 +573,9 @@ async function onBrainChange() {
   }
 
   state.activeBrainId = nextBrainId;
+  clearDocumentSelectionState();
+  renderDocuments();
+  renderDocumentEditor();
   await refreshDocumentsForActiveBrain({ preserveSelection: false, skipDirtyCheck: true });
 }
 
@@ -431,8 +618,10 @@ async function refreshDocumentsForActiveBrain(options = {}) {
   try {
     const session = await ensureValidSession();
     await loadDocumentsForActiveBrain(session.idToken, options);
+    await loadIndexingRunsForActiveBrain(session.idToken);
     renderDocuments();
     renderDocumentEditor();
+    renderTools();
   } catch (error) {
     showBanner('error', error.message);
   }
@@ -440,13 +629,8 @@ async function refreshDocumentsForActiveBrain(options = {}) {
 
 async function loadDocumentsForActiveBrain(idToken, options = {}) {
   if (!state.activeBrainId) {
-    state.documents = [];
-    state.filteredDocuments = [];
-    state.selectedDocument = null;
-    state.documentDraft = buildEmptyDocumentDraft();
-    state.isCreatingDocument = false;
-    state.documentVersions = [];
-    state.selectedVersion = null;
+    clearDocumentSelectionState();
+    state.indexingRuns = [];
     return;
   }
 
@@ -466,15 +650,13 @@ async function loadDocumentsForActiveBrain(idToken, options = {}) {
   if (nextDocumentId) {
     await loadDocumentDetail(state.activeBrainId, nextDocumentId, idToken);
   } else {
-    state.selectedDocument = null;
-    state.documentDraft = buildEmptyDocumentDraft();
-    state.isCreatingDocument = false;
-    state.documentVersions = [];
-    state.selectedVersion = null;
+    clearDocumentSelectionState();
   }
 }
 
 async function loadDocumentDetail(brainId, managedDocumentId, idToken) {
+  state.documentVersions = [];
+  state.selectedVersion = null;
   const document = await portalFetch(
     `/portal-api/tenant/brains/${encodeURIComponent(brainId)}/documents/${encodeURIComponent(managedDocumentId)}`,
     idToken);
@@ -494,7 +676,7 @@ async function loadDocumentVersions(brainId, managedDocumentId, idToken, options
   const selectedVersionId = options.preserveSelection ? state.selectedVersion?.managedDocumentVersionId : null;
   const nextVersionId = selectedVersionId && state.documentVersions.some(version => version.managedDocumentVersionId === selectedVersionId)
     ? selectedVersionId
-    : state.documentVersions[0]?.managedDocumentVersionId;
+    : null;
 
   if (!nextVersionId) {
     state.selectedVersion = null;
@@ -521,6 +703,10 @@ async function onSelectDocument(managedDocumentId) {
 
   try {
     const session = await ensureValidSession();
+    state.documentVersions = [];
+    state.selectedVersion = null;
+    renderVersionHistory();
+    renderVersionPreview();
     await loadDocumentDetail(state.activeBrainId, managedDocumentId, session.idToken);
     renderDocuments();
     renderDocumentEditor();
@@ -799,14 +985,40 @@ async function onRevokeToken(apiTokenId) {
 }
 
 function renderAll() {
+  renderRouteState();
   renderSummary();
+  renderAccountSession();
   renderFacts();
+  renderUsageSummary();
   renderBrainOptions();
   renderDocuments();
   renderDocumentEditor();
   renderVersionHistory();
   renderVersionPreview();
+  renderTools();
   renderTokens();
+}
+
+function renderRouteState() {
+  const activeView = state.authSession ? normalizeView(state.activeView) : 'signin';
+  const meta = viewMetadata[activeView] || viewMetadata.signin;
+
+  pageTitle.textContent = meta.title;
+  pageLead.textContent = meta.lead;
+  sessionChip.textContent = !state.authSession
+    ? 'Signed out'
+    : (state.context?.customerName || state.authSession.email || 'Authenticated');
+
+  appNav.classList.toggle('hidden', !state.authSession);
+  signinView.classList.toggle('hidden', activeView !== 'signin');
+  documentsView.classList.toggle('hidden', activeView !== 'documents');
+  accountView.classList.toggle('hidden', activeView !== 'account');
+  usageView.classList.toggle('hidden', activeView !== 'usage');
+  toolsView.classList.toggle('hidden', activeView !== 'tools');
+
+  navLinks.forEach(link => {
+    link.classList.toggle('active', link.dataset.view === activeView);
+  });
 }
 
 function renderSummary() {
@@ -851,6 +1063,29 @@ function renderSummary() {
     : `${state.tokens.filter(token => !token.revokedAt).length} active token(s) in this workspace.`;
 }
 
+function renderAccountSession() {
+  if (!state.authSession) {
+    accountEmailValue.textContent = 'Not loaded';
+    accountDisplayNameValue.textContent = 'Not loaded';
+    accountWorkspaceValue.textContent = 'Not loaded';
+    accountSessionExpiryValue.textContent = 'Not loaded';
+    accountAuthStatus.textContent = 'Sign in to load tenant session details.';
+    refreshSessionButton.disabled = true;
+    signOutButton.disabled = true;
+    return;
+  }
+
+  accountEmailValue.textContent = state.context?.email || state.authSession.email || 'Not loaded';
+  accountDisplayNameValue.textContent = state.context?.displayName || state.authSession.displayName || 'Not loaded';
+  accountWorkspaceValue.textContent = state.context?.customerName || 'Loading workspace...';
+  accountSessionExpiryValue.textContent = formatDateTime(state.authSession.expiresAt);
+  accountAuthStatus.textContent = state.context
+    ? `Authenticated as ${state.context.displayName} in ${state.context.customerName}.`
+    : `Browser session established for ${state.authSession.email}.`;
+  refreshSessionButton.disabled = false;
+  signOutButton.disabled = false;
+}
+
 function renderFacts() {
   const facts = !state.context || !state.billing
     ? [
@@ -879,23 +1114,299 @@ function renderFacts() {
     </div>`).join('');
 }
 
+function renderUsageSummary() {
+  if (!state.authSession) {
+    usageDocumentsValue.textContent = 'Not loaded';
+    usageDocumentsDetail.textContent = 'Document usage appears after sign-in.';
+    usageQueriesValue.textContent = 'Not loaded';
+    usageQueriesDetail.textContent = 'MCP usage appears after sign-in.';
+    usageBrainValue.textContent = 'Not loaded';
+    usageBrainDetail.textContent = 'The selected managed-content brain appears after sign-in.';
+    usageSessionValue.textContent = 'Not loaded';
+    usageSessionDetail.textContent = 'Browser session expiry appears after sign-in.';
+    return;
+  }
+
+  if (!state.context || !state.billing) {
+    usageDocumentsValue.textContent = 'Loading';
+    usageDocumentsDetail.textContent = 'Fetching document quota...';
+    usageQueriesValue.textContent = 'Loading';
+    usageQueriesDetail.textContent = 'Fetching MCP usage...';
+    usageBrainValue.textContent = 'Loading';
+    usageBrainDetail.textContent = 'Fetching default brain...';
+    usageSessionValue.textContent = formatDateTime(state.authSession.expiresAt);
+    usageSessionDetail.textContent = 'Browser session is active.';
+    return;
+  }
+
+  usageDocumentsValue.textContent = `${state.billing.activeDocuments} / ${formatLimit(state.billing.maxDocuments)}`;
+  usageDocumentsDetail.textContent = 'Active managed-content documents in this workspace.';
+  usageQueriesValue.textContent = `${state.billing.mcpQueriesUsed} / ${formatLimit(state.billing.mcpQueriesPerMonth)}`;
+  usageQueriesDetail.textContent = 'Current monthly MCP query posture.';
+  usageBrainValue.textContent = state.context.brainName;
+  usageBrainDetail.textContent = state.activeBrainId
+    ? `Current selected brain ${state.activeBrainId}.`
+    : `Default brain ${state.context.brainId}.`;
+  usageSessionValue.textContent = formatDateTime(state.authSession.expiresAt);
+  usageSessionDetail.textContent = `Signed in as ${state.context.email}.`;
+}
+
+function renderTools() {
+  if (!state.authSession) {
+    toolQueryOql.value = '';
+    toolQueryResult.innerHTML = 'No smoke test executed yet.';
+  }
+
+  renderMcpTooling();
+  renderIndexingRuns();
+}
+
+function renderMcpTooling() {
+  const hasMcpUrl = Boolean(state.config?.mcpBaseUrl);
+  const operatorUrl = state.config?.operatorConsoleUrl || '';
+  const activeToken = state.tokens.find(token => !token.revokedAt) || null;
+
+  mcpUrlValue.textContent = hasMcpUrl ? state.config.mcpBaseUrl : 'Not configured';
+  mcpTokenHintValue.textContent = activeToken
+    ? `${activeToken.name} (${activeToken.tokenPrefix})`
+    : 'Create a token under Account.';
+  operatorConsoleValue.innerHTML = operatorUrl
+    ? `<a href="${escapeAttr(operatorUrl)}" target="_blank" rel="noreferrer">${escapeHtml(operatorUrl)}</a>`
+    : 'Not configured';
+  mcpConfigSnippet.value = buildMcpConfigSnippet();
+  copyMcpConfigButton.disabled = !state.authSession;
+}
+
+function buildMcpConfigSnippet() {
+  const url = state.config?.mcpBaseUrl || 'https://your-mcp-host/mcp';
+  const tokenName = state.tokens.find(token => !token.revokedAt)?.name || 'replace-with-token-name';
+
+  return JSON.stringify({
+    mcpServers: {
+      OpenCortex: {
+        url,
+        headers: {
+          Authorization: 'Bearer oct_replace_with_token',
+        },
+        notes: `Token label: ${tokenName}`,
+      },
+    },
+  }, null, 2);
+}
+
+async function onCopyMcpConfig() {
+  try {
+    await navigator.clipboard.writeText(mcpConfigSnippet.value);
+    showBanner('info', 'MCP configuration copied to clipboard.');
+  } catch {
+    showBanner('warn', 'Clipboard copy failed. Copy the MCP configuration manually.');
+  }
+}
+
+function onToolQueryBuilderChanged() {
+  toolQueryOql.value = buildToolOql();
+}
+
+function buildToolOql() {
+  const brainId = toolQueryBrain.value || state.activeBrainId || '';
+  if (!brainId) {
+    return '';
+  }
+
+  const lines = [`FROM brain("${brainId}")`];
+  const search = toolQuerySearch.value.trim();
+  const where = toolQueryWhere.value.trim();
+  const rank = toolQueryRank.value || 'hybrid';
+  const limit = toolQueryLimit.value || '5';
+
+  if (search) {
+    lines.push(`SEARCH "${search}"`);
+  }
+  if (where) {
+    lines.push(`WHERE ${where}`);
+  }
+  lines.push(`RANK ${rank}`);
+  lines.push(`LIMIT ${limit}`);
+  return lines.join('\n');
+}
+
+async function onToolQuerySubmit(event) {
+  event.preventDefault();
+
+  let session;
+  try {
+    session = await ensureValidSession();
+  } catch (error) {
+    showBanner('warn', error.message);
+    return;
+  }
+
+  const oql = buildToolOql();
+  if (!oql) {
+    showBanner('warn', 'Select a brain before running a smoke test.');
+    return;
+  }
+
+  try {
+    const result = await portalFetch('/portal-api/tenant/query', session.idToken, {
+      method: 'POST',
+      body: JSON.stringify({ oql }),
+    });
+    renderToolQueryResult(result);
+  } catch (error) {
+    toolQueryResult.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    showBanner('error', error.message);
+  }
+}
+
+function renderToolQueryResult(payload) {
+  toolQueryResult.innerHTML = '';
+
+  if (payload.summary) {
+    const summary = document.createElement('p');
+    summary.className = 'result-summary';
+    summary.textContent =
+      `${payload.summary.totalResults} result(s) | ` +
+      `keyword ${payload.summary.resultsWithKeywordSignal} | ` +
+      `semantic ${payload.summary.resultsWithSemanticSignal} | ` +
+      `graph ${payload.summary.resultsWithGraphSignal}`;
+    toolQueryResult.appendChild(summary);
+  }
+
+  if (!payload.results?.length) {
+    toolQueryResult.innerHTML += '<div class="empty-state">No results returned.</div>';
+    return;
+  }
+
+  for (const result of payload.results) {
+    const card = document.createElement('article');
+    card.className = 'result-card';
+    card.innerHTML = `
+      <strong>${escapeHtml(result.title || '(untitled)')}</strong>
+      <p>${escapeHtml(result.canonicalPath || '')}</p>
+      <p>${escapeHtml(result.snippet || '')}</p>
+    `;
+    toolQueryResult.appendChild(card);
+  }
+}
+
+async function loadIndexingRunsForActiveBrain(idToken) {
+  if (!state.activeBrainId) {
+    state.indexingRuns = [];
+    return;
+  }
+
+  const response = await portalFetch(
+    `/portal-api/tenant/brains/${encodeURIComponent(state.activeBrainId)}/indexing/runs?limit=10`,
+    idToken);
+
+  state.indexingRuns = response.runs || [];
+}
+
+function renderIndexingRuns() {
+  if (!state.authSession) {
+    indexingRunsEmptyState.textContent = 'Sign in to load indexing activity.';
+    indexingRunsEmptyState.classList.remove('hidden');
+    indexingRunsWrap.classList.add('hidden');
+    indexingRunsBody.innerHTML = '';
+    refreshIndexingButton.disabled = true;
+    reindexBrainButton.disabled = true;
+    return;
+  }
+
+  refreshIndexingButton.disabled = !state.activeBrainId;
+  reindexBrainButton.disabled = !state.activeBrainId || !Boolean(state.billing?.mcpWrite);
+
+  if (!state.activeBrainId) {
+    indexingRunsEmptyState.textContent = 'Select a brain to load indexing activity.';
+    indexingRunsEmptyState.classList.remove('hidden');
+    indexingRunsWrap.classList.add('hidden');
+    indexingRunsBody.innerHTML = '';
+    return;
+  }
+
+  if (state.indexingRuns.length === 0) {
+    indexingRunsEmptyState.textContent = 'No indexing runs recorded for this brain yet.';
+    indexingRunsEmptyState.classList.remove('hidden');
+    indexingRunsWrap.classList.add('hidden');
+    indexingRunsBody.innerHTML = '';
+    return;
+  }
+
+  indexingRunsEmptyState.classList.add('hidden');
+  indexingRunsWrap.classList.remove('hidden');
+  indexingRunsBody.innerHTML = state.indexingRuns.map(run => `
+    <tr>
+      <td>${escapeHtml(formatDateTime(run.startedAt))}</td>
+      <td>${escapeHtml(run.status || '')}</td>
+      <td>${escapeHtml(run.triggerType || '')}</td>
+      <td>${escapeHtml(String(run.documentsSeen ?? 0))}</td>
+      <td>${escapeHtml(String(run.documentsIndexed ?? 0))}</td>
+      <td>${escapeHtml(String(run.documentsFailed ?? 0))}</td>
+      <td>${escapeHtml(run.errorSummary || '')}</td>
+    </tr>`).join('');
+}
+
+async function onRefreshIndexingRuns() {
+  try {
+    const session = await ensureValidSession();
+    await loadIndexingRunsForActiveBrain(session.idToken);
+    renderTools();
+  } catch (error) {
+    showBanner('error', error.message);
+  }
+}
+
+async function onTriggerBrainReindex() {
+  if (!state.activeBrainId) {
+    showBanner('warn', 'Select a brain before triggering reindex.');
+    return;
+  }
+
+  if (!window.confirm('Trigger a full managed-content reindex for the active brain?')) {
+    return;
+  }
+
+  try {
+    const session = await ensureValidSession();
+    await portalFetch(
+      `/portal-api/tenant/brains/${encodeURIComponent(state.activeBrainId)}/reindex`,
+      session.idToken,
+      { method: 'POST' });
+    await loadIndexingRunsForActiveBrain(session.idToken);
+    renderTools();
+    showBanner('info', 'Reindex started for the active brain.');
+  } catch (error) {
+    showBanner('error', error.message);
+  }
+}
+
 function renderBrainOptions() {
   if (!state.authSession) {
     brainSelect.innerHTML = '<option value="">Sign in to load brains</option>';
     brainSelect.disabled = true;
+    toolQueryBrain.innerHTML = '<option value="">Sign in to load brains</option>';
+    toolQueryBrain.disabled = true;
     return;
   }
 
   if (state.brains.length === 0) {
     brainSelect.innerHTML = '<option value="">No managed-content brains found</option>';
     brainSelect.disabled = true;
+    toolQueryBrain.innerHTML = '<option value="">No managed-content brains found</option>';
+    toolQueryBrain.disabled = true;
     return;
   }
 
-  brainSelect.innerHTML = state.brains.map(brain =>
+  const options = state.brains.map(brain =>
     `<option value="${escapeAttr(brain.brainId)}">${escapeHtml(brain.name)} (${escapeHtml(brain.brainId)})</option>`).join('');
+  brainSelect.innerHTML = options;
   brainSelect.disabled = false;
   brainSelect.value = state.activeBrainId;
+  toolQueryBrain.innerHTML = options;
+  toolQueryBrain.disabled = false;
+  toolQueryBrain.value = state.activeBrainId;
+  onToolQueryBuilderChanged();
 }
 
 function renderDocuments() {
@@ -931,16 +1442,17 @@ function renderDocuments() {
     const isSelected = !state.isCreatingDocument
       && document.managedDocumentId === state.selectedDocument?.managedDocumentId;
     return `
-      <tr class="${isSelected ? 'selected-row' : ''}" data-document-id="${escapeAttr(document.managedDocumentId)}">
-        <td>${escapeHtml(document.title || '(untitled)')}</td>
-        <td>${escapeHtml(document.status || 'draft')}</td>
-        <td>${escapeHtml(document.slug || '')}</td>
-        <td>${escapeHtml(String(document.wordCount || 0))}</td>
-        <td>${escapeHtml(formatDateTime(document.updatedAt))}</td>
-      </tr>`;
+      <button type="button" class="document-list-item ${isSelected ? 'selected-row' : ''}" data-document-id="${escapeAttr(document.managedDocumentId)}">
+        <span class="document-list-title">${escapeHtml(document.title || '(untitled)')}</span>
+        <span class="document-list-meta">
+          <span>${escapeHtml(document.status || 'draft')}</span>
+          <span>${escapeHtml(document.slug || '')}</span>
+          <span>${escapeHtml(formatDateTime(document.updatedAt))}</span>
+        </span>
+      </button>`;
   }).join('');
 
-  document.querySelectorAll('#documentsTableBody tr[data-document-id]').forEach(row => {
+  document.querySelectorAll('#documentsTableBody [data-document-id]').forEach(row => {
     row.addEventListener('click', () => onSelectDocument(row.dataset.documentId));
   });
 }
@@ -1078,11 +1590,13 @@ function renderVersionHistory() {
 
 function renderVersionPreview() {
   if (!state.selectedVersion) {
+    versionPreviewPanel.classList.add('hidden');
     versionDetailMeta.textContent = 'Select a saved version to inspect it.';
     versionPreviewSurface.innerHTML = '<p>Select a saved version to preview it here.</p>';
     return;
   }
 
+  versionPreviewPanel.classList.remove('hidden');
   versionDetailMeta.textContent = `${state.selectedVersion.snapshotKind} | ${state.selectedVersion.status} | ${formatDateTime(state.selectedVersion.createdAt)} | ${state.selectedVersion.snapshotBy}`;
   versionPreviewSurface.innerHTML = renderMarkdown(state.selectedVersion.content || '');
 }
@@ -1140,6 +1654,18 @@ function buildEmptyDocumentDraft() {
     frontmatterText: '',
     content: '',
   };
+}
+
+function clearDocumentSelectionState() {
+  state.documents = [];
+  state.filteredDocuments = [];
+  state.selectedDocument = null;
+  state.documentDraft = buildEmptyDocumentDraft();
+  state.isCreatingDocument = false;
+  state.documentSaveState = 'idle';
+  state.documentSaveMessage = 'Make a change to enable save.';
+  state.documentVersions = [];
+  state.selectedVersion = null;
 }
 
 function buildDraftFromDocument(document) {

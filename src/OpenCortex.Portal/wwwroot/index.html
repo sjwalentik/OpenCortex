@@ -10,89 +10,91 @@
 </head>
 <body>
   <div class="page-shell">
-    <header class="hero">
-      <div>
+    <header class="site-header">
+      <div class="brand-block">
         <p class="eyebrow">OpenCortex Portal</p>
-        <h1>Workspace</h1>
-        <p class="lede">Hosted customer workspace for managed-content browsing, token settings, and account-level MCP access.</p>
+        <h1 id="pageTitle">Sign In</h1>
+        <p id="pageLead" class="lede">Authenticate into the hosted customer workspace.</p>
+      </div>
+      <div class="header-meta">
+        <div id="sessionChip" class="session-chip">Signed out</div>
+        <nav id="appNav" class="app-nav hidden" aria-label="Portal sections">
+          <a href="#documents" data-view="documents" class="app-nav-link">Documents</a>
+          <a href="#account" data-view="account" class="app-nav-link">Account</a>
+          <a href="#usage" data-view="usage" class="app-nav-link">Usage</a>
+          <a href="#tools" data-view="tools" class="app-nav-link">Tools</a>
+        </nav>
       </div>
     </header>
 
     <section id="statusBanner" class="status-banner hidden" aria-live="polite"></section>
 
-    <section class="notice-strip">
-      <article class="notice-card">
-        <p class="notice-label">Native Auth</p>
-        <p>The portal owns browser sign-in for Firebase email/password accounts and refreshes sessions automatically.</p>
-      </article>
-      <article class="notice-card">
-        <p class="notice-label">Current Scope</p>
-        <p>This slice adds managed-content authoring, live preview, version history, and token settings in one customer workspace.</p>
-      </article>
-    </section>
+    <main class="portal-main">
+      <section id="signinView" class="route-view">
+        <div class="auth-layout">
+          <section class="auth-intro panel">
+            <p class="eyebrow">Hosted Workspace</p>
+            <h2>Sign in once, then work from focused pages.</h2>
+            <p class="auth-copy">The portal now separates browser auth, document authoring, tenant settings, and usage posture into distinct views.</p>
+            <div class="feature-stack">
+              <article class="feature-card">
+                <p class="notice-label">Documents</p>
+                <p>Make the editor the primary workspace with versions and preview nearby instead of below unrelated account controls.</p>
+              </article>
+              <article class="feature-card">
+                <p class="notice-label">Account</p>
+                <p>Keep tenant settings, token issuance, and session controls together under a dedicated account surface.</p>
+              </article>
+              <article class="feature-card">
+                <p class="notice-label">Usage</p>
+                <p>Move workspace context, quota posture, and MCP usage into a page intended for operational visibility.</p>
+              </article>
+            </div>
+          </section>
 
-    <section class="panel">
-      <div class="panel-header">
-        <div>
-          <h2>Browser Session</h2>
-          <p>Email/password sign-in is handled through the portal. Google sign-in uses the Firebase Authentication provider configuration for this project.</p>
+          <section class="auth-panel panel">
+            <div class="panel-header">
+              <div>
+                <h2>Browser Session</h2>
+                <p>Firebase email/password and Google sign-in are both handled in the portal.</p>
+              </div>
+            </div>
+
+            <form id="authForm" class="session-form">
+              <label class="field">
+                <span>Email</span>
+                <input id="authEmailInput" type="email" autocomplete="email" placeholder="you@example.com" required>
+              </label>
+              <label class="field">
+                <span>Password</span>
+                <input id="authPasswordInput" type="password" autocomplete="current-password" placeholder="Password" required>
+              </label>
+              <div class="action-row">
+                <button type="submit" class="button button-primary">Sign In</button>
+                <button type="button" id="createAccountButton" class="button">Create Account</button>
+              </div>
+            </form>
+
+            <div class="google-auth-panel">
+              <p id="googleAuthStatus" class="summary-detail">Google sign-in is available when the Google provider is enabled in Firebase Authentication.</p>
+              <button type="button" id="googleSignInButton" class="button google-signin-button">Continue with Google</button>
+            </div>
+
+            <p id="sessionStatus" class="session-status">No browser session loaded.</p>
+          </section>
         </div>
-      </div>
-      <form id="authForm" class="session-form">
-        <label class="field">
-          <span>Email</span>
-          <input id="authEmailInput" type="email" autocomplete="email" placeholder="you@example.com" required>
-        </label>
-        <label class="field">
-          <span>Password</span>
-          <input id="authPasswordInput" type="password" autocomplete="current-password" placeholder="Password" required>
-        </label>
-        <div class="action-row">
-          <button type="submit" class="button button-primary">Sign In</button>
-          <button type="button" id="createAccountButton" class="button">Create Account</button>
-          <button type="button" id="refreshSessionButton" class="button">Refresh</button>
-          <button type="button" id="signOutButton" class="button button-danger">Sign Out</button>
-        </div>
-      </form>
-      <div class="google-auth-panel">
-        <p id="googleAuthStatus" class="summary-detail">Google sign-in is available when the Google provider is enabled in Firebase Authentication.</p>
-        <button type="button" id="googleSignInButton" class="button google-signin-button">Continue with Google</button>
-      </div>
-      <p id="sessionStatus" class="session-status">No browser session loaded.</p>
-    </section>
+      </section>
 
-    <section class="summary-grid">
-      <article class="summary-card">
-        <p class="summary-label">Workspace</p>
-        <strong id="workspaceName">Disconnected</strong>
-        <p id="workspaceDetail" class="summary-detail">Sign in to load workspace context.</p>
-      </article>
-      <article class="summary-card">
-        <p class="summary-label">Plan</p>
-        <strong id="planName">Unknown</strong>
-        <p id="planDetail" class="summary-detail">Billing state appears after sign-in.</p>
-      </article>
-      <article class="summary-card">
-        <p class="summary-label">MCP Access</p>
-        <strong id="mcpAccess">Unknown</strong>
-        <p id="mcpAccessDetail" class="summary-detail">Scope and write posture appear after sign-in.</p>
-      </article>
-      <article class="summary-card">
-        <p class="summary-label">Tokens</p>
-        <strong id="tokenCount">0</strong>
-        <p id="tokenCountDetail" class="summary-detail">No token records loaded.</p>
-      </article>
-    </section>
-
-    <main class="grid">
-      <section class="panel panel-wide">
-        <div class="panel-header">
+      <section id="documentsView" class="route-view hidden">
+        <div class="view-header">
           <div>
-            <h2>Documents</h2>
-            <p>Browse managed-content brains and inspect indexed document content.</p>
+            <p class="eyebrow">Documents</p>
+            <h2>Managed-content authoring</h2>
+            <p class="summary-detail">The document editor is the primary workspace. Pick a brain, select a document, edit, preview, and restore versions without account noise on the same page.</p>
           </div>
         </div>
-        <div class="browser-controls">
+
+        <div class="workspace-toolbar panel">
           <label class="field">
             <span>Brain</span>
             <select id="brainSelect">
@@ -103,30 +105,27 @@
             <span>Filter</span>
             <input id="documentFilterInput" type="search" placeholder="Filter by title, slug, or path">
           </label>
-          <div class="action-row">
+          <div class="action-row toolbar-actions">
             <button type="button" id="createDocumentButton" class="button button-primary">New Document</button>
             <button type="button" id="refreshDocumentsButton" class="button">Refresh Documents</button>
           </div>
         </div>
-        <div class="document-browser">
-          <section class="document-list-panel">
-            <div id="documentsEmptyState" class="empty-state">Sign in to load documents.</div>
-            <div id="documentsTableWrap" class="table-wrap hidden">
-              <table class="token-table" aria-label="Managed document list">
-                <thead>
-                  <tr>
-                    <th>Title</th>
-                    <th>Status</th>
-                    <th>Slug</th>
-                    <th>Words</th>
-                    <th>Updated</th>
-                  </tr>
-                </thead>
-                <tbody id="documentsTableBody"></tbody>
-              </table>
+
+        <div class="documents-layout">
+          <aside class="panel rail-panel">
+            <div class="panel-header compact-header">
+              <div>
+                <h3>Document List</h3>
+                <p class="summary-detail">Compact document rail for the active brain.</p>
+              </div>
             </div>
-          </section>
-          <section class="document-detail-panel">
+            <div id="documentsEmptyState" class="empty-state">Sign in to load documents.</div>
+            <div id="documentsTableWrap" class="hidden">
+              <div id="documentsTableBody" class="document-list" aria-label="Managed document list"></div>
+            </div>
+          </aside>
+
+          <section class="panel editor-panel">
             <div class="panel-header compact-header">
               <div>
                 <h3 id="documentDetailTitle">Document Editor</h3>
@@ -138,7 +137,9 @@
                 <button type="button" id="deleteDocumentButton" class="button button-danger">Delete</button>
               </div>
             </div>
+
             <p id="documentSaveStatus" class="document-save-status">Make a change to enable save.</p>
+
             <div class="document-editor-grid">
               <label class="field">
                 <span>Title</span>
@@ -157,14 +158,17 @@
                 </select>
               </label>
             </div>
+
             <label class="field">
               <span>Frontmatter</span>
               <textarea id="documentFrontmatterInput" class="document-frontmatter" rows="6" placeholder="category: reference&#10;owner: steph"></textarea>
             </label>
+
             <label class="field">
               <span>Markdown Content</span>
               <textarea id="documentContentEditor" class="document-preview" placeholder="Write Markdown content here."></textarea>
             </label>
+
             <div class="panel-header compact-header">
               <div>
                 <h3>Preview</h3>
@@ -172,135 +176,340 @@
               </div>
             </div>
             <div id="documentPreviewSurface" class="markdown-preview">Start typing to preview this document.</div>
-            <div class="panel-header compact-header">
-              <div>
-                <h3>Version History</h3>
-                <p class="summary-detail">Saved snapshots for this document. Restore any saved version back into the active document.</p>
-              </div>
-              <div class="action-row">
-                <button type="button" id="refreshVersionsButton" class="button">Refresh Versions</button>
-                <button type="button" id="restoreVersionButton" class="button">Restore Selected</button>
-              </div>
-            </div>
-            <div class="version-history-grid">
-              <section class="document-list-panel">
-                <div id="versionsEmptyState" class="empty-state">Select a document to load version history.</div>
-                <div id="versionsTableWrap" class="table-wrap hidden">
-                  <table class="token-table" aria-label="Managed document version list">
-                    <thead>
-                      <tr>
-                        <th>Saved</th>
-                        <th>Kind</th>
-                        <th>Status</th>
-                        <th>Words</th>
-                        <th>By</th>
-                      </tr>
-                    </thead>
-                    <tbody id="versionsTableBody"></tbody>
-                  </table>
+
+            <section class="version-section">
+              <div class="panel-header compact-header version-section-header">
+                <div>
+                  <h3>Version History</h3>
+                  <p class="summary-detail">Saved snapshots for the current document.</p>
                 </div>
-              </section>
-              <section class="document-detail-panel">
-                <div class="panel-header compact-header">
+                <div class="action-row">
+                  <button type="button" id="refreshVersionsButton" class="button">Refresh Versions</button>
+                  <button type="button" id="restoreVersionButton" class="button">Restore Selected</button>
+                </div>
+              </div>
+
+              <div id="versionsEmptyState" class="empty-state">Select a document to load version history.</div>
+              <div id="versionsTableWrap" class="table-wrap hidden">
+                <table class="token-table" aria-label="Managed document version list">
+                  <thead>
+                    <tr>
+                      <th>Saved</th>
+                      <th>Kind</th>
+                      <th>Status</th>
+                      <th>Words</th>
+                      <th>By</th>
+                    </tr>
+                  </thead>
+                  <tbody id="versionsTableBody"></tbody>
+                </table>
+              </div>
+
+              <section id="versionPreviewPanel" class="version-preview-panel hidden">
+                <div class="panel-header compact-header side-preview-header">
                   <div>
                     <h3>Version Preview</h3>
                     <p id="versionDetailMeta" class="summary-detail">Select a saved version to inspect it.</p>
                   </div>
                 </div>
-                <div id="versionPreviewSurface" class="markdown-preview">Select a saved version to preview it here.</div>
+                <div id="versionPreviewSurface" class="markdown-preview version-preview">Select a saved version to preview it here.</div>
               </section>
-            </div>
+            </section>
           </section>
+
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-header">
+      <section id="accountView" class="route-view hidden">
+        <div class="view-header">
           <div>
-            <h2>Create Token</h2>
-            <p>New token values are shown once. Save them before dismissing the panel.</p>
+            <p class="eyebrow">Account</p>
+            <h2>Tenant settings and token access</h2>
+            <p class="summary-detail">Session controls, workspace posture, and MCP personal tokens live together here instead of sharing the authoring surface.</p>
           </div>
         </div>
-        <form id="createTokenForm" class="create-token-form">
-          <label class="field">
-            <span>Name</span>
-            <input id="tokenNameInput" type="text" placeholder="Claude Desktop" required>
-          </label>
-          <label class="field">
-            <span>Expires At</span>
-            <input id="expiresAtInput" type="datetime-local">
-          </label>
-          <fieldset class="scope-fieldset">
-            <legend>Scopes</legend>
-            <label class="scope-option">
-              <input type="checkbox" checked disabled>
-              <span><code>mcp:read</code> is always included.</span>
-            </label>
-            <label class="scope-option">
-              <input id="scopeWriteInput" type="checkbox">
-              <span>Request <code>mcp:write</code> when the effective plan allows it.</span>
-            </label>
-          </fieldset>
-          <button type="submit" class="button button-primary">Create Token</button>
-        </form>
 
-        <section id="createdTokenPanel" class="created-token-panel hidden">
-          <div class="panel-header compact-header">
-            <div>
-              <h3>New Token</h3>
-              <p id="createdTokenMeta" class="summary-detail"></p>
+        <section class="summary-grid">
+          <article class="summary-card">
+            <p class="summary-label">Workspace</p>
+            <strong id="workspaceName">Disconnected</strong>
+            <p id="workspaceDetail" class="summary-detail">Sign in to load workspace context.</p>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">Plan</p>
+            <strong id="planName">Unknown</strong>
+            <p id="planDetail" class="summary-detail">Billing state appears after sign-in.</p>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">MCP Access</p>
+            <strong id="mcpAccess">Unknown</strong>
+            <p id="mcpAccessDetail" class="summary-detail">Scope and write posture appear after sign-in.</p>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">Tokens</p>
+            <strong id="tokenCount">0</strong>
+            <p id="tokenCountDetail" class="summary-detail">No token records loaded.</p>
+          </article>
+        </section>
+
+        <div class="account-layout">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Browser Session</h2>
+                <p>Authenticated session state and tenant identity for the current browser.</p>
+              </div>
             </div>
-            <button type="button" id="dismissCreatedTokenButton" class="button">Dismiss</button>
+
+            <dl class="facts-list compact-facts">
+              <div class="fact-row"><dt>Email</dt><dd id="accountEmailValue">Not loaded</dd></div>
+              <div class="fact-row"><dt>User</dt><dd id="accountDisplayNameValue">Not loaded</dd></div>
+              <div class="fact-row"><dt>Workspace</dt><dd id="accountWorkspaceValue">Not loaded</dd></div>
+              <div class="fact-row"><dt>Session Expires</dt><dd id="accountSessionExpiryValue">Not loaded</dd></div>
+            </dl>
+
+            <div class="google-auth-panel">
+              <p id="accountAuthStatus" class="summary-detail">Session details appear after sign-in.</p>
+              <div class="action-row">
+                <button type="button" id="refreshSessionButton" class="button">Refresh Session</button>
+                <button type="button" id="signOutButton" class="button button-danger">Sign Out</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Create Token</h2>
+                <p>New token values are shown once. Save them before dismissing the panel.</p>
+              </div>
+            </div>
+
+            <form id="createTokenForm" class="create-token-form">
+              <label class="field">
+                <span>Name</span>
+                <input id="tokenNameInput" type="text" placeholder="Claude Desktop" required>
+              </label>
+              <label class="field">
+                <span>Expires At</span>
+                <input id="expiresAtInput" type="datetime-local">
+              </label>
+              <fieldset class="scope-fieldset">
+                <legend>Scopes</legend>
+                <label class="scope-option">
+                  <input type="checkbox" checked disabled>
+                  <span><code>mcp:read</code> is always included.</span>
+                </label>
+                <label class="scope-option">
+                  <input id="scopeWriteInput" type="checkbox">
+                  <span>Request <code>mcp:write</code> when the effective plan allows it.</span>
+                </label>
+              </fieldset>
+              <button type="submit" class="button button-primary">Create Token</button>
+            </form>
+
+            <section id="createdTokenPanel" class="created-token-panel hidden">
+              <div class="panel-header compact-header">
+                <div>
+                  <h3>New Token</h3>
+                  <p id="createdTokenMeta" class="summary-detail"></p>
+                </div>
+                <button type="button" id="dismissCreatedTokenButton" class="button">Dismiss</button>
+              </div>
+              <textarea id="createdTokenValue" rows="4" readonly></textarea>
+              <div class="action-row">
+                <button type="button" id="copyCreatedTokenButton" class="button button-primary">Copy Token</button>
+              </div>
+            </section>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Issued Tokens</h2>
+              <p>Revocation is immediate. Expired or revoked entries stay visible for audit.</p>
+            </div>
           </div>
-          <textarea id="createdTokenValue" rows="4" readonly></textarea>
-          <div class="action-row">
-            <button type="button" id="copyCreatedTokenButton" class="button button-primary">Copy Token</button>
+          <div id="tokensEmptyState" class="empty-state">Sign in to load tokens.</div>
+          <div id="tokensTableWrap" class="table-wrap hidden">
+            <table class="token-table" aria-label="API token list">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Prefix</th>
+                  <th>Scopes</th>
+                  <th>Created</th>
+                  <th>Last Used</th>
+                  <th>Expires</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tokensTableBody"></tbody>
+            </table>
           </div>
         </section>
       </section>
 
-      <section class="panel">
-        <div class="panel-header">
+      <section id="usageView" class="route-view hidden">
+        <div class="view-header">
           <div>
-            <h2>Workspace Context</h2>
-            <p>Live tenant identity and quota posture for the authenticated browser session.</p>
+            <p class="eyebrow">Usage</p>
+            <h2>Workspace context and quota posture</h2>
+            <p class="summary-detail">Tenant identity, document quota, MCP usage, and the current default brain are tracked here for operational visibility.</p>
           </div>
         </div>
-        <dl id="workspaceFacts" class="facts-list">
-          <div class="fact-row"><dt>User</dt><dd>Not loaded</dd></div>
-          <div class="fact-row"><dt>Email</dt><dd>Not loaded</dd></div>
-          <div class="fact-row"><dt>Role</dt><dd>Not loaded</dd></div>
-          <div class="fact-row"><dt>Customer</dt><dd>Not loaded</dd></div>
-          <div class="fact-row"><dt>Brain</dt><dd>Not loaded</dd></div>
-          <div class="fact-row"><dt>Documents</dt><dd>Not loaded</dd></div>
-          <div class="fact-row"><dt>MCP Queries</dt><dd>Not loaded</dd></div>
-        </dl>
+
+        <section class="usage-grid">
+          <article class="summary-card">
+            <p class="summary-label">Documents</p>
+            <strong id="usageDocumentsValue">Not loaded</strong>
+            <p id="usageDocumentsDetail" class="summary-detail">Document usage appears after sign-in.</p>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">MCP Queries</p>
+            <strong id="usageQueriesValue">Not loaded</strong>
+            <p id="usageQueriesDetail" class="summary-detail">MCP usage appears after sign-in.</p>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">Default Brain</p>
+            <strong id="usageBrainValue">Not loaded</strong>
+            <p id="usageBrainDetail" class="summary-detail">The selected managed-content brain appears after sign-in.</p>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">Session</p>
+            <strong id="usageSessionValue">Not loaded</strong>
+            <p id="usageSessionDetail" class="summary-detail">Browser session expiry appears after sign-in.</p>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Workspace Context</h2>
+              <p>Live tenant identity and quota posture for the authenticated browser session.</p>
+            </div>
+          </div>
+          <dl id="workspaceFacts" class="facts-list">
+            <div class="fact-row"><dt>User</dt><dd>Not loaded</dd></div>
+            <div class="fact-row"><dt>Email</dt><dd>Not loaded</dd></div>
+            <div class="fact-row"><dt>Role</dt><dd>Not loaded</dd></div>
+            <div class="fact-row"><dt>Customer</dt><dd>Not loaded</dd></div>
+            <div class="fact-row"><dt>Brain</dt><dd>Not loaded</dd></div>
+            <div class="fact-row"><dt>Documents</dt><dd>Not loaded</dd></div>
+            <div class="fact-row"><dt>MCP Queries</dt><dd>Not loaded</dd></div>
+          </dl>
+        </section>
       </section>
 
-      <section class="panel panel-wide">
-        <div class="panel-header">
+      <section id="toolsView" class="route-view hidden">
+        <div class="view-header">
           <div>
-            <h2>Issued Tokens</h2>
-            <p>Revocation is immediate. Expired or revoked entries stay visible for audit.</p>
+            <p class="eyebrow">Tools</p>
+            <h2>Smoke test, MCP, and indexing</h2>
+            <p class="summary-detail">Customer-safe diagnostics inspired by the operator console: smoke-test OQL, copy MCP configuration, and inspect recent indexing activity for the active brain.</p>
           </div>
         </div>
-        <div id="tokensEmptyState" class="empty-state">Sign in to load tokens.</div>
-        <div id="tokensTableWrap" class="table-wrap hidden">
-          <table class="token-table" aria-label="API token list">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Prefix</th>
-                <th>Scopes</th>
-                <th>Created</th>
-                <th>Last Used</th>
-                <th>Expires</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="tokensTableBody"></tbody>
-          </table>
+
+        <div class="tools-layout">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>OQL Smoke Test</h2>
+                <p>Run a quick tenant-scoped retrieval query against the active brain.</p>
+              </div>
+            </div>
+
+            <form id="toolQueryForm" class="query-form">
+              <label class="field">
+                <span>Brain</span>
+                <select id="toolQueryBrain"></select>
+              </label>
+              <label class="field">
+                <span>Search</span>
+                <input id="toolQuerySearch" type="text" placeholder="identity">
+              </label>
+              <label class="field">
+                <span>Rank</span>
+                <select id="toolQueryRank">
+                  <option value="keyword">keyword</option>
+                  <option value="semantic">semantic</option>
+                  <option value="hybrid" selected>hybrid</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Where</span>
+                <input id="toolQueryWhere" type="text" placeholder="type = &quot;reference&quot;">
+              </label>
+              <label class="field">
+                <span>Limit</span>
+                <input id="toolQueryLimit" type="number" min="1" max="25" value="5">
+              </label>
+              <label class="field field-wide">
+                <span>Generated OQL</span>
+                <textarea id="toolQueryOql" rows="6" readonly></textarea>
+              </label>
+              <button type="submit" class="button button-primary">Run Smoke Test</button>
+            </form>
+
+            <div id="toolQueryResult" class="stack compact empty-state">No smoke test executed yet.</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>MCP Setup</h2>
+                <p>Copy-ready connection details for a desktop client or agent runtime.</p>
+              </div>
+            </div>
+
+            <div class="facts-list compact-facts">
+              <div class="fact-row"><dt>MCP URL</dt><dd id="mcpUrlValue">Not configured</dd></div>
+              <div class="fact-row"><dt>Recommended Token</dt><dd id="mcpTokenHintValue">Create a token under Account.</dd></div>
+              <div class="fact-row"><dt>Operator Console</dt><dd id="operatorConsoleValue">Not configured</dd></div>
+            </div>
+
+            <label class="field">
+              <span>Example Configuration</span>
+              <textarea id="mcpConfigSnippet" rows="10" readonly></textarea>
+            </label>
+
+            <div class="action-row">
+              <button type="button" id="copyMcpConfigButton" class="button button-primary">Copy MCP Config</button>
+            </div>
+          </section>
+
+          <section class="panel panel-wide">
+            <div class="panel-header">
+              <div>
+                <h2>Indexing Activity</h2>
+                <p>Recent runs for the active brain and a tenant-scoped reindex action.</p>
+              </div>
+              <div class="action-row">
+                <button type="button" id="refreshIndexingButton" class="button">Refresh Indexing</button>
+                <button type="button" id="reindexBrainButton" class="button button-primary">Run Reindex</button>
+              </div>
+            </div>
+
+            <div id="indexingRunsEmptyState" class="empty-state">Select a brain to load indexing activity.</div>
+            <div id="indexingRunsWrap" class="table-wrap hidden">
+              <table class="token-table" aria-label="Tenant indexing runs">
+                <thead>
+                  <tr>
+                    <th>Started</th>
+                    <th>Status</th>
+                    <th>Trigger</th>
+                    <th>Seen</th>
+                    <th>Indexed</th>
+                    <th>Failed</th>
+                    <th>Error</th>
+                  </tr>
+                </thead>
+                <tbody id="indexingRunsBody"></tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </section>
     </main>

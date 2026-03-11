@@ -125,6 +125,8 @@ Current bootstrap slice:
 - `GET /tenant/billing/plan` returns the resolved workspace's plan and document-usage summary
 - `GET /tenant/brains/{brainId}/documents` lists managed documents for a managed-content brain in the resolved workspace
 - `GET /tenant/brains/{brainId}/documents/{managedDocumentId}` returns a managed document only when it belongs to the resolved workspace and brain
+- `GET /tenant/brains/{brainId}/indexing/runs` returns recent index runs for the selected managed-content brain
+- `POST /tenant/brains/{brainId}/reindex` triggers a tenant-scoped full managed-content reindex for the selected brain
 - `POST /tenant/brains/{brainId}/documents` creates a managed document in Postgres for a managed-content brain
 - `PUT /tenant/brains/{brainId}/documents/{managedDocumentId}` updates a managed document in Postgres for a managed-content brain
 - `DELETE /tenant/brains/{brainId}/documents/{managedDocumentId}` soft-deletes a managed document for a managed-content brain
@@ -178,9 +180,11 @@ Current repo status:
 - tenant token routes are now implemented under `/tenant/tokens`
 - a separate `OpenCortex.Portal` project now exists for customer-facing workspace and token settings
 - the portal now owns a native browser auth bootstrap for Firebase email/password sign-in and refresh-token renewal
-- the portal now lists managed-content brains, filters managed documents, and supports create, edit, save, revert, and delete through the tenant API
+- the portal now separates Sign In, Documents, Account, Usage, and Tools into distinct routed views
+- the portal now lists managed-content brains in a compact rail, supports create, edit, save, revert, and delete through the tenant API, and keeps the editor as the main document surface
 - the portal now renders a live Markdown preview and saved version history for managed-content documents, with restore wired through the tenant API
-- the portal still requires configured `Portal:ApiBaseUrl`, `Portal:Auth:FirebaseProjectId`, and `Portal:Auth:FirebaseApiKey`
+- the portal now has a tenant-safe Tools page for OQL smoke tests, MCP setup snippets, and recent indexing activity for the active brain
+- the portal still requires configured `Portal:ApiBaseUrl`, `Portal:Auth:FirebaseProjectId`, and `Portal:Auth:FirebaseApiKey`; `Portal:McpBaseUrl` is optional but recommended for copy-ready MCP connection details
 - MCP write tools now exist for managed-content brains, so token-based agents and the browser portal now share the same managed-content CRUD surface
 
 See `docs/architecture/mcp-security.md` for full MCP token design.

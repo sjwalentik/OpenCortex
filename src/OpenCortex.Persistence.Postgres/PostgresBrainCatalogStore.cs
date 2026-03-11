@@ -385,7 +385,8 @@ public sealed class PostgresBrainCatalogStore : IBrainCatalogStore
             retireCommand.CommandText = $"""
                 UPDATE {_connectionFactory.Schema}.brains
                 SET status = 'retired', updated_at = now()
-                WHERE status != 'retired'
+                WHERE customer_id IS NULL
+                  AND status != 'retired'
                   AND brain_id NOT IN ({string.Join(", ", paramNames)});
                 """;
             for (var i = 0; i < currentBrainIds.Count; i++)
