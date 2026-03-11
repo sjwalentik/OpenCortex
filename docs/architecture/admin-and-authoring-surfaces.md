@@ -183,6 +183,7 @@ Current repo status:
 - the portal now separates Sign In, Documents, Account, Usage, and Tools into distinct routed views
 - the portal now lists managed-content brains in a compact rail, supports create, edit, save, revert, and delete through the tenant API, and keeps the editor as the main document surface
 - the portal now renders a live Markdown preview and saved version history for managed-content documents, with restore wired through the tenant API
+- the portal now supports single-document Markdown import into a new draft and client-side export of the active draft or saved document
 - the portal now has a tenant-safe Tools page for OQL smoke tests, MCP setup snippets, and recent indexing activity for the active brain
 - the portal still requires configured `Portal:ApiBaseUrl`, `Portal:Auth:FirebaseProjectId`, and `Portal:Auth:FirebaseApiKey`; `Portal:McpBaseUrl` is optional but recommended for copy-ready MCP connection details
 - MCP write tools now exist for managed-content brains, so token-based agents and the browser portal now share the same managed-content CRUD surface
@@ -214,3 +215,5 @@ See `docs/architecture/mcp-security.md` for full MCP token design.
 - review and publishing workflows
 - customer-scoped branding
 - public read-only brain sharing
+
+

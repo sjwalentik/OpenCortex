@@ -107,7 +107,9 @@
           </label>
           <div class="action-row toolbar-actions">
             <button type="button" id="createDocumentButton" class="button button-primary">New Document</button>
+            <button type="button" id="importDocumentButton" class="button">Import Markdown</button>
             <button type="button" id="refreshDocumentsButton" class="button">Refresh Documents</button>
+            <input id="importDocumentInput" type="file" accept=".md,text/markdown" class="hidden" aria-hidden="true">
           </div>
         </div>
 
@@ -133,6 +135,7 @@
               </div>
               <div class="action-row">
                 <button type="button" id="saveDocumentButton" class="button button-primary">Save Document</button>
+                <button type="button" id="exportDocumentButton" class="button">Export Markdown</button>
                 <button type="button" id="revertDocumentButton" class="button">Revert</button>
                 <button type="button" id="deleteDocumentButton" class="button button-danger">Delete</button>
               </div>
@@ -518,3 +521,6 @@
   <script src="/app.js"></script>
 </body>
 </html>
+
+
+

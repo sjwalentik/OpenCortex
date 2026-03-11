@@ -85,6 +85,8 @@ const tokenCountDetail = document.getElementById('tokenCountDetail');
 const brainSelect = document.getElementById('brainSelect');
 const documentFilterInput = document.getElementById('documentFilterInput');
 const createDocumentButton = document.getElementById('createDocumentButton');
+const importDocumentButton = document.getElementById('importDocumentButton');
+const importDocumentInput = document.getElementById('importDocumentInput');
 const refreshDocumentsButton = document.getElementById('refreshDocumentsButton');
 const documentsEmptyState = document.getElementById('documentsEmptyState');
 const documentsTableWrap = document.getElementById('documentsTableWrap');
@@ -99,6 +101,7 @@ const documentFrontmatterInput = document.getElementById('documentFrontmatterInp
 const documentContentEditor = document.getElementById('documentContentEditor');
 const documentPreviewSurface = document.getElementById('documentPreviewSurface');
 const saveDocumentButton = document.getElementById('saveDocumentButton');
+const exportDocumentButton = document.getElementById('exportDocumentButton');
 const revertDocumentButton = document.getElementById('revertDocumentButton');
 const deleteDocumentButton = document.getElementById('deleteDocumentButton');
 const refreshVersionsButton = document.getElementById('refreshVersionsButton');
@@ -163,8 +166,11 @@ async function init() {
   brainSelect.addEventListener('change', onBrainChange);
   documentFilterInput.addEventListener('input', onDocumentFilterChange);
   createDocumentButton.addEventListener('click', onCreateDocument);
+  importDocumentButton.addEventListener('click', onImportDocumentClick);
+  importDocumentInput.addEventListener('change', onImportDocumentSelected);
   refreshDocumentsButton.addEventListener('click', () => refreshDocumentsForActiveBrain());
   saveDocumentButton.addEventListener('click', onSaveDocument);
+  exportDocumentButton.addEventListener('click', onExportDocument);
   revertDocumentButton.addEventListener('click', onRevertDocument);
   deleteDocumentButton.addEventListener('click', onDeleteDocument);
   refreshVersionsButton.addEventListener('click', onRefreshVersions);
@@ -610,6 +616,50 @@ async function onCreateDocument() {
   showBanner('info', 'New document draft ready.');
 }
 
+function onImportDocumentClick() {
+  if (!state.authSession) {
+    showBanner('warn', 'Sign in before importing Markdown.');
+    return;
+  }
+
+  if (!state.activeBrainId) {
+    showBanner('warn', 'Select a managed-content brain before importing Markdown.');
+    return;
+  }
+
+  importDocumentInput.click();
+}
+
+async function onImportDocumentSelected(event) {
+  const [file] = Array.from(event.target.files || []);
+  importDocumentInput.value = '';
+
+  if (!file) {
+    return;
+  }
+
+  if (!confirmDiscardDocumentChanges(`Import '${file.name}' as a new draft and discard unsaved changes?`)) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    const imported = parseImportedMarkdown(text, file.name);
+
+    state.isCreatingDocument = true;
+    state.selectedDocument = null;
+    state.selectedVersion = null;
+    state.documentVersions = [];
+    state.documentDraft = imported;
+    setDocumentSaveFeedback('warn', `Imported '${file.name}'. Review the draft, then save it into this brain.`);
+    hideBanner();
+    renderAll();
+  } catch (error) {
+    setDocumentSaveFeedback('error', error.message);
+    showBanner('error', error.message);
+    renderAll();
+  }
+}
 async function refreshDocumentsForActiveBrain(options = {}) {
   if (!options.skipDirtyCheck && !confirmDiscardDocumentChanges('Refresh documents and discard unsaved changes?')) {
     return;
@@ -801,6 +851,28 @@ async function onSaveDocument() {
   } catch (error) {
     setDocumentSaveFeedback('error', error.message);
     renderDocumentActionState();
+    showBanner('error', error.message);
+  }
+}
+
+function onExportDocument() {
+  if (!state.authSession) {
+    showBanner('warn', 'Sign in before exporting Markdown.');
+    return;
+  }
+
+  const draft = normalizeDocumentDraft(readDocumentDraftFromInputsSafe());
+  if (!draft.title && !draft.content.trim()) {
+    showBanner('warn', 'Create or select a document before exporting Markdown.');
+    return;
+  }
+
+  try {
+    const markdown = buildMarkdownExport(draft);
+    const filename = buildDocumentExportFileName(draft);
+    downloadTextFile(filename, markdown, 'text/markdown;charset=utf-8');
+    showBanner('info', `Exported '${filename}'.`);
+  } catch (error) {
     showBanner('error', error.message);
   }
 }
@@ -1527,9 +1599,12 @@ function renderDocumentActionState() {
   const hasSelection = Boolean(state.selectedDocument?.managedDocumentId) && !state.isCreatingDocument;
   const dirty = hasUnsavedDocumentChanges();
   const saving = state.documentSaveState === 'saving';
+  const hasDraftContent = Boolean(documentTitleInput.value.trim() || documentContentEditor.value.trim());
 
   createDocumentButton.disabled = !hasSession || !hasBrain;
+  importDocumentButton.disabled = !hasSession || !hasBrain || saving;
   saveDocumentButton.disabled = !hasSession || !hasBrain || !dirty || saving;
+  exportDocumentButton.disabled = !hasSession || !hasBrain || !hasDraftContent || saving;
   revertDocumentButton.disabled = !hasSession || !hasBrain || !dirty || saving;
   deleteDocumentButton.disabled = !hasSelection || saving;
   refreshVersionsButton.disabled = !hasSelection || saving;
@@ -1700,6 +1775,109 @@ function buildDocumentPayload(draft) {
     content: draft.content || '',
     frontmatter: parseFrontmatterText(draft.frontmatterText),
   };
+}
+
+function parseImportedMarkdown(markdown, fileName) {
+  const normalized = String(markdown || '').replace(/\r\n/g, '\n');
+  let frontmatterText = '';
+  let content = normalized;
+
+  if (normalized.startsWith('---\n')) {
+    const endIndex = normalized.indexOf('\n---\n', 4);
+    const alternateEndIndex = normalized.indexOf('\n...\n', 4);
+    const closingIndex = endIndex >= 0 ? endIndex : alternateEndIndex;
+
+    if (closingIndex < 0) {
+      throw new Error('Imported Markdown frontmatter is missing a closing --- or ... line.');
+    }
+
+    frontmatterText = normalized.slice(4, closingIndex).trim();
+    content = normalized.slice(closingIndex + 5);
+  }
+
+  const parsedFrontmatter = parseFrontmatterText(frontmatterText);
+  const title = deriveImportedDocumentTitle(content, parsedFrontmatter, fileName);
+  const slug = deriveImportedDocumentSlug(parsedFrontmatter, title, fileName);
+
+  return {
+    title,
+    slug,
+    status: 'draft',
+    frontmatterText: serializeFrontmatter(parsedFrontmatter),
+    content: content.replace(/^\n+/, ''),
+  };
+}
+
+function deriveImportedDocumentTitle(content, frontmatter, fileName) {
+  const frontmatterTitle = String(frontmatter.title || '').trim();
+  if (frontmatterTitle) {
+    return frontmatterTitle;
+  }
+
+  const headingMatch = String(content || '').match(/^\s*#\s+(.+)$/m);
+  if (headingMatch?.[1]) {
+    return headingMatch[1].trim();
+  }
+
+  const fileStem = String(fileName || '').replace(/\.[^.]+$/, '').trim();
+  if (fileStem) {
+    return fileStem;
+  }
+
+  return 'Imported document';
+}
+
+function deriveImportedDocumentSlug(frontmatter, title, fileName) {
+  const explicitSlug = String(frontmatter.slug || '').trim();
+  if (explicitSlug) {
+    return explicitSlug;
+  }
+
+  const titleSlug = slugifyValue(title);
+  if (titleSlug) {
+    return titleSlug;
+  }
+
+  return slugifyValue(String(fileName || '').replace(/\.[^.]+$/, ''));
+}
+
+function buildMarkdownExport(draft) {
+  const frontmatter = parseFrontmatterText(draft.frontmatterText);
+  const parts = [];
+
+  if (Object.keys(frontmatter).length > 0) {
+    parts.push('---');
+    parts.push(serializeFrontmatter(frontmatter));
+    parts.push('---');
+    parts.push('');
+  }
+
+  parts.push(String(draft.content || '').replace(/\r\n/g, '\n').replace(/\s+$/, ''));
+  return parts.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
+function buildDocumentExportFileName(draft) {
+  const slug = slugifyValue(draft.slug || draft.title || state.selectedDocument?.slug || state.selectedDocument?.title || 'document');
+  return (slug || 'document') + '.md';
+}
+
+function slugifyValue(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function downloadTextFile(fileName, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function parseFrontmatterText(value) {
@@ -2179,3 +2357,9 @@ function escapeHtml(value) {
 function escapeAttr(value) {
   return String(value ?? '').replace(/"/g, '&quot;');
 }
+
+
+
+
+
+

@@ -210,6 +210,7 @@ Current bootstrap status:
 - the portal now separates Sign In, Documents, Account, Usage, and Tools into distinct routed views
 - the portal now lists managed-content brains in a compact document rail and supports browser-side create/edit/save/delete through existing tenant APIs
 - managed-content authoring now includes browser-side Markdown preview plus persisted document version history and restore
+- the portal now supports single-document Markdown import/export for managed-content authoring
 - the portal now has a tenant-safe Tools page for OQL smoke tests, MCP setup guidance, and recent indexing activity for the active brain
 - MCP is now mapped explicitly at `/mcp` and requires bearer `oct_` tokens
 - MCP middleware resolves `customer_id`, updates `last_used_at`, and restricts all existing tools to customer-owned brains
@@ -272,3 +273,5 @@ See `docs/architecture/mcp-security.md` for full design.
 - add Firebase Auth JWT middleware and user/workspace provisioning (Phase 10)
 - finish Stripe billing state polish and complete hosted billing UX (Phase 11)
 - finish MCP token hardening, broaden the portal beyond token settings, and add transport-level MCP quota shaping (Phase 12)
+
+

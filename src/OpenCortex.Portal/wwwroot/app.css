@@ -271,6 +271,7 @@ h3 {
 .toolbar-actions {
   justify-content: flex-end;
   align-items: end;
+  flex-wrap: wrap;
 }
 
 .status-banner {
@@ -752,3 +753,4 @@ h3 {
     flex-wrap: wrap;
   }
 }
+
