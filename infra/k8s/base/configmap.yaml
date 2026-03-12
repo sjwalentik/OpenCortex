@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencortex-config
+  namespace: opencortex
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/part-of: opencortex
+data:
+  # Embeddings configuration (non-secrets)
+  EMBEDDINGS_PROVIDER: "openai"
+  EMBEDDINGS_MODEL: "text-embedding-3-small"
+  EMBEDDINGS_DIMENSIONS: "1536"
+
+  # Feature flags
+  HOSTED_AUTH_ENABLED: "true"
+  STRIPE_ENABLED: "true"
+
+  # Internal service URLs
+  API_INTERNAL_URL: "http://opencortex-api:8080"
+  MCP_INTERNAL_URL: "http://opencortex-mcp:8080"

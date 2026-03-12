@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencortex-mcp
+  namespace: opencortex
+  labels:
+    app.kubernetes.io/name: opencortex-mcp
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/part-of: opencortex
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencortex-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opencortex-mcp
+        app.kubernetes.io/component: mcp
+        app.kubernetes.io/part-of: opencortex
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: mcp
+          image: opencortex/mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            # Database
+            - name: OpenCortex__Database__ConnectionString
+              valueFrom:
+                secretKeyRef:
+                  name: opencortex-db-credentials
+                  key: connection-string
+            # Embeddings
+            - name: OpenCortex__Embeddings__Provider
+              valueFrom:
+                configMapKeyRef:
+                  name: opencortex-config
+                  key: EMBEDDINGS_PROVIDER
+            - name: OpenCortex__Embeddings__Model
+              valueFrom:
+                configMapKeyRef:
+                  name: opencortex-config
+                  key: EMBEDDINGS_MODEL
+            - name: OpenCortex__Embeddings__Dimensions
+              valueFrom:
+                configMapKeyRef:
+                  name: opencortex-config
+                  key: EMBEDDINGS_DIMENSIONS
+            - name: OpenCortex__Embeddings__ApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: opencortex-embeddings
+                  key: api-key
+            - name: OpenCortex__Embeddings__Endpoint
+              valueFrom:
+                secretKeyRef:
+                  name: opencortex-embeddings
+                  key: endpoint
+                  optional: true
+            - name: OpenCortex__Mcp__ApiBaseUrl
+              valueFrom:
+                configMapKeyRef:
+                  name: opencortex-config
+                  key: API_INTERNAL_URL
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opencortex-mcp
+  namespace: opencortex
+  labels:
+    app.kubernetes.io/name: opencortex-mcp
+    app.kubernetes.io/component: mcp
+    app.kubernetes.io/part-of: opencortex
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: opencortex-mcp

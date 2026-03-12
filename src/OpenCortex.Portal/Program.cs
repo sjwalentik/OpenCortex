@@ -9,6 +9,36 @@ builder.Services.AddHttpClient(PortalSettings.FirebaseHttpClientName);
 
 var app = builder.Build();
 
+// ---------------------------------------------------------------------------
+// Security headers middleware
+// ---------------------------------------------------------------------------
+
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["X-XSS-Protection"] = "1; mode=block";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()";
+
+    // CSP for React SPA - allows inline scripts for Vite, Firebase, and API connections
+    var settings = PortalSettings.FromConfiguration(app.Configuration);
+    var apiOrigin = settings.ApiBaseUri?.GetLeftPart(UriPartial.Authority) ?? "";
+    var firebaseOrigins = "https://*.firebaseapp.com https://*.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com";
+
+    headers["Content-Security-Policy"] = string.Join("; ",
+        "default-src 'self'",
+        $"connect-src 'self' {apiOrigin} {firebaseOrigins}".Trim(),
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: https:",
+        "font-src 'self' data:",
+        "frame-ancestors 'none'");
+
+    await next();
+});
+
 app.UseStaticFiles();
 
 app.MapGet("/", () => Results.Redirect("/app/index.html"));

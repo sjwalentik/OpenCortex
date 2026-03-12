@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opencortex
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/instance: production
+    environment: production

@@ -1,0 +1,131 @@
+# GitHub Actions Self-Hosted Runner for OpenCortex
+#
+# Prerequisites:
+# 1. Install Actions Runner Controller (ARC):
+#    kubectl apply -f https://github.com/actions/actions-runner-controller/releases/download/gha-runner-scale-set-0.9.0/actions-runner-controller.yaml
+#
+# 2. Create a GitHub App or PAT with repo permissions
+#
+# 3. Create the runner secret:
+#    kubectl create secret generic github-runner-secret \
+#      --namespace=actions-runner-system \
+#      --from-literal=github_token=YOUR_PAT_OR_APP_TOKEN
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: actions-runner-system
+  labels:
+    app.kubernetes.io/name: github-runner
+    app.kubernetes.io/part-of: opencortex-ci
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-runner
+  namespace: actions-runner-system
+  labels:
+    app.kubernetes.io/name: github-runner
+
+---
+# RBAC for the runner to deploy to opencortex namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: github-runner-deploy
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "configmaps", "secrets", "services", "pods", "pods/exec", "pods/log"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: github-runner-deploy
+subjects:
+  - kind: ServiceAccount
+    name: github-runner
+    namespace: actions-runner-system
+roleRef:
+  kind: ClusterRole
+  name: github-runner-deploy
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Simple runner deployment (alternative to ARC)
+# Use this if you prefer a simpler setup without ARC
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-runner
+  namespace: actions-runner-system
+  labels:
+    app.kubernetes.io/name: github-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: github-runner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: github-runner
+    spec:
+      serviceAccountName: github-runner
+      containers:
+        - name: runner
+          image: ghcr.io/actions/actions-runner:latest
+          env:
+            - name: RUNNER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: RUNNER_REPO
+              value: "https://github.com/YOUR_ORG/OpenCortex"
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-runner-secret
+                  key: github_token
+            - name: RUNNER_LABELS
+              value: "self-hosted,linux,x64,opencortex"
+            - name: RUNNER_WORKDIR
+              value: "/tmp/runner"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              cd /home/runner
+              ./config.sh --url ${RUNNER_REPO} --token ${GITHUB_TOKEN} --name ${RUNNER_NAME} --labels ${RUNNER_LABELS} --work ${RUNNER_WORKDIR} --unattended --replace
+              ./run.sh
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+            - name: work
+              mountPath: /tmp/runner
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        - name: work
+          emptyDir: {}

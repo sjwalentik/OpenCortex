@@ -3,18 +3,124 @@ services:
     image: pgvector/pgvector:pg16
     container_name: opencortex-postgres
     environment:
-      POSTGRES_DB: opencortex
-      POSTGRES_USER: opencortex
-      POSTGRES_PASSWORD: opencortex
+      POSTGRES_DB: ${POSTGRES_DB:-opencortex}
+      POSTGRES_USER: ${POSTGRES_USER:-opencortex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - opencortex-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U opencortex -d opencortex"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opencortex} -d ${POSTGRES_DB:-opencortex}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - opencortex
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    container_name: opencortex-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      OpenCortex__Database__ConnectionString: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-opencortex};Username=${POSTGRES_USER:-opencortex};Password=${POSTGRES_PASSWORD}"
+      OpenCortex__Embeddings__Provider: ${EMBEDDINGS_PROVIDER:-deterministic}
+      OpenCortex__Embeddings__Model: ${EMBEDDINGS_MODEL:-opencortex-deterministic-v1}
+      OpenCortex__Embeddings__Dimensions: ${EMBEDDINGS_DIMENSIONS:-1536}
+      OpenCortex__Embeddings__ApiKey: ${EMBEDDINGS_API_KEY:-}
+      OpenCortex__Embeddings__Endpoint: ${EMBEDDINGS_ENDPOINT:-}
+      OpenCortex__HostedAuth__Enabled: ${HOSTED_AUTH_ENABLED:-false}
+      OpenCortex__HostedAuth__FirebaseProjectId: ${FIREBASE_PROJECT_ID:-}
+      OpenCortex__HostedAuth__AdminUserIds__0: ${ADMIN_USER_ID_0:-}
+      OpenCortex__HostedAuth__AdminEmailPatterns__0: ${ADMIN_EMAIL_PATTERN_0:-}
+      OpenCortex__Billing__Stripe__Enabled: ${STRIPE_ENABLED:-false}
+      OpenCortex__Billing__Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      OpenCortex__Billing__Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      OpenCortex__Billing__Stripe__AppBaseUrl: ${APP_BASE_URL:-}
+    ports:
+      - "${API_PORT:-5000}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - opencortex
+
+  portal:
+    build:
+      context: ../..
+      dockerfile: infra/docker/portal.Dockerfile
+    container_name: opencortex-portal
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      Portal__ApiBaseUrl: http://api:8080
+      Portal__McpBaseUrl: ${MCP_BASE_URL:-}
+      Portal__Auth__FirebaseProjectId: ${FIREBASE_PROJECT_ID:-}
+      Portal__Auth__FirebaseApiKey: ${FIREBASE_API_KEY:-}
+    ports:
+      - "${PORTAL_PORT:-5001}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - opencortex
+
+  mcp:
+    build:
+      context: ../..
+      dockerfile: infra/docker/mcp.Dockerfile
+    container_name: opencortex-mcp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      OpenCortex__Database__ConnectionString: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-opencortex};Username=${POSTGRES_USER:-opencortex};Password=${POSTGRES_PASSWORD}"
+      OpenCortex__Embeddings__Provider: ${EMBEDDINGS_PROVIDER:-deterministic}
+      OpenCortex__Embeddings__Model: ${EMBEDDINGS_MODEL:-opencortex-deterministic-v1}
+      OpenCortex__Embeddings__Dimensions: ${EMBEDDINGS_DIMENSIONS:-1536}
+      OpenCortex__Embeddings__ApiKey: ${EMBEDDINGS_API_KEY:-}
+      OpenCortex__Embeddings__Endpoint: ${EMBEDDINGS_ENDPOINT:-}
+      OpenCortex__Mcp__ApiBaseUrl: http://api:8080
+    ports:
+      - "${MCP_PORT:-5002}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - opencortex
+
+  workers:
+    build:
+      context: ../..
+      dockerfile: infra/docker/workers.Dockerfile
+    container_name: opencortex-workers
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      OpenCortex__Database__ConnectionString: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-opencortex};Username=${POSTGRES_USER:-opencortex};Password=${POSTGRES_PASSWORD}"
+      OpenCortex__Embeddings__Provider: ${EMBEDDINGS_PROVIDER:-deterministic}
+      OpenCortex__Embeddings__Model: ${EMBEDDINGS_MODEL:-opencortex-deterministic-v1}
+      OpenCortex__Embeddings__Dimensions: ${EMBEDDINGS_DIMENSIONS:-1536}
+      OpenCortex__Embeddings__ApiKey: ${EMBEDDINGS_API_KEY:-}
+      OpenCortex__Embeddings__Endpoint: ${EMBEDDINGS_ENDPOINT:-}
+    networks:
+      - opencortex
 
 volumes:
   opencortex-postgres-data:
+
+networks:
+  opencortex:
+    driver: bridge

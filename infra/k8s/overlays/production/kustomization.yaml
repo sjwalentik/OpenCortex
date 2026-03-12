@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: opencortex
+
+resources:
+  - ../../base
+  - namespace.yaml
+  - ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/instance: production
+  environment: production
+
+images:
+  - name: opencortex/api
+    newName: ghcr.io/your-org/opencortex/api
+    newTag: latest
+  - name: opencortex/portal
+    newName: ghcr.io/your-org/opencortex/portal
+    newTag: latest
+  - name: opencortex/mcp
+    newName: ghcr.io/your-org/opencortex/mcp
+    newTag: latest
+  - name: opencortex/workers
+    newName: ghcr.io/your-org/opencortex/workers
+    newTag: latest
+
+configMapGenerator:
+  - name: opencortex-config
+    behavior: merge
+    literals:
+      - HOSTED_AUTH_ENABLED=true
+      - STRIPE_ENABLED=true
+      - API_INTERNAL_URL=http://opencortex-api:8080
+      - MCP_INTERNAL_URL=http://opencortex-mcp:8080

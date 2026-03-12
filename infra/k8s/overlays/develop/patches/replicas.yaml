@@ -1,0 +1,28 @@
+# Reduce replicas for develop environment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencortex-api
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencortex-portal
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencortex-mcp
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencortex-workers
+spec:
+  replicas: 1

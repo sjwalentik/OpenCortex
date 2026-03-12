@@ -1,0 +1,15 @@
+# Root kustomization - use overlays for environment-specific deployments
+#
+# Deploy to develop:
+#   kubectl apply -k infra/k8s/overlays/develop
+#
+# Deploy to production:
+#   kubectl apply -k infra/k8s/overlays/production
+#
+# This file exists for backwards compatibility and deploys the production overlay
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - overlays/production

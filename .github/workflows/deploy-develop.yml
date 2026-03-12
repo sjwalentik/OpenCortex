@@ -1,0 +1,161 @@
+name: Deploy to Develop
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ vars.CONTAINER_REGISTRY || 'ghcr.io/sjwalentik/opencortex' }}
+  IMAGE_TAG: ${{ github.sha }}
+  DOMAIN: ${{ vars.DEVELOP_DOMAIN || 'opencortex.walentik.net' }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/api:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/api:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Portal image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/portal.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/portal:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/portal:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push MCP image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/mcp.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/mcp:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/mcp:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Workers image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/workers.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/workers:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/workers:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: self-hosted
+    environment: develop
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create namespace
+        run: |
+          kubectl create namespace opencortex-develop --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create image pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-pull-secret \
+            --namespace=opencortex-develop \
+            --docker-server=ghcr.io \
+            --docker-username=${{ github.actor }} \
+            --docker-password=${{ secrets.GHCR_PAT }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create secrets from GitHub secrets
+        run: |
+          # Database credentials
+          kubectl create secret generic opencortex-db-credentials \
+            --namespace=opencortex-develop \
+            --from-literal=connection-string="${{ secrets.DB_CONNECTION_STRING }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Firebase credentials
+          kubectl create secret generic opencortex-firebase \
+            --namespace=opencortex-develop \
+            --from-literal=project-id="${{ secrets.FIREBASE_PROJECT_ID }}" \
+            --from-literal=api-key="${{ secrets.FIREBASE_API_KEY }}" \
+            --from-literal=admin-user-ids="${{ secrets.FIREBASE_ADMIN_USER_IDS }}" \
+            --from-literal=admin-email-patterns="${{ secrets.FIREBASE_ADMIN_EMAIL_PATTERNS }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Stripe credentials (optional)
+          kubectl create secret generic opencortex-stripe \
+            --namespace=opencortex-develop \
+            --from-literal=secret-key="${{ secrets.STRIPE_SECRET_KEY }}" \
+            --from-literal=webhook-secret="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+            --from-literal=app-base-url="https://${{ env.DOMAIN }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Embeddings credentials
+          kubectl create secret generic opencortex-embeddings \
+            --namespace=opencortex-develop \
+            --from-literal=api-key="${{ secrets.EMBEDDINGS_API_KEY }}" \
+            --from-literal=endpoint="${{ vars.EMBEDDINGS_ENDPOINT }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Generate IngressRoute from template
+        run: |
+          export DOMAIN="${{ env.DOMAIN }}"
+          envsubst < infra/k8s/overlays/develop/ingressroute.yaml | kubectl apply -f -
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -k infra/k8s/overlays/develop
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/opencortex-api -n opencortex-develop --timeout=300s
+          kubectl rollout status deployment/opencortex-portal -n opencortex-develop --timeout=300s
+          kubectl rollout status deployment/opencortex-mcp -n opencortex-develop --timeout=300s
+          kubectl rollout status deployment/opencortex-workers -n opencortex-develop --timeout=300s
+
+      - name: Verify deployment
+        run: |
+          echo "Deployed images:"
+          kubectl get pods -n opencortex-develop -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
+          echo ""
+          echo "Services:"
+          kubectl get services -n opencortex-develop
+          echo ""
+          echo "IngressRoutes:"
+          kubectl get ingressroute -n opencortex-develop
+          echo ""
+          echo "Application URL: https://${{ env.DOMAIN }}"

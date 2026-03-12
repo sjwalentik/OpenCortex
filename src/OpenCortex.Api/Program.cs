@@ -495,7 +495,21 @@ if (hostedAuthConfigured)
             };
         });
 
-    builder.Services.AddAuthorization();
+    builder.Services.AddAuthorization(auth =>
+    {
+        auth.AddPolicy("admin", policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.RequireAssertion(context =>
+            {
+                var userId = context.User.FindFirst("user_id")?.Value
+                    ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                var email = context.User.FindFirst("email")?.Value
+                    ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                return options.HostedAuth.IsAdmin(userId, email);
+            });
+        });
+    });
     builder.Services.AddSingleton<ITenantCatalogStore>(tenantCatalogStore);
 }
 
@@ -538,7 +552,52 @@ builder.Services.AddRateLimiter(rateLimiter =>
             }));
 });
 
+// ---------------------------------------------------------------------------
+// CORS policy
+// ---------------------------------------------------------------------------
+
+var corsOrigins = builder.Configuration.GetSection("OpenCortex:Cors:AllowedOrigins").Get<string[]>() ?? [];
+builder.Services.AddCors(cors =>
+{
+    cors.AddPolicy("Production", policy =>
+    {
+        if (corsOrigins.Length > 0)
+        {
+            policy.WithOrigins(corsOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+        else
+        {
+            // Development fallback: allow any origin when not configured
+            policy.AllowAnyOrigin()
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+    });
+});
+
 var app = builder.Build();
+
+// ---------------------------------------------------------------------------
+// Security headers middleware
+// ---------------------------------------------------------------------------
+
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["X-XSS-Protection"] = "1; mode=block";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()";
+
+    // Content-Security-Policy for API (restrictive since it's primarily JSON)
+    headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'";
+
+    await next();
+});
 
 app.Use(async (context, next) =>
 {
@@ -560,6 +619,8 @@ app.Use(async (context, next) =>
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
+
+app.UseCors("Production");
 
 if (hostedAuthConfigured)
 {
@@ -628,14 +689,26 @@ app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken ca
     return Results.Ok(new { received = true, eventId = stripeEvent.Id, eventType = stripeEvent.Type });
 }).RequireRateLimiting("webhooks");
 
-app.MapGet("/brains", async (CancellationToken cancellationToken) =>
+// ---------------------------------------------------------------------------
+// Admin routes — protected when hosted auth is configured
+// ---------------------------------------------------------------------------
+
+var adminRoutes = app.MapGroup("")
+    .RequireRateLimiting("tenant-api");
+
+if (hostedAuthConfigured)
+{
+    adminRoutes.RequireAuthorization("admin");
+}
+
+adminRoutes.MapGet("/brains", async (CancellationToken cancellationToken) =>
 {
     await brainCatalogStore.UpsertBrainsAsync(options.Brains, cancellationToken);
     var brains = await brainCatalogStore.ListBrainsAsync(cancellationToken);
     return Results.Ok(brains);
 });
 
-app.MapGet("/admin/brains/health", async (CancellationToken cancellationToken) =>
+adminRoutes.MapGet("/admin/brains/health", async (CancellationToken cancellationToken) =>
 {
     await brainCatalogStore.UpsertBrainsAsync(options.Brains, cancellationToken);
     var brains = await brainCatalogStore.ListBrainsAsync(cancellationToken);
@@ -682,7 +755,7 @@ app.MapGet("/admin/brains/health", async (CancellationToken cancellationToken) =
 
 // Admin CRUD: brains
 
-app.MapGet("/admin/brains/{brainId}", async (string brainId, CancellationToken cancellationToken) =>
+adminRoutes.MapGet("/admin/brains/{brainId}", async (string brainId, CancellationToken cancellationToken) =>
 {
     var brain = await brainCatalogStore.GetBrainAsync(brainId, cancellationToken);
     return brain is null
@@ -690,7 +763,7 @@ app.MapGet("/admin/brains/{brainId}", async (string brainId, CancellationToken c
         : Results.Ok(brain);
 });
 
-app.MapPost("/admin/brains", async (CreateBrainRequest request, CancellationToken cancellationToken) =>
+adminRoutes.MapPost("/admin/brains", async (CreateBrainRequest request, CancellationToken cancellationToken) =>
 {
     var definition = new OpenCortex.Core.Brains.BrainDefinition
     {
@@ -708,7 +781,7 @@ app.MapPost("/admin/brains", async (CreateBrainRequest request, CancellationToke
     return Results.Created($"/admin/brains/{brain.BrainId}", brain);
 });
 
-app.MapPut("/admin/brains/{brainId}", async (string brainId, UpdateBrainRequest request, CancellationToken cancellationToken) =>
+adminRoutes.MapPut("/admin/brains/{brainId}", async (string brainId, UpdateBrainRequest request, CancellationToken cancellationToken) =>
 {
     var brain = await brainCatalogStore.UpdateBrainAsync(
         brainId,
@@ -724,7 +797,7 @@ app.MapPut("/admin/brains/{brainId}", async (string brainId, UpdateBrainRequest 
         : Results.Ok(brain);
 });
 
-app.MapDelete("/admin/brains/{brainId}", async (string brainId, CancellationToken cancellationToken) =>
+adminRoutes.MapDelete("/admin/brains/{brainId}", async (string brainId, CancellationToken cancellationToken) =>
 {
     var retired = await brainCatalogStore.RetireBrainAsync(brainId, cancellationToken);
     return retired
@@ -734,7 +807,7 @@ app.MapDelete("/admin/brains/{brainId}", async (string brainId, CancellationToke
 
 // Admin CRUD: source roots
 
-app.MapPost("/admin/brains/{brainId}/source-roots", async (string brainId, AddSourceRootRequest request, CancellationToken cancellationToken) =>
+adminRoutes.MapPost("/admin/brains/{brainId}/source-roots", async (string brainId, AddSourceRootRequest request, CancellationToken cancellationToken) =>
 {
     var brain = await brainCatalogStore.GetBrainAsync(brainId, cancellationToken);
     if (brain is null)
@@ -757,7 +830,7 @@ app.MapPost("/admin/brains/{brainId}/source-roots", async (string brainId, AddSo
     return Results.Created($"/admin/brains/{brainId}/source-roots/{sourceRoot.SourceRootId}", sourceRoot);
 });
 
-app.MapPut("/admin/brains/{brainId}/source-roots/{sourceRootId}", async (string brainId, string sourceRootId, UpdateSourceRootRequest request, CancellationToken cancellationToken) =>
+adminRoutes.MapPut("/admin/brains/{brainId}/source-roots/{sourceRootId}", async (string brainId, string sourceRootId, UpdateSourceRootRequest request, CancellationToken cancellationToken) =>
 {
     var sourceRoot = await brainCatalogStore.UpdateSourceRootAsync(
         brainId,
@@ -775,7 +848,7 @@ app.MapPut("/admin/brains/{brainId}/source-roots/{sourceRootId}", async (string 
         : Results.Ok(sourceRoot);
 });
 
-app.MapDelete("/admin/brains/{brainId}/source-roots/{sourceRootId}", async (string brainId, string sourceRootId, CancellationToken cancellationToken) =>
+adminRoutes.MapDelete("/admin/brains/{brainId}/source-roots/{sourceRootId}", async (string brainId, string sourceRootId, CancellationToken cancellationToken) =>
 {
     var removed = await brainCatalogStore.RemoveSourceRootAsync(brainId, sourceRootId, cancellationToken);
     return removed
@@ -783,9 +856,9 @@ app.MapDelete("/admin/brains/{brainId}/source-roots/{sourceRootId}", async (stri
         : Results.NotFound(new { message = $"Source root '{sourceRootId}' was not found on brain '{brainId}'." });
 });
 
-app.MapGet("/indexing/plans", () => Results.Ok(new BrainIndexingPlanner().BuildPlans(options)));
+adminRoutes.MapGet("/indexing/plans", () => Results.Ok(new BrainIndexingPlanner().BuildPlans(options)));
 
-app.MapGet("/indexing/preview/{brainId}", async (string brainId) =>
+adminRoutes.MapGet("/indexing/preview/{brainId}", async (string brainId) =>
 {
     var brain = options.Brains.FirstOrDefault(candidate => string.Equals(candidate.BrainId, brainId, StringComparison.OrdinalIgnoreCase));
 
@@ -812,7 +885,7 @@ app.MapGet("/indexing/preview/{brainId}", async (string brainId) =>
     });
 });
 
-app.MapPost("/indexing/run/{brainId}", async (string brainId, CancellationToken cancellationToken) =>
+adminRoutes.MapPost("/indexing/run/{brainId}", async (string brainId, CancellationToken cancellationToken) =>
 {
     var brain = options.Brains.FirstOrDefault(candidate => string.Equals(candidate.BrainId, brainId, StringComparison.OrdinalIgnoreCase));
 
@@ -842,13 +915,13 @@ app.MapPost("/indexing/run/{brainId}", async (string brainId, CancellationToken 
     });
 });
 
-app.MapGet("/indexing/runs", async (string? brainId, int? limit, CancellationToken cancellationToken) =>
+adminRoutes.MapGet("/indexing/runs", async (string? brainId, int? limit, CancellationToken cancellationToken) =>
 {
     var runs = await indexRunStore.ListIndexRunsAsync(brainId, limit ?? 20, cancellationToken);
     return Results.Ok(runs);
 });
 
-app.MapGet("/indexing/runs/{indexRunId}", async (string indexRunId, CancellationToken cancellationToken) =>
+adminRoutes.MapGet("/indexing/runs/{indexRunId}", async (string indexRunId, CancellationToken cancellationToken) =>
 {
     var run = await indexRunStore.GetIndexRunAsync(indexRunId, cancellationToken);
 
@@ -857,7 +930,7 @@ app.MapGet("/indexing/runs/{indexRunId}", async (string indexRunId, Cancellation
         : Results.Ok(run);
 });
 
-app.MapGet("/indexing/runs/{indexRunId}/errors", async (string indexRunId, CancellationToken cancellationToken) =>
+adminRoutes.MapGet("/indexing/runs/{indexRunId}/errors", async (string indexRunId, CancellationToken cancellationToken) =>
 {
     var run = await indexRunStore.GetIndexRunAsync(indexRunId, cancellationToken);
 
@@ -870,7 +943,7 @@ app.MapGet("/indexing/runs/{indexRunId}/errors", async (string indexRunId, Cance
     return Results.Ok(errors);
 });
 
-app.MapPost("/query", async (OqlQueryRequest request, CancellationToken cancellationToken) =>
+adminRoutes.MapPost("/query", async (OqlQueryRequest request, CancellationToken cancellationToken) =>
 {
     var executor = new OqlQueryExecutor(new PostgresDocumentQueryStore(connectionFactory, embeddingProvider));
     var result = await executor.ExecuteAsync(request.Oql, cancellationToken);
@@ -1715,25 +1788,61 @@ if (hostedAuthConfigured)
 }
 
 // ---------------------------------------------------------------------------
-// Browse API — document listing for authoring surface
+// Browse API — document listing for authoring surface (protected when hosted auth is configured)
 // ---------------------------------------------------------------------------
 
-app.MapGet("/browse/brains/{brainId}/documents", async (
-    string brainId,
-    string? sourceRootId,
-    string? pathPrefix,
-    int? limit,
-    CancellationToken cancellationToken) =>
+if (hostedAuthConfigured)
 {
-    var documentCatalogStore = new PostgresDocumentCatalogStore(connectionFactory);
-    var documents = await documentCatalogStore.ListDocumentsAsync(
-        brainId,
-        sourceRootId,
-        pathPrefix,
-        limit ?? 200,
-        cancellationToken);
-    return Results.Ok(new { brainId, count = documents.Count, documents });
-});
+    app.MapGet("/browse/brains/{brainId}/documents", async (
+        string brainId,
+        string? sourceRootId,
+        string? pathPrefix,
+        int? limit,
+        System.Security.Claims.ClaimsPrincipal user,
+        ITenantCatalogStore catalogStore,
+        CancellationToken cancellationToken) =>
+    {
+        var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, brainId, cancellationToken);
+        if (brain is null)
+        {
+            return Results.NotFound(new { message = $"Brain '{brainId}' was not found in your workspace." });
+        }
+
+        var documentCatalogStore = new PostgresDocumentCatalogStore(connectionFactory);
+        var documents = await documentCatalogStore.ListDocumentsAsync(
+            brainId,
+            sourceRootId,
+            pathPrefix,
+            limit ?? 200,
+            cancellationToken);
+        return Results.Ok(new { brainId, count = documents.Count, documents });
+    }).RequireAuthorization().RequireRateLimiting("tenant-api");
+}
+else
+{
+    app.MapGet("/browse/brains/{brainId}/documents", async (
+        string brainId,
+        string? sourceRootId,
+        string? pathPrefix,
+        int? limit,
+        CancellationToken cancellationToken) =>
+    {
+        var documentCatalogStore = new PostgresDocumentCatalogStore(connectionFactory);
+        var documents = await documentCatalogStore.ListDocumentsAsync(
+            brainId,
+            sourceRootId,
+            pathPrefix,
+            limit ?? 200,
+            cancellationToken);
+        return Results.Ok(new { brainId, count = documents.Count, documents });
+    });
+}
 
 app.Run();
 
