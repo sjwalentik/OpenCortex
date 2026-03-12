@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: opencortex-api
+  namespace: opencortex
 spec:
   replicas: 1
 ---
@@ -10,6 +11,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: opencortex-portal
+  namespace: opencortex
 spec:
   replicas: 1
 ---
@@ -17,6 +19,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: opencortex-mcp
+  namespace: opencortex
 spec:
   replicas: 1
 ---
@@ -24,5 +27,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: opencortex-workers
+  namespace: opencortex
 spec:
   replicas: 1

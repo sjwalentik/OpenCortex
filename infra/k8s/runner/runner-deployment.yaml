@@ -45,6 +45,9 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["traefik.io"]
+    resources: ["ingressroutes", "middlewares"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -93,7 +96,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             - name: RUNNER_REPO
-              value: "https://github.com/YOUR_ORG/OpenCortex"
+              value: "https://github.com/sjwalentik/OpenCortex"
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
