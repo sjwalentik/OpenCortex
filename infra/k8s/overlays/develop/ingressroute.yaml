@@ -1,5 +1,5 @@
 # Traefik IngressRoute for OpenCortex Develop
-# Domain is templated via envsubst in the deploy workflow
+# Domain is templated by the deploy workflow before apply
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:

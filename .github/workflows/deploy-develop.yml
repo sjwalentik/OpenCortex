@@ -86,6 +86,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
       - name: Create namespace
         run: |
           kubectl create namespace opencortex-develop --dry-run=client -o yaml | kubectl apply -f -
@@ -134,7 +139,7 @@ jobs:
       - name: Generate IngressRoute from template
         run: |
           export DOMAIN="${{ env.DOMAIN }}"
-          envsubst < infra/k8s/overlays/develop/ingressroute.yaml | kubectl apply -f -
+          sed "s|\${DOMAIN}|${DOMAIN}|g" infra/k8s/overlays/develop/ingressroute.yaml | kubectl apply -f -
 
       - name: Deploy to Kubernetes
         run: |
