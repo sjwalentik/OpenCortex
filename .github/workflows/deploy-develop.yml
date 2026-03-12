@@ -13,7 +13,7 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, opencortex]
 
     steps:
       - name: Checkout
@@ -79,7 +79,7 @@ jobs:
 
   deploy:
     needs: build-and-push
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64, opencortex]
     environment: develop
 
     steps:
