@@ -33,8 +33,8 @@ RUN dotnet restore src/OpenCortex.Portal/OpenCortex.Portal.csproj
 COPY src/OpenCortex.Core/ src/OpenCortex.Core/
 COPY src/OpenCortex.Portal/ src/OpenCortex.Portal/
 
-# Copy frontend build output to wwwroot
-COPY --from=frontend-build /frontend/dist src/OpenCortex.Portal/wwwroot/app/
+# Copy frontend build output to wwwroot (Vite outputs to ../wwwroot/app relative to Frontend dir)
+COPY --from=frontend-build /wwwroot/app src/OpenCortex.Portal/wwwroot/app/
 
 # Build and publish
 RUN dotnet publish src/OpenCortex.Portal/OpenCortex.Portal.csproj \
