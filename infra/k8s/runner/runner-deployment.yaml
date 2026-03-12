@@ -100,7 +100,7 @@ spec:
                   name: github-runner-secret
                   key: github_token
             - name: RUNNER_LABELS
-              value: "self-hosted,linux,x64,opencortex"
+              value: "self-hosted,linux,x64,opencortex-deploy"
             - name: RUNNER_WORKDIR
               value: "/tmp/runner"
           command:
