@@ -10,6 +10,7 @@ env:
   IMAGE_PREFIX: ${{ vars.CONTAINER_REGISTRY || 'ghcr.io/sjwalentik/opencortex' }}
   IMAGE_TAG: ${{ github.sha }}
   DOMAIN: ${{ vars.DEVELOP_DOMAIN || 'opencortex.walentik.net' }}
+  DEVELOP_DB_HOST: ${{ vars.DEVELOP_DB_HOST || 'opencortex-postgres.opencortex.svc.cluster.local' }}
 
 jobs:
   build-and-push:
@@ -106,10 +107,13 @@ jobs:
 
       - name: Create secrets from GitHub secrets
         run: |
+          DB_CONNECTION_STRING="${{ secrets.DB_CONNECTION_STRING }}"
+          DB_CONNECTION_STRING="${DB_CONNECTION_STRING/Host=opencortex-postgres;/Host=${{ env.DEVELOP_DB_HOST }};}"
+
           # Database credentials
           kubectl create secret generic opencortex-db-credentials \
             --namespace=opencortex-develop \
-            --from-literal=connection-string="${{ secrets.DB_CONNECTION_STRING }}" \
+            --from-literal=connection-string="${DB_CONNECTION_STRING}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
           # Firebase credentials
