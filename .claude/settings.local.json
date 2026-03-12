@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__OpenCortex-local__get_document",
+      "mcp__OpenCortex-local__list_brains",
+      "mcp__OpenCortex-local__query_brain",
+      "mcp__OpenCortex-local__save_document",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(kubectl get:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd production readiness and CI/CD pipeline\n\nSecurity:\n- Protect admin routes with JWT + admin policy\n- Protect browse API with tenant auth\n- Add security headers and CORS to API and Portal\n- Add AdminUserIds/AdminEmailPatterns configuration\n\nInfrastructure:\n- Add Dockerfiles for API, Portal, MCP, Workers\n- Add Kubernetes manifests with Kustomize overlays\n- Add Traefik IngressRoute for develop environment\n- Externalize all secrets via environment variables\n\nCI/CD:\n- Add CI workflow for build and test\n- Add deploy-develop workflow for auto-deploy to cluster\n- Support ghcr.io container registry\n- Add self-hosted runner manifests\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(git checkout:*)"
+    ]
+  }
+}
