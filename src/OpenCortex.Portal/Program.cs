@@ -9,8 +9,11 @@ builder.Services.AddHttpClient(PortalSettings.FirebaseHttpClientName);
 
 var app = builder.Build();
 
-app.UseDefaultFiles();
 app.UseStaticFiles();
+
+app.MapGet("/", () => Results.Redirect("/app/index.html"));
+app.MapGet("/app", () => Results.Redirect("/app/index.html"));
+app.MapGet("/legacy", () => Results.Redirect("/index.html"));
 
 app.MapGet("/health", (IConfiguration configuration) =>
 {
@@ -422,3 +425,4 @@ internal sealed class PortalSettings
     public Uri BuildSecureTokenUri() =>
         new($"https://securetoken.googleapis.com/v1/token?key={Uri.EscapeDataString(FirebaseApiKey)}");
 }
+

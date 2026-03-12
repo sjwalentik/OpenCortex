@@ -36,6 +36,7 @@ Thumbs.db
 node_modules/
 .npm/
 .pnpm-store/
+src/OpenCortex.Portal/wwwroot/app/
 
 # Test artifacts
 TestResults/
@@ -47,3 +48,5 @@ tmp/
 temp/
 backups/
 nul
+.codex-verify/
+

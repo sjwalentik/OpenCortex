@@ -126,6 +126,50 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
         return ReadDetail(reader);
     }
 
+    public async Task<ManagedDocumentDetail?> GetManagedDocumentByCanonicalPathAsync(
+        string customerId,
+        string brainId,
+        string canonicalPath,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT
+                managed_document_id,
+                brain_id,
+                customer_id,
+                title,
+                slug,
+                content,
+                frontmatter,
+                content_hash,
+                status,
+                word_count,
+                created_by,
+                updated_by,
+                created_at,
+                updated_at,
+                is_deleted
+            FROM {_connectionFactory.Schema}.managed_documents
+            WHERE customer_id = @customer_id
+              AND brain_id = @brain_id
+              AND slug = @slug
+              AND is_deleted = false;
+            """;
+        command.Parameters.AddWithValue("customer_id", customerId);
+        command.Parameters.AddWithValue("brain_id", brainId);
+        command.Parameters.AddWithValue("slug", OpenCortex.Core.Authoring.ManagedDocumentText.NormalizeSlug(Path.ChangeExtension(canonicalPath?.Trim() ?? string.Empty, null)));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return ReadDetail(reader);
+    }
+
     public async Task<IReadOnlyList<ManagedDocumentVersionSummary>> ListManagedDocumentVersionsAsync(
         string customerId,
         string brainId,

@@ -126,7 +126,8 @@ Current bootstrap slice:
 - `POST /tenant/query` parses OQL, verifies the referenced brain belongs to the resolved workspace, then executes retrieval
 - `GET /tenant/billing/plan` returns the resolved workspace's plan and document-usage summary
 - `GET /tenant/brains/{brainId}/documents` lists managed documents for a managed-content brain in the resolved workspace
-- `GET /tenant/brains/{brainId}/documents/{managedDocumentId}` returns a managed document only when it belongs to the resolved workspace and brain
+- `GET /tenant/brains/{brainId}/documents/{managedDocumentId}` returns a managed document by ID only when it belongs to the resolved workspace and brain
+- `GET /tenant/brains/{brainId}/documents/by-path?canonicalPath=identity/pixel.md` returns a managed document by canonical path for the resolved workspace and brain
 - `GET /tenant/brains/{brainId}/indexing/runs` returns recent index runs for the selected managed-content brain
 - `POST /tenant/brains/{brainId}/reindex` triggers a tenant-scoped full managed-content reindex for the selected brain
 - `POST /tenant/brains/{brainId}/documents` creates a managed document in Postgres for a managed-content brain
@@ -141,7 +142,8 @@ Current bootstrap slice:
 |---|---|---|
 | `/documents` | GET | List documents in active brain |
 | `/documents` | POST | Create document (quota checked) |
-| `/documents/:id` | GET | Get document content and metadata |
+| `/documents/:id` | GET | Get document content and metadata by managed document ID |
+| `/documents/by-path?canonicalPath=<path>` | GET | Get document content and metadata by canonical path |
 | `/documents/:id` | PUT | Update document content |
 | `/documents/:id` | DELETE | Soft-delete document |
 | `/documents/import` | POST | Import a single `.md` file |
@@ -181,16 +183,20 @@ Current bootstrap slice:
 Current repo status:
 - tenant token routes are now implemented under `/tenant/tokens`
 - a separate `OpenCortex.Portal` project now exists for customer-facing workspace and token settings
-- the portal now owns a native browser auth bootstrap for Firebase email/password sign-in and refresh-token renewal
-- the portal now separates Sign In, Documents, Account, Usage, and Tools into distinct routed views
+- the portal now owns the shared browser session contract, refresh-token renewal, and the main customer shell
+- the portal now separates Sign In, Documents, Account, Usage, and Tools into distinct routed views, with React serving the main signed-in workspace experience
 - the portal now keeps Documents as the main workspace surface and moves account, token, and usage details out of the editor page
 - the portal now lists managed-content brains in a compact folder-aware rail, supports create, edit, save, revert, and delete through the tenant API, and keeps the editor as the main document surface
 - the portal now renders a live Markdown preview and saved version history for managed-content documents, with restore wired through the tenant API
 - the portal now supports single-document Markdown import into a new draft and client-side export of the active draft or saved document
 - the portal now treats the slug input as a filename/path input so import/export, editor saves, and visual organization all use the same path-style document identity
-- the portal now has a tenant-safe Tools page for OQL smoke tests, MCP setup snippets, and recent indexing activity for the active brain
+- the portal now has a tenant-safe Tools page for OQL smoke tests, MCP setup snippets, the published MCP tool manifest, and recent indexing activity for the active brain
 - the portal still requires configured `Portal:ApiBaseUrl`, `Portal:Auth:FirebaseProjectId`, and `Portal:Auth:FirebaseApiKey`; `Portal:McpBaseUrl` is optional but recommended for copy-ready MCP connection details
 - MCP write tools now exist for managed-content brains, so token-based agents and the browser portal now share the same managed-content CRUD surface
+- `save_document` is now the preferred agent write path because it works directly from canonical path, upserts existing documents, and avoids forcing the caller to manage `managed_document_id` for routine edits
+- `delete_document` now accepts either `managed_document_id` or `canonical_path`, and can also infer `brain_id` when the workspace has a single active managed-content brain
+- `create_document` and `update_document` still exist for lower-level callers, but they should not be the default agent path
+- the React portal shell is now the primary customer entrypoint at `/app`, while the classic HTML/CSS/JS shell remains available at `/legacy` for fallback access during the cutover; see `docs/architecture/frontend-portal-direction.md`
 
 See `docs/architecture/mcp-security.md` for full MCP token design.
 
@@ -219,5 +225,6 @@ See `docs/architecture/mcp-security.md` for full MCP token design.
 - review and publishing workflows
 - customer-scoped branding
 - public read-only brain sharing
+
 
 

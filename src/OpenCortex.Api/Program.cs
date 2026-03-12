@@ -1341,6 +1341,34 @@ if (hostedAuthConfigured)
         });
     });
 
+    tenantRoutes.MapGet("/brains/{brainId}/documents/by-path", async (
+        string brainId,
+        HttpRequest request,
+        System.Security.Claims.ClaimsPrincipal user,
+        ITenantCatalogStore catalogStore,
+        CancellationToken cancellationToken) =>
+    {
+        var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
+        if (errorResult is not null)
+        {
+            return errorResult;
+        }
+
+        var canonicalPath = request.Query["canonicalPath"].ToString();
+        if (string.IsNullOrWhiteSpace(canonicalPath))
+        {
+            canonicalPath = request.Query["canonical_path"].ToString();
+        }
+
+        return await TenantManagedDocumentEndpoints.GetDocumentByCanonicalPathAsync(
+            context!.CustomerId,
+            brainId,
+            canonicalPath,
+            brainCatalogStore,
+            managedDocumentStore,
+            cancellationToken);
+    });
+
     tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}", async (
         string brainId,
         string managedDocumentId,

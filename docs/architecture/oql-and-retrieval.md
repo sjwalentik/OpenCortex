@@ -126,6 +126,10 @@ Likely tool shapes:
 - `get_related_documents`
 - `build_context_pack`
 
+The expected read workflow is two-step: use `query_brain` to discover ranked candidates, then call `get_document` with the returned `documentId` or `canonicalPath` when the agent needs the full stored Markdown instead of a snippet.
+
+For managed-content write workflows, prefer `save_document` with a canonical path instead of forcing the agent to create first and then remember a managed document ID for future updates. Deletion can now follow the same path-first model through `delete_document` with `canonical_path`.
+
 ## Remaining v0 Retrieval Work
 
 - expand executable grammar coverage as new OQL clauses are added

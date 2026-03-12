@@ -152,7 +152,7 @@ Current repo status:
 - `POST /tenant/brains/{brainId}/documents` enforces `maxDocuments` and reconciles `documents.active`
 - `POST /tenant/query` increments `mcp.queries.YYYY-MM` and enforces `mcpQueriesPerMonth` on capped plans
 - authenticated MCP `query_brain` calls now increment the same monthly counter after token-based customer resolution
-- managed-content MCP write tools now reuse the same effective-plan checks for `mcp:write`, enforce `maxDocuments` on document create, and reconcile `documents.active` after create and delete
+- managed-content MCP write tools now reuse the same effective-plan checks for `mcp:write`; `save_document` and `create_document` enforce `maxDocuments` on create, and document counters are reconciled after create and delete
 - MCP overage is enforced in the tool layer today; custom transport-level `429` shaping is still pending
 
 ## Grace Period On Cancellation

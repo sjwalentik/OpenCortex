@@ -93,6 +93,9 @@ public sealed class ManagedContentBrainIndexingServiceTests
         public Task<ManagedDocumentDetail?> GetManagedDocumentAsync(string customerId, string brainId, string managedDocumentId, CancellationToken cancellationToken = default)
             => Task.FromResult(_documents.FirstOrDefault(document => document.ManagedDocumentId == managedDocumentId));
 
+        public Task<ManagedDocumentDetail?> GetManagedDocumentByCanonicalPathAsync(string customerId, string brainId, string canonicalPath, CancellationToken cancellationToken = default)
+            => Task.FromResult(_documents.FirstOrDefault(document => string.Equals(document.CanonicalPath, canonicalPath, StringComparison.OrdinalIgnoreCase)));
+
         public Task<IReadOnlyList<ManagedDocumentVersionSummary>> ListManagedDocumentVersionsAsync(string customerId, string brainId, string managedDocumentId, int limit = 50, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<ManagedDocumentVersionSummary>>([]);
 

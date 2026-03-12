@@ -615,6 +615,47 @@ h3 {
   background: var(--surface-muted);
 }
 
+.result-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.result-card-meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.result-card p {
+  margin: 8px 0 0;
+}
+
+.result-summary {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.tool-fetch-note,
+.tool-document-meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.tool-document-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.tool-document-preview {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
 .result-summary {
   color: var(--muted);
   font-size: 0.9rem;

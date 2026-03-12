@@ -121,7 +121,7 @@ The cloud-hosted product uses managed-content brains exclusively for tenant user
 | Aspect | Self-Hosted (Filesystem) | Hosted SaaS (Managed-Content) |
 |---|---|---|
 | Content source of truth | Filesystem / NAS | Postgres (`managed_documents`) |
-| Editing | External editor (Obsidian, VSCode) | Browser (TipTap editor) |
+| Editing | External editor (Obsidian, VSCode) | Browser (React + Tiptap editor) |
 | Indexing trigger | Manual, scheduled | On save + manual reindex |
 | Auth | Operator-managed | Firebase Auth + tenant JWT |
 | Billing | None | Stripe subscriptions |

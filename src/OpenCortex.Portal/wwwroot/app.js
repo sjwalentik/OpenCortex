@@ -24,6 +24,8 @@ const state = {
   firebaseAuth: null,
   tokens: [],
   indexingRuns: [],
+  toolQueryResults: null,
+  toolFetchedDocuments: {},
 };
 
 const viewMetadata = {
@@ -141,6 +143,7 @@ const toolQueryResult = document.getElementById('toolQueryResult');
 const mcpUrlValue = document.getElementById('mcpUrlValue');
 const mcpTokenHintValue = document.getElementById('mcpTokenHintValue');
 const operatorConsoleValue = document.getElementById('operatorConsoleValue');
+const mcpToolManifestValue = document.getElementById('mcpToolManifestValue');
 const mcpConfigSnippet = document.getElementById('mcpConfigSnippet');
 const copyMcpConfigButton = document.getElementById('copyMcpConfigButton');
 const refreshIndexingButton = document.getElementById('refreshIndexingButton');
@@ -411,6 +414,8 @@ function clearWorkspaceState() {
   state.selectedVersion = null;
   state.tokens = [];
   state.indexingRuns = [];
+  state.toolQueryResults = null;
+  state.toolFetchedDocuments = {};
 }
 
 function renderGoogleAuthSurface(attempt = 0) {
@@ -1226,7 +1231,9 @@ function renderUsageSummary() {
 function renderTools() {
   if (!state.authSession) {
     toolQueryOql.value = '';
-    toolQueryResult.innerHTML = 'No smoke test executed yet.';
+    renderToolQueryResult(null);
+  } else {
+    renderToolQueryResult(state.toolQueryResults);
   }
 
   renderMcpTooling();
@@ -1236,6 +1243,7 @@ function renderTools() {
 function renderMcpTooling() {
   const hasMcpUrl = Boolean(state.config?.mcpBaseUrl);
   const operatorUrl = state.config?.operatorConsoleUrl || '';
+  const manifestUrl = buildMcpToolManifestUrl();
   const activeToken = state.tokens.find(token => !token.revokedAt) || null;
 
   mcpUrlValue.textContent = hasMcpUrl ? state.config.mcpBaseUrl : 'Not configured';
@@ -1245,8 +1253,22 @@ function renderMcpTooling() {
   operatorConsoleValue.innerHTML = operatorUrl
     ? `<a href="${escapeAttr(operatorUrl)}" target="_blank" rel="noreferrer">${escapeHtml(operatorUrl)}</a>`
     : 'Not configured';
+  mcpToolManifestValue.innerHTML = manifestUrl
+    ? `<a href="${escapeAttr(manifestUrl)}" target="_blank" rel="noreferrer">${escapeHtml(manifestUrl)}</a>`
+    : 'Not configured';
   mcpConfigSnippet.value = buildMcpConfigSnippet();
   copyMcpConfigButton.disabled = !state.authSession;
+}
+
+function buildMcpToolManifestUrl() {
+  const baseUrl = state.config?.mcpBaseUrl || '';
+  if (!baseUrl) {
+    return '';
+  }
+
+  return baseUrl.endsWith('/mcp')
+    ? `${baseUrl.slice(0, -4)}/tool-manifest`
+    : `${baseUrl.replace(/\/$/, '')}/tool-manifest`;
 }
 
 function buildMcpConfigSnippet() {
@@ -1265,7 +1287,6 @@ function buildMcpConfigSnippet() {
     },
   }, null, 2);
 }
-
 async function onCopyMcpConfig() {
   try {
     await navigator.clipboard.writeText(mcpConfigSnippet.value);
@@ -1324,8 +1345,12 @@ async function onToolQuerySubmit(event) {
       method: 'POST',
       body: JSON.stringify({ oql }),
     });
-    renderToolQueryResult(result);
+    state.toolQueryResults = result;
+    state.toolFetchedDocuments = {};
+    renderToolQueryResult(state.toolQueryResults);
   } catch (error) {
+    state.toolQueryResults = null;
+    state.toolFetchedDocuments = {};
     toolQueryResult.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     showBanner('error', error.message);
   }
@@ -1333,6 +1358,11 @@ async function onToolQuerySubmit(event) {
 
 function renderToolQueryResult(payload) {
   toolQueryResult.innerHTML = '';
+
+  if (!payload) {
+    toolQueryResult.innerHTML = '<div class="empty-state">No smoke test executed yet.</div>';
+    return;
+  }
 
   if (payload.summary) {
     const summary = document.createElement('p');
@@ -1352,16 +1382,79 @@ function renderToolQueryResult(payload) {
 
   for (const result of payload.results) {
     const card = document.createElement('article');
+    const fetchState = state.toolFetchedDocuments[getToolResultKey(result)] || null;
     card.className = 'result-card';
     card.innerHTML = `
-      <strong>${escapeHtml(result.title || '(untitled)')}</strong>
-      <p>${escapeHtml(result.canonicalPath || '')}</p>
+      <div class="result-card-header">
+        <div>
+          <strong>${escapeHtml(result.title || '(untitled)')}</strong>
+          <div class="result-card-meta">${escapeHtml(result.canonicalPath || '')}</div>
+        </div>
+        <div class="action-row">
+          <button type="button" class="button">${escapeHtml(fetchState?.status === 'ready' ? 'Refresh Document' : 'Fetch Full Document')}</button>
+        </div>
+      </div>
       <p>${escapeHtml(result.snippet || '')}</p>
+      <div class="tool-document-panel">${renderToolFetchState(result, fetchState)}</div>
     `;
+
+    const fetchButton = card.querySelector('button');
+    fetchButton.disabled = !(result.documentId || result.canonicalPath) || fetchState?.status === 'loading';
+    fetchButton.addEventListener('click', () => onFetchToolResultDocument(result));
+
     toolQueryResult.appendChild(card);
   }
 }
 
+function getToolResultKey(result) {
+  return result.documentId || `${result.brainId || ''}::${result.canonicalPath || ''}`;
+}
+
+function renderToolFetchState(result, fetchState) {
+  if (!result.documentId && !result.canonicalPath) {
+    return '<div class="empty-state">This result does not expose a retrievable document id or canonical path.</div>';
+  }
+
+  if (!fetchState) {
+    return '<p class="tool-fetch-note">Fetch the stored document to inspect the full markdown behind this ranked snippet.</p>';
+  }
+
+  if (fetchState.status === 'loading') {
+    return '<div class="empty-state">Fetching full document...</div>';
+  }
+
+  if (fetchState.status === 'error') {
+    return `<div class="empty-state">${escapeHtml(fetchState.message || 'Document fetch failed.')}</div>`;
+  }
+
+  const document = fetchState.document;
+  return `
+    <div class="tool-document-meta">
+      ${escapeHtml(document.status || 'draft')} | ${escapeHtml(document.canonicalPath || '')} | ${escapeHtml(String(document.wordCount ?? 0))} words | updated ${escapeHtml(formatDateTime(document.updatedAt))}
+    </div>
+    <div class="tool-document-preview">${renderMarkdown(document.content || '')}</div>
+  `;
+}
+
+async function onFetchToolResultDocument(result) {
+  const key = getToolResultKey(result);
+  state.toolFetchedDocuments[key] = { status: 'loading' };
+  renderToolQueryResult(state.toolQueryResults);
+
+  try {
+    const session = await ensureValidSession();
+    const documentUrl = result.documentId
+      ? `/portal-api/tenant/brains/${encodeURIComponent(result.brainId)}/documents/${encodeURIComponent(result.documentId)}`
+      : `/portal-api/tenant/brains/${encodeURIComponent(result.brainId)}/documents/by-path?canonicalPath=${encodeURIComponent(result.canonicalPath || '')}`;
+    const document = await portalFetch(documentUrl, session.idToken);
+    state.toolFetchedDocuments[key] = { status: 'ready', document };
+    renderToolQueryResult(state.toolQueryResults);
+  } catch (error) {
+    state.toolFetchedDocuments[key] = { status: 'error', message: error.message };
+    renderToolQueryResult(state.toolQueryResults);
+    showBanner('error', error.message);
+  }
+}
 async function loadIndexingRunsForActiveBrain(idToken) {
   if (!state.activeBrainId) {
     state.indexingRuns = [];

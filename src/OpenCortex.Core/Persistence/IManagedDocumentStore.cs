@@ -23,6 +23,12 @@ public interface IManagedDocumentStore
         string managedDocumentId,
         CancellationToken cancellationToken = default);
 
+    Task<ManagedDocumentDetail?> GetManagedDocumentByCanonicalPathAsync(
+        string customerId,
+        string brainId,
+        string canonicalPath,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<ManagedDocumentVersionSummary>> ListManagedDocumentVersionsAsync(
         string customerId,
         string brainId,

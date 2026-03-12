@@ -125,6 +125,16 @@ public sealed class TenantApiTests : IClassFixture<TenantApiTests.TenantApiWebAp
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task GetDocumentByPath_WithoutAuth_ReturnsUnauthorized()
+    {
+        _client.DefaultRequestHeaders.Authorization = null;
+
+        var response = await _client.GetAsync("/tenant/brains/brain_test123/documents/by-path?canonicalPath=identity/pixel.md");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     // -------------------------------------------------------------------------
     // POST /tenant/query - Authorization tests
     // -------------------------------------------------------------------------

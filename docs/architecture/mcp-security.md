@@ -117,6 +117,7 @@ bearer_token_env_var = "OPENCORTEX_MCP_TOKEN"
 ## MCP Endpoint
 
 - exposed at `https://mcp.opencortex.app` or `/mcp` on the main domain
+- diagnostic tool inventory is published at `/tool-manifest` so clients can verify the currently exposed MCP tools
 - HTTPS only via Traefik + cert-manager
 - separate Kubernetes Ingress from the main app (allows independent rate limiting)
 - returns `401` for missing or invalid tokens
@@ -143,11 +144,15 @@ Current repo status:
 - raw tokens are generated with the `oct_` prefix, SHA-256 hashed before storage, and returned only once on creation
 - MCP is now mapped explicitly at `/mcp` and requires `Authorization: Bearer oct_...`
 - MCP middleware validates token hash, expiry, revocation, and `mcp:read`, updates `last_used_at`, and attaches resolved `customer_id` to the request
-- `list_brains`, `get_brain`, and `query_brain` are now scoped to the authenticated customer's brains instead of the global catalog
+- `list_brains`, `get_brain`, `query_brain`, and `get_document` are now scoped to the authenticated customer's brains instead of the global catalog
 - `query_brain` now consumes the same monthly `mcp.queries.YYYY-MM` usage counter used by hosted tenant queries
-- managed-content MCP write tools now exist: `create_document`, `update_document`, `delete_document`, and `reindex_brain`
+- `get_document` returns full stored managed-document content after ranked retrieval, using either `document_id` or `canonical_path`
+- managed-content MCP write tools now exist: `save_document`, `delete_document`, `create_document`, `update_document`, and `reindex_brain`
+- `save_document` is the preferred write path for agents because it upserts by `canonical_path` and can infer `brain_id` when the workspace has exactly one active managed-content brain
+- `delete_document` now accepts either `managed_document_id` or `canonical_path`, and can infer `brain_id` under the same single-brain rule
+- `create_document` and `update_document` remain available as lower-level escape hatches when a caller explicitly needs create-only behavior or direct update-by-id behavior
 - MCP write tools require both token scope `mcp:write` and an effective plan with `mcpWrite = true`
-- MCP document create enforces the same effective `maxDocuments` limit as the hosted tenant API, and MCP create/delete/reindex reconcile `documents.active`
+- MCP document create and `save_document` create-paths enforce the same effective `maxDocuments` limit as the hosted tenant API, and MCP create/delete/reindex reconcile `documents.active`
 - MCP overage currently surfaces as a tool error message; transport-level `429` shaping and broader portal coverage are still pending
 
 ## Rate Limiting

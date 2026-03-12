@@ -90,6 +90,7 @@ builder.Services.AddMcpServer()
     .WithToolsFromAssembly();
 
 var app = builder.Build();
+var toolManifest = OpenCortexToolManifest.Build();
 
 // ---------------------------------------------------------------------------
 // Diagnostic HTTP endpoints (not part of MCP protocol)
@@ -101,19 +102,29 @@ app.MapGet("/", () => Results.Ok(new
     protocol = "mcp/1.1",
     status = validationErrors.Count == 0 ? "ready" : "configuration-invalid",
     transport = "http+sse",
+    toolCount = toolManifest.Count,
+    toolManifestUrl = "/tool-manifest",
 }));
 
 app.MapGet("/health", () => Results.Ok(new
 {
     service = "OpenCortex.McpServer",
     validationErrors,
+    toolCount = toolManifest.Count,
+}));
+
+app.MapGet("/tool-manifest", () => Results.Ok(new
+{
+    count = toolManifest.Count,
+    tools = toolManifest,
 }));
 
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? string.Empty;
     if (string.Equals(path, "/", StringComparison.Ordinal)
-        || string.Equals(path, "/health", StringComparison.Ordinal))
+        || string.Equals(path, "/health", StringComparison.Ordinal)
+        || string.Equals(path, "/tool-manifest", StringComparison.Ordinal))
     {
         await next();
         return;

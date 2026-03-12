@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Microsoft.AspNetCore.Http;
 using ModelContextProtocol.Server;
+using OpenCortex.Core.Authoring;
 using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Tenancy;
@@ -175,11 +176,73 @@ public sealed class OpenCortexTools(
     }
 
     // -----------------------------------------------------------------------
+    // get_document
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Retrieve the full stored content for a managed document in a managed-content brain. " +
+        "Use this after query_brain when you want more than the ranked snippet. " +
+        "Accepts either the retrieval document ID or the canonical path returned by query_brain.")]
+    public async Task<GetDocumentResult> get_document(
+        [Description("The managed-content brain ID that owns the document.")] string brain_id,
+        [Description("Optional retrieval document ID / managed document ID returned by query_brain.")] string? document_id,
+        [Description("Optional canonical path returned by query_brain, for example \"identity/pixel.md\".")] string? canonical_path,
+        CancellationToken cancellationToken)
+    {
+        var tokenContext = GetRequiredTokenContext();
+
+        if (string.IsNullOrWhiteSpace(brain_id))
+        {
+            return GetDocumentResult.Failure("brain_id is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(document_id) && string.IsNullOrWhiteSpace(canonical_path))
+        {
+            return GetDocumentResult.Failure("Provide document_id or canonical_path.");
+        }
+
+        var (brain, brainError) = await GetManagedContentBrainAsync(tokenContext.CustomerId, brain_id, cancellationToken);
+        if (brain is null)
+        {
+            return GetDocumentResult.Failure(brainError!);
+        }
+
+        ManagedDocumentDetail? document;
+        if (!string.IsNullOrWhiteSpace(document_id))
+        {
+            document = await managedDocumentStore.GetManagedDocumentAsync(
+                tokenContext.CustomerId,
+                brain.BrainId,
+                document_id,
+                cancellationToken);
+        }
+        else
+        {
+            document = await managedDocumentStore.GetManagedDocumentByCanonicalPathAsync(
+                tokenContext.CustomerId,
+                brain.BrainId,
+                canonical_path!,
+                cancellationToken);
+        }
+
+        if (document is null)
+        {
+            return GetDocumentResult.Failure(
+                !string.IsNullOrWhiteSpace(document_id)
+                    ? $"Document '{document_id}' was not found in brain '{brain.BrainId}'."
+                    : $"Document '{canonical_path}' was not found in brain '{brain.BrainId}'.");
+        }
+
+        return GetDocumentResult.Success(document);
+    }
+
+    // -----------------------------------------------------------------------
     // create_document
     // -----------------------------------------------------------------------
 
     [McpServerTool, Description(
         "Create a managed document in a managed-content brain. " +
+        "Lower-level create-only tool; prefer save_document for most agent workflows. " +
         "Requires mcp:write scope and a plan that allows MCP write access. " +
         "The brain is reindexed immediately after the document is created.")]
     public async Task<ManagedDocumentResult> create_document(
@@ -257,11 +320,133 @@ public sealed class OpenCortexTools(
     }
 
     // -----------------------------------------------------------------------
+    // save_document
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Create or update a managed document in a managed-content brain using its canonical path. " +
+        "Preferred write tool for agents because it upserts by path and can infer the brain when the workspace has exactly one active managed-content brain. " +
+        "Requires mcp:write scope and an MCP-write-enabled plan. " +
+        "The brain is reindexed immediately after the document is saved.")]
+    public async Task<SaveManagedDocumentResult> save_document(
+        [Description("Optional managed-content brain ID. Omit this when the workspace has exactly one active managed-content brain.")] string? brain_id,
+        [Description("Canonical path for the document, for example \"projects/opencortex/frontend-portal-direction.md\".")] string canonical_path,
+        [Description("Markdown or plain text content for the document.")] string content,
+        [Description("Optional document title. Defaults from the canonical path when omitted.")] string? title,
+        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter,
+        [Description("Document status. Defaults to draft when omitted.")] string? status,
+        CancellationToken cancellationToken)
+    {
+        var tokenContext = GetRequiredTokenContext();
+
+        if (string.IsNullOrWhiteSpace(canonical_path))
+        {
+            return SaveManagedDocumentResult.Failure("canonical_path is required.");
+        }
+
+        var writeAccessError = await ValidateWriteAccessAsync(tokenContext, cancellationToken);
+        if (writeAccessError is not null)
+        {
+            return SaveManagedDocumentResult.Failure(writeAccessError);
+        }
+
+        var (brain, brainError) = await ResolveManagedContentBrainAsync(tokenContext.CustomerId, brain_id, cancellationToken);
+        if (brain is null)
+        {
+            return SaveManagedDocumentResult.Failure(brainError!);
+        }
+
+        var normalizedSlug = ManagedDocumentText.NormalizeSlug(canonical_path);
+        var normalizedCanonicalPath = ManagedDocumentText.BuildCanonicalPath(normalizedSlug);
+        var documentTitle = string.IsNullOrWhiteSpace(title)
+            ? BuildTitleFromCanonicalPath(normalizedCanonicalPath)
+            : title;
+        var normalizedStatus = string.IsNullOrWhiteSpace(status) ? "draft" : status;
+        var normalizedFrontmatter = frontmatter ?? new Dictionary<string, string>();
+
+        var existing = await managedDocumentStore.GetManagedDocumentByCanonicalPathAsync(
+            tokenContext.CustomerId,
+            brain.BrainId,
+            normalizedCanonicalPath,
+            cancellationToken);
+
+        try
+        {
+            if (existing is null)
+            {
+                var (billingState, plan) = await GetBillingContextAsync(tokenContext.CustomerId, cancellationToken);
+                if (plan.MaxDocuments >= 0)
+                {
+                    var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(tokenContext.CustomerId, cancellationToken);
+                    if (activeDocuments >= plan.MaxDocuments)
+                    {
+                        return SaveManagedDocumentResult.Failure(
+                            $"Document limit reached for plan '{billingState.PlanId}'. Upgrade to continue adding more content.");
+                    }
+                }
+
+                var created = await managedDocumentStore.CreateManagedDocumentAsync(
+                    new ManagedDocumentCreateRequest(
+                        BrainId: brain.BrainId,
+                        CustomerId: tokenContext.CustomerId,
+                        Title: documentTitle,
+                        Slug: normalizedSlug,
+                        Content: content ?? string.Empty,
+                        Frontmatter: normalizedFrontmatter,
+                        Status: normalizedStatus,
+                        UserId: tokenContext.UserId),
+                    cancellationToken);
+
+                var createIndexRun = await managedContentBrainIndexingService.ReindexAsync(
+                    tokenContext.CustomerId,
+                    brain.BrainId,
+                    "mcp-document-create",
+                    cancellationToken);
+
+                await SyncActiveDocumentCounterAsync(tokenContext.CustomerId, cancellationToken);
+
+                return SaveManagedDocumentResult.Success("created", created, createIndexRun);
+            }
+
+            var updated = await managedDocumentStore.UpdateManagedDocumentAsync(
+                new ManagedDocumentUpdateRequest(
+                    ManagedDocumentId: existing.ManagedDocumentId,
+                    BrainId: brain.BrainId,
+                    CustomerId: tokenContext.CustomerId,
+                    Title: documentTitle,
+                    Slug: normalizedSlug,
+                    Content: content ?? string.Empty,
+                    Frontmatter: normalizedFrontmatter,
+                    Status: normalizedStatus,
+                    UserId: tokenContext.UserId),
+                cancellationToken);
+
+            if (updated is null)
+            {
+                return SaveManagedDocumentResult.Failure($"Document '{normalizedCanonicalPath}' was not found in brain '{brain.BrainId}'.");
+            }
+
+            var updateIndexRun = await managedContentBrainIndexingService.ReindexAsync(
+                tokenContext.CustomerId,
+                brain.BrainId,
+                "mcp-document-update",
+                cancellationToken);
+
+            return SaveManagedDocumentResult.Success("updated", updated, updateIndexRun);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return SaveManagedDocumentResult.Failure(ex.Message);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // update_document
     // -----------------------------------------------------------------------
 
     [McpServerTool, Description(
         "Update an existing managed document in a managed-content brain. " +
+        "Lower-level update-by-id tool; prefer save_document for most agent workflows. " +
         "Requires mcp:write scope and an MCP-write-enabled plan. " +
         "The brain is reindexed immediately after the document is updated.")]
     public async Task<ManagedDocumentResult> update_document(
@@ -343,23 +528,21 @@ public sealed class OpenCortexTools(
 
     [McpServerTool, Description(
         "Soft-delete a managed document from a managed-content brain. " +
+        "Accepts either the managed document ID or canonical path and can infer the brain when the workspace has exactly one active managed-content brain. " +
+        "Prefer canonical_path for routine agent workflows. " +
         "Requires mcp:write scope and an MCP-write-enabled plan. " +
         "The brain is reindexed immediately after the document is deleted.")]
     public async Task<DeleteManagedDocumentResult> delete_document(
-        [Description("The managed-content brain ID that owns the document.")] string brain_id,
-        [Description("Managed document ID to delete.")] string managed_document_id,
+        [Description("Optional managed-content brain ID. Omit this when the workspace has exactly one active managed-content brain.")] string? brain_id,
+        [Description("Optional managed document ID to delete.")] string? managed_document_id,
+        [Description("Optional canonical path to delete, for example \"projects/opencortex/frontend-portal-direction.md\".")] string? canonical_path,
         CancellationToken cancellationToken)
     {
         var tokenContext = GetRequiredTokenContext();
 
-        if (string.IsNullOrWhiteSpace(brain_id))
+        if (string.IsNullOrWhiteSpace(managed_document_id) && string.IsNullOrWhiteSpace(canonical_path))
         {
-            return DeleteManagedDocumentResult.Failure("brain_id is required.");
-        }
-
-        if (string.IsNullOrWhiteSpace(managed_document_id))
-        {
-            return DeleteManagedDocumentResult.Failure("managed_document_id is required.");
+            return DeleteManagedDocumentResult.Failure("Provide managed_document_id or canonical_path.");
         }
 
         var writeAccessError = await ValidateWriteAccessAsync(tokenContext, cancellationToken);
@@ -368,22 +551,42 @@ public sealed class OpenCortexTools(
             return DeleteManagedDocumentResult.Failure(writeAccessError);
         }
 
-        var (brain, brainError) = await GetManagedContentBrainAsync(tokenContext.CustomerId, brain_id, cancellationToken);
+        var (brain, brainError) = await ResolveManagedContentBrainAsync(tokenContext.CustomerId, brain_id, cancellationToken);
         if (brain is null)
         {
             return DeleteManagedDocumentResult.Failure(brainError!);
         }
 
+        var existing = !string.IsNullOrWhiteSpace(managed_document_id)
+            ? await managedDocumentStore.GetManagedDocumentAsync(
+                tokenContext.CustomerId,
+                brain.BrainId,
+                managed_document_id,
+                cancellationToken)
+            : await managedDocumentStore.GetManagedDocumentByCanonicalPathAsync(
+                tokenContext.CustomerId,
+                brain.BrainId,
+                ManagedDocumentText.BuildCanonicalPath(ManagedDocumentText.NormalizeSlug(canonical_path)),
+                cancellationToken);
+
+        if (existing is null)
+        {
+            return DeleteManagedDocumentResult.Failure(
+                !string.IsNullOrWhiteSpace(managed_document_id)
+                    ? $"Document '{managed_document_id}' was not found in brain '{brain.BrainId}'."
+                    : $"Document '{canonical_path}' was not found in brain '{brain.BrainId}'.");
+        }
+
         var deleted = await managedDocumentStore.SoftDeleteManagedDocumentAsync(
             tokenContext.CustomerId,
             brain.BrainId,
-            managed_document_id,
+            existing.ManagedDocumentId,
             tokenContext.UserId,
             cancellationToken);
 
         if (!deleted)
         {
-            return DeleteManagedDocumentResult.Failure($"Document '{managed_document_id}' was not found in brain '{brain.BrainId}'.");
+            return DeleteManagedDocumentResult.Failure($"Document '{existing.ManagedDocumentId}' was not found in brain '{brain.BrainId}'.");
         }
 
         var indexRun = await managedContentBrainIndexingService.ReindexAsync(
@@ -394,7 +597,7 @@ public sealed class OpenCortexTools(
 
         await SyncActiveDocumentCounterAsync(tokenContext.CustomerId, cancellationToken);
 
-        return DeleteManagedDocumentResult.Success(managed_document_id, indexRun);
+        return DeleteManagedDocumentResult.Success(existing.ManagedDocumentId, indexRun);
     }
 
     // -----------------------------------------------------------------------
@@ -528,6 +731,47 @@ public sealed class OpenCortexTools(
         return (brain, null);
     }
 
+    private async Task<(BrainDetail? Brain, string? Error)> ResolveManagedContentBrainAsync(
+        string customerId,
+        string? brainId,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(brainId))
+        {
+            return await GetManagedContentBrainAsync(customerId, brainId, cancellationToken);
+        }
+
+        var managedContentBrains = (await brainCatalogStore.ListBrainsByCustomerAsync(customerId, cancellationToken))
+            .Where(brain =>
+                !string.Equals(brain.Status, "retired", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(brain.Mode, "managed-content", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return managedContentBrains.Count switch
+        {
+            0 => (null, "No active managed-content brains were found in this workspace."),
+            1 => await GetManagedContentBrainAsync(customerId, managedContentBrains[0].BrainId, cancellationToken),
+            _ => (null, "brain_id is required because this workspace has multiple active managed-content brains. Use list_brains to choose one.")
+        };
+    }
+
+    private static string BuildTitleFromCanonicalPath(string canonicalPath)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(canonicalPath?.Replace('\\', '/'));
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return "Document";
+        }
+
+        var words = fileName
+            .Split(new[] { '-', '_' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(word => !string.IsNullOrWhiteSpace(word))
+            .Select(word => char.ToUpperInvariant(word[0]) + word[1..]);
+
+        var title = string.Join(' ', words);
+        return string.IsNullOrWhiteSpace(title) ? fileName : title;
+    }
+
     private async Task<UsageCounterRecord> SyncActiveDocumentCounterAsync(string customerId, CancellationToken cancellationToken)
     {
         var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(customerId, cancellationToken);
@@ -606,6 +850,15 @@ public sealed record ScoreBreakdownItem(double Keyword, double Semantic, double 
 
 public sealed record GetBrainResult(BrainDetailItem? Brain, string? Error);
 
+public sealed record GetDocumentResult(ManagedDocumentItem? Document, string? Error)
+{
+    public static GetDocumentResult Success(ManagedDocumentDetail document) =>
+        new(OpenCortexToolResultMapper.MapManagedDocument(document), null);
+
+    public static GetDocumentResult Failure(string message) =>
+        new(null, message);
+}
+
 public sealed record BrainDetailItem(
     string BrainId,
     string Name,
@@ -633,6 +886,19 @@ public sealed record ManagedDocumentResult(
 
     public static ManagedDocumentResult Failure(string message) =>
         new(null, null, message);
+}
+
+public sealed record SaveManagedDocumentResult(
+    string? Operation,
+    ManagedDocumentItem? Document,
+    IndexRunItem? IndexRun,
+    string? Error)
+{
+    public static SaveManagedDocumentResult Success(string operation, ManagedDocumentDetail document, IndexRunRecord indexRun) =>
+        new(operation, OpenCortexToolResultMapper.MapManagedDocument(document), OpenCortexToolResultMapper.MapIndexRun(indexRun), null);
+
+    public static SaveManagedDocumentResult Failure(string message) =>
+        new(null, null, null, message);
 }
 
 public sealed record DeleteManagedDocumentResult(

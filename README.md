@@ -99,7 +99,9 @@ During each index run, stale chunks, link edges, and embeddings for rescanned do
 
 The API now serves a lightweight admin console at `/admin/` for operator/debug workflows such as browsing brains, triggering indexing, inspecting run history/errors, and smoke-testing OQL queries from the browser.
 
-Customer-facing workspace flows now live in the separate `OpenCortex.Portal` project, which owns hosted Firebase sign-in plus managed-content document authoring, preview, version history, import/export, MCP token settings, and tenant-safe tooling pages.
+Customer-facing workspace flows now live in the separate `OpenCortex.Portal` project, with the React portal now serving as the primary shell at `/app` and the classic browser shell preserved at `/legacy` for fallback access.
+
+The portal direction is now active rather than aspirational: React + TypeScript is the primary customer shell, while the classic plain-JS portal remains available at `/legacy` during the cutover. Tiptap for rich document editing and React Flow for graph-aware interaction remain the next major frontend steps. See `docs/architecture/frontend-portal-direction.md`.
 
 The current portal is split into dedicated views for:
 
@@ -110,6 +112,10 @@ The current portal is split into dedicated views for:
 - Tools
 
 Managed-content authoring is now path-aware, so documents can use filenames like `daily/2026-03-10` and render in a folder-style document rail instead of a flat list.
+
+The portal Tools view can now show live workspace context, smoke-test retrieval, inspect ranked snippets, fetch the full stored document behind a result, and link to the published MCP tool manifest without leaving the diagnostics surface.
+
+For MCP write flows, agents should prefer `save_document` for create/update and can use `delete_document` by canonical path for removal. Both path-first tools can infer the target brain when the workspace has exactly one active managed-content brain.
 
 ## Licensing
 
@@ -122,3 +128,4 @@ That keeps the code open while requiring network-hosted modifications to remain 
 OpenCortex is currently limiting outside code contributions while the architecture, licensing, and commercialization strategy are still being defined.
 
 See `CONTRIBUTING.md` for the current contribution policy and `CLA.md` for the contributor assignment terms expected for accepted contributions.
+

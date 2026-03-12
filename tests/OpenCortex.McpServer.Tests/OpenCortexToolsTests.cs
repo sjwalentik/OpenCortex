@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using OpenCortex.Core.Authoring;
 using OpenCortex.Core.Brains;
 using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Persistence;
@@ -60,6 +61,37 @@ public sealed class OpenCortexToolsTests
     }
 
     [Fact]
+    public void ToolManifest_IncludesDocumentReadAndWriteHelpers()
+    {
+        var manifest = OpenCortexToolManifest.Build();
+        var toolNames = manifest.Select(item => item.Name).ToList();
+
+        var getDocument = manifest.Single(item => string.Equals(item.Name, "get_document", StringComparison.Ordinal));
+
+        Assert.Contains(getDocument.Parameters, parameter => string.Equals(parameter.Name, "brain_id", StringComparison.Ordinal));
+        Assert.Contains(getDocument.Parameters, parameter => string.Equals(parameter.Name, "document_id", StringComparison.Ordinal));
+        Assert.Contains(getDocument.Parameters, parameter => string.Equals(parameter.Name, "canonical_path", StringComparison.Ordinal));
+        Assert.DoesNotContain(getDocument.Parameters, parameter => string.Equals(parameter.Name, "cancellationToken", StringComparison.OrdinalIgnoreCase));
+
+        var saveDocument = manifest.Single(item => string.Equals(item.Name, "save_document", StringComparison.Ordinal));
+
+        Assert.Contains(saveDocument.Parameters, parameter => string.Equals(parameter.Name, "brain_id", StringComparison.Ordinal) && parameter.Optional);
+        Assert.Contains(saveDocument.Parameters, parameter => string.Equals(parameter.Name, "canonical_path", StringComparison.Ordinal) && !parameter.Optional);
+        Assert.Contains(saveDocument.Parameters, parameter => string.Equals(parameter.Name, "content", StringComparison.Ordinal) && !parameter.Optional);
+
+        var deleteDocument = manifest.Single(item => string.Equals(item.Name, "delete_document", StringComparison.Ordinal));
+
+        Assert.Contains(deleteDocument.Parameters, parameter => string.Equals(parameter.Name, "brain_id", StringComparison.Ordinal) && parameter.Optional);
+        Assert.Contains(deleteDocument.Parameters, parameter => string.Equals(parameter.Name, "managed_document_id", StringComparison.Ordinal) && parameter.Optional);
+        Assert.Contains(deleteDocument.Parameters, parameter => string.Equals(parameter.Name, "canonical_path", StringComparison.Ordinal) && parameter.Optional);
+        Assert.True(toolNames.IndexOf("save_document") < toolNames.IndexOf("create_document"));
+        Assert.True(toolNames.IndexOf("save_document") < toolNames.IndexOf("update_document"));
+        Assert.Contains("Preferred write tool", saveDocument.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prefer save_document", manifest.Single(item => string.Equals(item.Name, "create_document", StringComparison.Ordinal)).Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prefer save_document", manifest.Single(item => string.Equals(item.Name, "update_document", StringComparison.Ordinal)).Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task QueryBrain_ReturnsFailure_WhenOqlMissingFromClause()
     {
         var result = await BuildTools().query_brain("SEARCH \"test\"", CancellationToken.None);
@@ -111,6 +143,95 @@ public sealed class OpenCortexToolsTests
         Assert.Null(result.Error);
         Assert.NotNull(result.Brain);
         Assert.Equal("knowledge/canonical", result.Brain!.SourceRoots[0].Path);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsManagedDocumentByDocumentId_WhenFound()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        var created = await managedDocumentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                "brain-write",
+                "cus_test",
+                "Pixel",
+                "identity/pixel",
+                "# Pixel\n\nFull profile.",
+                new Dictionary<string, string> { ["type"] = "identity" },
+                "published",
+                "user_test"),
+            CancellationToken.None);
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            managedDocumentStore: managedDocumentStore)
+            .get_document("brain-write", created.ManagedDocumentId, null, CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.NotNull(result.Document);
+        Assert.Equal(created.ManagedDocumentId, result.Document!.ManagedDocumentId);
+        Assert.Equal("# Pixel\n\nFull profile.", result.Document.Content);
+        Assert.Equal("identity/pixel.md", result.Document.CanonicalPath);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsManagedDocumentByCanonicalPath_WhenFound()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        await managedDocumentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                "brain-write",
+                "cus_test",
+                "Pixel",
+                "identity/pixel",
+                "# Pixel\n\nFull profile.",
+                new Dictionary<string, string> { ["type"] = "identity" },
+                "published",
+                "user_test"),
+            CancellationToken.None);
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            managedDocumentStore: managedDocumentStore)
+            .get_document("brain-write", null, "identity/pixel.md", CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.NotNull(result.Document);
+        Assert.Equal("identity/pixel.md", result.Document!.CanonicalPath);
+        Assert.Equal("# Pixel\n\nFull profile.", result.Document.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsFailure_WhenIdentifierIsMissing()
+    {
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"))
+            .get_document("brain-write", null, null, CancellationToken.None);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("document_id or canonical_path", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsFailure_WhenBrainIsNotManagedContent()
+    {
+        var catalog = new StubBrainCatalogStore(new Dictionary<string, IReadOnlyList<BrainSummary>>
+        {
+            ["cus_test"] =
+            [
+                new BrainSummary("brain-read", "Read Brain", "brain-read", "Filesystem", "active", 0),
+            ],
+        });
+
+        var result = await BuildTools(
+            catalog: catalog,
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"))
+            .get_document("brain-read", "doc-1", null, CancellationToken.None);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("managed-content", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -173,6 +294,111 @@ public sealed class OpenCortexToolsTests
     }
 
     [Fact]
+    public async Task SaveDocument_CreatesManagedDocumentByCanonicalPath_AndInfersSingleBrain()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
+        var usageCounterStore = new StubUsageCounterStore();
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            usageCounterStore: usageCounterStore,
+            managedDocumentStore: managedDocumentStore,
+            indexingService: indexingService,
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .save_document(
+                null,
+                "projects/OpenCortex/frontend-portal-direction.md",
+                "# Direction\n\nReact + TypeScript",
+                null,
+                new Dictionary<string, string> { ["project"] = "OpenCortex" },
+                "published",
+                CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal("created", result.Operation);
+        Assert.NotNull(result.Document);
+        Assert.Equal("projects/opencortex/frontend-portal-direction.md", result.Document!.CanonicalPath);
+        Assert.Equal("Frontend Portal Direction", result.Document.Title);
+        Assert.Equal("published", result.Document.Status);
+        Assert.Equal("mcp-document-create", result.IndexRun!.TriggerType);
+        Assert.Equal(1, usageCounterStore.GetValue("cus_test", "documents.active"));
+        Assert.Single(indexingService.Calls);
+    }
+
+    [Fact]
+    public async Task SaveDocument_UpdatesManagedDocumentByCanonicalPath_WhenDocumentAlreadyExists()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
+        var existing = await managedDocumentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                "brain-write",
+                "cus_test",
+                "OpenCortex Frontend Direction",
+                "projects/opencortex/frontend-portal-direction",
+                "old content",
+                new Dictionary<string, string>(),
+                "draft",
+                "user_test"),
+            CancellationToken.None);
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            managedDocumentStore: managedDocumentStore,
+            indexingService: indexingService,
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .save_document(
+                "brain-write",
+                "projects/OpenCortex/frontend-portal-direction.md",
+                "new content",
+                "OpenCortex Frontend Direction",
+                null,
+                "published",
+                CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal("updated", result.Operation);
+        Assert.NotNull(result.Document);
+        Assert.Equal(existing.ManagedDocumentId, result.Document!.ManagedDocumentId);
+        Assert.Equal("new content", result.Document.Content);
+        Assert.Equal("published", result.Document.Status);
+        Assert.Equal("mcp-document-update", result.IndexRun!.TriggerType);
+        Assert.Single(indexingService.Calls);
+    }
+
+    [Fact]
+    public async Task SaveDocument_ReturnsFailure_WhenBrainMustBeDisambiguated()
+    {
+        var catalog = new StubBrainCatalogStore(new Dictionary<string, IReadOnlyList<BrainSummary>>
+        {
+            ["cus_test"] =
+            [
+                new BrainSummary("brain-one", "Brain One", "brain-one", "managed-content", "active", 0),
+                new BrainSummary("brain-two", "Brain Two", "brain-two", "managed-content", "active", 0),
+            ],
+        });
+
+        var result = await BuildTools(
+            catalog: catalog,
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .save_document(
+                null,
+                "projects/OpenCortex/frontend-portal-direction.md",
+                "content",
+                null,
+                null,
+                "draft",
+                CancellationToken.None);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("brain_id is required", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task DeleteDocument_DeletesManagedDocumentAndReturnsIndexRun()
     {
         var managedDocumentStore = new StubManagedDocumentStore();
@@ -197,13 +423,82 @@ public sealed class OpenCortexToolsTests
             managedDocumentStore: managedDocumentStore,
             indexingService: indexingService,
             httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
-            .delete_document("brain-write", created.ManagedDocumentId, CancellationToken.None);
+            .delete_document("brain-write", created.ManagedDocumentId, null, CancellationToken.None);
 
         Assert.Null(result.Error);
         Assert.Equal(created.ManagedDocumentId, result.ManagedDocumentId);
         Assert.Equal("mcp-document-delete", result.IndexRun!.TriggerType);
         Assert.Equal(0, managedDocumentStore.CountActive("cus_test"));
         Assert.Equal(0, usageCounterStore.GetValue("cus_test", "documents.active"));
+    }
+
+    [Fact]
+    public async Task DeleteDocument_DeletesManagedDocumentByCanonicalPath_AndInfersSingleBrain()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
+        var usageCounterStore = new StubUsageCounterStore();
+        var created = await managedDocumentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                "brain-write",
+                "cus_test",
+                "Frontend Portal Direction",
+                "projects/opencortex/frontend-portal-direction",
+                "body",
+                new Dictionary<string, string>(),
+                "published",
+                "user_test"),
+            CancellationToken.None);
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            usageCounterStore: usageCounterStore,
+            managedDocumentStore: managedDocumentStore,
+            indexingService: indexingService,
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .delete_document(null, null, "projects/OpenCortex/frontend-portal-direction.md", CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(created.ManagedDocumentId, result.ManagedDocumentId);
+        Assert.Equal("mcp-document-delete", result.IndexRun!.TriggerType);
+        Assert.Equal(0, managedDocumentStore.CountActive("cus_test"));
+        Assert.Equal(0, usageCounterStore.GetValue("cus_test", "documents.active"));
+    }
+
+    [Fact]
+    public async Task DeleteDocument_ReturnsFailure_WhenIdentifierIsMissing()
+    {
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .delete_document("brain-write", null, null, CancellationToken.None);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("managed_document_id or canonical_path", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeleteDocument_ReturnsFailure_WhenBrainMustBeDisambiguated()
+    {
+        var catalog = new StubBrainCatalogStore(new Dictionary<string, IReadOnlyList<BrainSummary>>
+        {
+            ["cus_test"] =
+            [
+                new BrainSummary("brain-one", "Brain One", "brain-one", "managed-content", "active", 0),
+                new BrainSummary("brain-two", "Brain Two", "brain-two", "managed-content", "active", 0),
+            ],
+        });
+
+        var result = await BuildTools(
+            catalog: catalog,
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .delete_document(null, null, "projects/OpenCortex/frontend-portal-direction.md", CancellationToken.None);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("brain_id is required", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -483,6 +778,13 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
         return Task.FromResult<ManagedDocumentDetail?>(null);
     }
 
+    public Task<ManagedDocumentDetail?> GetManagedDocumentByCanonicalPathAsync(string customerId, string brainId, string canonicalPath, CancellationToken cancellationToken = default)
+        => Task.FromResult<ManagedDocumentDetail?>(_documents.Values.FirstOrDefault(document =>
+            string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(document.CanonicalPath, canonicalPath, StringComparison.OrdinalIgnoreCase)
+            && !document.IsDeleted));
+
     public Task<IReadOnlyList<ManagedDocumentVersionSummary>> ListManagedDocumentVersionsAsync(string customerId, string brainId, string managedDocumentId, int limit = 50, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<ManagedDocumentVersionSummary>>(_versions
             .Where(version => string.Equals(version.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
@@ -525,7 +827,7 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
             request.CustomerId,
             request.Title,
             slug,
-            $"managed/{slug}.md",
+            ManagedDocumentText.BuildCanonicalPath(slug),
             content,
             new Dictionary<string, string>(request.Frontmatter, StringComparer.OrdinalIgnoreCase),
             $"hash-{managedDocumentId}",
@@ -558,7 +860,7 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
         {
             Title = request.Title,
             Slug = slug,
-            CanonicalPath = $"managed/{slug}.md",
+            CanonicalPath = ManagedDocumentText.BuildCanonicalPath(slug),
             Content = content,
             Frontmatter = new Dictionary<string, string>(request.Frontmatter, StringComparer.OrdinalIgnoreCase),
             Status = request.Status,

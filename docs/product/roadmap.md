@@ -218,7 +218,8 @@ Current bootstrap status:
 - MCP is now mapped explicitly at `/mcp` and requires bearer `oct_` tokens
 - MCP middleware resolves `customer_id`, updates `last_used_at`, and restricts all existing tools to customer-owned brains
 - `query_brain` now increments the shared monthly `mcp.queries.YYYY-MM` counter after token-based customer resolution
-- managed-content MCP write tools now exist: `create_document`, `update_document`, `delete_document`, and `reindex_brain`
+- managed-content MCP write tools now exist: `save_document`, `delete_document`, `create_document`, `update_document`, and `reindex_brain`
+- `save_document` should be treated as the default agent write tool; `create_document` and `update_document` remain as lower-level escape hatches
 - MCP write tools now require both `mcp:write` scope and a plan with `mcpWrite = true`, and document create reuses the same effective `maxDocuments` enforcement as the tenant API
 - the portal still requires configured API/Firebase settings, and broader account UI and transport-level MCP `429` responses are still pending
 - embedding-schema validation now hard-fails the API, MCP server, and workers when `OpenCortex:Embeddings:Dimensions` does not match the pgvector column definition
