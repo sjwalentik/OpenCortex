@@ -1,5 +1,6 @@
 using Npgsql;
 using NpgsqlTypes;
+using System.Text.Json;
 using OpenCortex.Core.Authoring;
 using OpenCortex.Core.Persistence;
 
@@ -833,7 +834,7 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
             slug,
             ManagedDocumentText.BuildCanonicalPath(slug),
             reader.GetString(5),
-            PostgresJson.Deserialize<Dictionary<string, string>>(reader.IsDBNull(6) ? "{}" : reader.GetString(6)) ?? [],
+            DeserializeFrontmatter(reader.IsDBNull(6) ? "{}" : reader.GetString(6)),
             reader.GetString(7),
             reader.GetString(8),
             reader.GetInt32(9),
@@ -875,12 +876,49 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
             slug,
             ManagedDocumentText.BuildCanonicalPath(slug),
             reader.GetString(6),
-            PostgresJson.Deserialize<Dictionary<string, string>>(reader.IsDBNull(7) ? "{}" : reader.GetString(7)) ?? [],
+            DeserializeFrontmatter(reader.IsDBNull(7) ? "{}" : reader.GetString(7)),
             reader.GetString(8),
             reader.GetString(9),
             reader.GetInt32(10),
             reader.GetString(11),
             reader.GetString(12),
             new DateTimeOffset(reader.GetDateTime(13), TimeSpan.Zero));
+    }
+
+    private static IReadOnlyDictionary<string, string> DeserializeFrontmatter(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            return PostgresJson.Deserialize<Dictionary<string, string>>(json)
+                ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                result[property.Name] = property.Value.ValueKind switch
+                {
+                    JsonValueKind.String => property.Value.GetString() ?? string.Empty,
+                    JsonValueKind.Null => string.Empty,
+                    JsonValueKind.True => bool.TrueString.ToLowerInvariant(),
+                    JsonValueKind.False => bool.FalseString.ToLowerInvariant(),
+                    _ => property.Value.GetRawText()
+                };
+            }
+
+            return result;
+        }
     }
 }

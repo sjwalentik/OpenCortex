@@ -111,12 +111,12 @@ public sealed class OpenCortexTools(
             r.CanonicalPath,
             r.Title,
             r.Snippet,
-            Math.Round(r.Score, 4),
+            RoundFinite(r.Score),
             r.Reason,
             new ScoreBreakdownItem(
-                Math.Round(r.Breakdown.KeywordScore, 4),
-                Math.Round(r.Breakdown.SemanticScore, 4),
-                Math.Round(r.Breakdown.GraphScore, 4)))).ToList();
+                RoundFinite(r.Breakdown.KeywordScore),
+                RoundFinite(r.Breakdown.SemanticScore),
+                RoundFinite(r.Breakdown.GraphScore)))).ToList();
 
         var summary = result.Summary;
 
@@ -124,8 +124,8 @@ public sealed class OpenCortexTools(
             Oql: oql,
             Error: null,
             TotalResults: summary.TotalResults,
-            MaxScore: Math.Round(summary.MaxScore, 4),
-            MinScore: Math.Round(summary.MinScore, 4),
+            MaxScore: RoundFinite(summary.MaxScore),
+            MinScore: RoundFinite(summary.MinScore),
             ResultsWithKeywordSignal: summary.ResultsWithKeywordSignal,
             ResultsWithSemanticSignal: summary.ResultsWithSemanticSignal,
             ResultsWithGraphSignal: summary.ResultsWithGraphSignal,
@@ -185,9 +185,9 @@ public sealed class OpenCortexTools(
         "Accepts either the retrieval document ID or the canonical path returned by query_brain.")]
     public async Task<GetDocumentResult> get_document(
         [Description("The managed-content brain ID that owns the document.")] string brain_id,
-        [Description("Optional retrieval document ID / managed document ID returned by query_brain.")] string? document_id,
-        [Description("Optional canonical path returned by query_brain, for example \"identity/pixel.md\".")] string? canonical_path,
-        CancellationToken cancellationToken)
+        [Description("Optional retrieval document ID / managed document ID returned by query_brain.")] string? document_id = null,
+        [Description("Optional canonical path returned by query_brain, for example \"identity/pixel.md\".")] string? canonical_path = null,
+        CancellationToken cancellationToken = default)
     {
         var tokenContext = GetRequiredTokenContext();
 
@@ -208,21 +208,28 @@ public sealed class OpenCortexTools(
         }
 
         ManagedDocumentDetail? document;
-        if (!string.IsNullOrWhiteSpace(document_id))
+        try
         {
-            document = await managedDocumentStore.GetManagedDocumentAsync(
-                tokenContext.CustomerId,
-                brain.BrainId,
-                document_id,
-                cancellationToken);
+            if (!string.IsNullOrWhiteSpace(document_id))
+            {
+                document = await managedDocumentStore.GetManagedDocumentAsync(
+                    tokenContext.CustomerId,
+                    brain.BrainId,
+                    document_id,
+                    cancellationToken);
+            }
+            else
+            {
+                document = await managedDocumentStore.GetManagedDocumentByCanonicalPathAsync(
+                    tokenContext.CustomerId,
+                    brain.BrainId,
+                    canonical_path!,
+                    cancellationToken);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            document = await managedDocumentStore.GetManagedDocumentByCanonicalPathAsync(
-                tokenContext.CustomerId,
-                brain.BrainId,
-                canonical_path!,
-                cancellationToken);
+            return GetDocumentResult.Failure($"Document retrieval failed: {ex.Message}");
         }
 
         if (document is null)
@@ -249,10 +256,10 @@ public sealed class OpenCortexTools(
         [Description("The managed-content brain ID that will own the document.")] string brain_id,
         [Description("Document title. Required.")] string title,
         [Description("Markdown or plain text content for the document.")] string content,
-        [Description("Optional slug override.")] string? slug,
-        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter,
-        [Description("Document status. Defaults to draft when omitted.")] string? status,
-        CancellationToken cancellationToken)
+        [Description("Optional slug override.")] string? slug = null,
+        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter = null,
+        [Description("Document status. Defaults to draft when omitted.")] string? status = null,
+        CancellationToken cancellationToken = default)
     {
         var tokenContext = GetRequiredTokenContext();
 
@@ -329,13 +336,13 @@ public sealed class OpenCortexTools(
         "Requires mcp:write scope and an MCP-write-enabled plan. " +
         "The brain is reindexed immediately after the document is saved.")]
     public async Task<SaveManagedDocumentResult> save_document(
-        [Description("Optional managed-content brain ID. Omit this when the workspace has exactly one active managed-content brain.")] string? brain_id,
         [Description("Canonical path for the document, for example \"projects/opencortex/frontend-portal-direction.md\".")] string canonical_path,
         [Description("Markdown or plain text content for the document.")] string content,
-        [Description("Optional document title. Defaults from the canonical path when omitted.")] string? title,
-        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter,
-        [Description("Document status. Defaults to draft when omitted.")] string? status,
-        CancellationToken cancellationToken)
+        [Description("Optional managed-content brain ID. Omit this when the workspace has exactly one active managed-content brain.")] string? brain_id = null,
+        [Description("Optional document title. Defaults from the canonical path when omitted.")] string? title = null,
+        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter = null,
+        [Description("Document status. Defaults to draft when omitted.")] string? status = null,
+        CancellationToken cancellationToken = default)
     {
         var tokenContext = GetRequiredTokenContext();
 
@@ -454,10 +461,10 @@ public sealed class OpenCortexTools(
         [Description("Managed document ID to update.")] string managed_document_id,
         [Description("Document title. Required.")] string title,
         [Description("Markdown or plain text content for the document.")] string content,
-        [Description("Optional slug override.")] string? slug,
-        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter,
-        [Description("Document status. Defaults to draft when omitted.")] string? status,
-        CancellationToken cancellationToken)
+        [Description("Optional slug override.")] string? slug = null,
+        [Description("Optional frontmatter key/value pairs.")] Dictionary<string, string>? frontmatter = null,
+        [Description("Document status. Defaults to draft when omitted.")] string? status = null,
+        CancellationToken cancellationToken = default)
     {
         var tokenContext = GetRequiredTokenContext();
 
@@ -533,10 +540,10 @@ public sealed class OpenCortexTools(
         "Requires mcp:write scope and an MCP-write-enabled plan. " +
         "The brain is reindexed immediately after the document is deleted.")]
     public async Task<DeleteManagedDocumentResult> delete_document(
-        [Description("Optional managed-content brain ID. Omit this when the workspace has exactly one active managed-content brain.")] string? brain_id,
-        [Description("Optional managed document ID to delete.")] string? managed_document_id,
-        [Description("Optional canonical path to delete, for example \"projects/opencortex/frontend-portal-direction.md\".")] string? canonical_path,
-        CancellationToken cancellationToken)
+        [Description("Optional managed-content brain ID. Omit this when the workspace has exactly one active managed-content brain.")] string? brain_id = null,
+        [Description("Optional managed document ID to delete.")] string? managed_document_id = null,
+        [Description("Optional canonical path to delete, for example \"projects/opencortex/frontend-portal-direction.md\".")] string? canonical_path = null,
+        CancellationToken cancellationToken = default)
     {
         var tokenContext = GetRequiredTokenContext();
 
@@ -810,6 +817,8 @@ public sealed class OpenCortexTools(
             ? $"Monthly MCP query limit reached for plan '{billingState.PlanId}'. Upgrade to continue."
             : null;
     }
+
+    private static double RoundFinite(double value) => Math.Round(double.IsFinite(value) ? value : 0.0, 4);
 
 }
 

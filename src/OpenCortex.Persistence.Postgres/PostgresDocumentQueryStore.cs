@@ -132,9 +132,9 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            var keywordScore  = reader.GetDouble(7);
-            var semanticScore = reader.GetDouble(8);
-            var graphScore    = reader.GetDouble(9);
+            var keywordScore  = SanitizeFiniteScore(reader.GetDouble(7));
+            var semanticScore = SanitizeFiniteScore(reader.GetDouble(8));
+            var graphScore    = SanitizeFiniteScore(reader.GetDouble(9));
             var titleMatched  = reader.GetBoolean(10);
             var contentMatched = reader.GetBoolean(11);
             var edgeCount     = reader.GetInt32(12);
@@ -150,7 +150,7 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
                 reader.GetString(3),
                 reader.IsDBNull(4) ? null : reader.GetString(4),
                 reader.IsDBNull(5) ? null : reader.GetString(5),
-                reader.GetDouble(6),
+                SanitizeFiniteScore(reader.GetDouble(6)),
                 reason,
                 breakdown));
         }
@@ -174,6 +174,8 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
             ? "CASE WHEN e.embedding_id IS NOT NULL THEN (1.0 - (e.vector <=> CAST(@query_vector AS vector))) ELSE 0.0 END"
             : "0.0";
     }
+
+    private static double SanitizeFiniteScore(double value) => double.IsFinite(value) ? value : 0.0;
 
     /// <summary>
     /// Builds a structured, human-readable reason string from the actual
