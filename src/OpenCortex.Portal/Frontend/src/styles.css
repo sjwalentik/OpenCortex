@@ -166,6 +166,63 @@ h3 {
   gap: 18px;
 }
 
+.auth-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.95fr);
+  align-items: stretch;
+}
+
+.auth-intro,
+.auth-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-panel {
+  align-content: start;
+}
+
+.auth-copy {
+  max-width: 62ch;
+}
+
+.session-form,
+.feature-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.feature-card {
+  background: rgba(255, 250, 242, 0.92);
+}
+
+.google-auth-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px dashed rgba(138, 75, 36, 0.24);
+  border-radius: 20px;
+  background: rgba(255, 248, 238, 0.78);
+}
+
+.google-signin-button {
+  justify-self: start;
+}
+
+.session-status {
+  margin: 0;
+}
+
+.auth-fallback-note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.auth-fallback-note a {
+  color: var(--primary-strong);
+}
+
 .session-chip {
   padding: 12px 18px;
   color: var(--primary-strong);

@@ -26,11 +26,12 @@ app.Use(async (context, next) =>
     var settings = PortalSettings.FromConfiguration(app.Configuration);
     var apiOrigin = settings.ApiBaseUri?.GetLeftPart(UriPartial.Authority) ?? "";
     var firebaseOrigins = "https://*.firebaseapp.com https://*.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com";
+    var firebaseScriptOrigins = "https://www.gstatic.com";
 
     headers["Content-Security-Policy"] = string.Join("; ",
         "default-src 'self'",
         $"connect-src 'self' {apiOrigin} {firebaseOrigins}".Trim(),
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        $"script-src 'self' 'unsafe-inline' 'unsafe-eval' {firebaseScriptOrigins}".Trim(),
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: https:",
         "font-src 'self' data:",

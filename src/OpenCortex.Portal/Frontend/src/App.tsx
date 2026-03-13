@@ -6,6 +6,8 @@ type PortalConfig = {
   apiBaseUrlConfigured: boolean;
   hostedAuthConfigured: boolean;
   firebaseProjectId?: string;
+  firebaseApiKey?: string;
+  firebaseAuthDomain?: string;
   mcpBaseUrl?: string;
   operatorConsoleUrl?: string;
   authMode?: string;
@@ -19,6 +21,55 @@ type StoredAuthSession = {
   displayName: string;
   expiresAt: string;
 };
+
+type PortalAuthResponse = {
+  idToken: string;
+  refreshToken: string;
+  email: string;
+  displayName?: string;
+  expiresAt?: string;
+  expiresIn: string;
+};
+
+type AuthPendingAction = 'signin' | 'register' | 'google' | null;
+
+type FirebaseUser = {
+  getIdToken(): Promise<string>;
+  getIdTokenResult(): Promise<{ expirationTime?: string } | null>;
+  refreshToken?: string;
+  email?: string | null;
+  displayName?: string | null;
+};
+
+type FirebaseUserCredential = {
+  user?: FirebaseUser | null;
+};
+
+type FirebaseAuthProvider = {
+  setCustomParameters(parameters: Record<string, string>): void;
+};
+
+type FirebaseAuthInstance = {
+  signInWithPopup(provider: FirebaseAuthProvider): Promise<FirebaseUserCredential>;
+  signOut(): Promise<void>;
+};
+
+type FirebaseAuthFactory = {
+  (): FirebaseAuthInstance;
+  GoogleAuthProvider: new () => FirebaseAuthProvider;
+};
+
+type FirebaseNamespace = {
+  apps: unknown[];
+  initializeApp(config: { apiKey?: string; authDomain?: string; projectId?: string }): unknown;
+  auth: FirebaseAuthFactory;
+};
+
+declare global {
+  interface Window {
+    firebase?: FirebaseNamespace;
+  }
+}
 
 type PortalContext = {
   displayName: string;
@@ -226,6 +277,13 @@ function App() {
   const [config, setConfig] = useState<PortalConfig | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [authSession, setAuthSession] = useState<StoredAuthSession | null>(() => loadStoredAuthSession());
+  const [authEmailInput, setAuthEmailInput] = useState('');
+  const [authPasswordInput, setAuthPasswordInput] = useState('');
+  const [authActionMessage, setAuthActionMessage] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authPendingAction, setAuthPendingAction] = useState<AuthPendingAction>(null);
+  const [firebaseAuth, setFirebaseAuth] = useState<FirebaseAuthInstance | null>(null);
+  const [googleAuthStatus, setGoogleAuthStatus] = useState('Google sign-in is available when the Google provider is enabled in Firebase Authentication.');
   const [context, setContext] = useState<PortalContext | null>(null);
   const [billing, setBilling] = useState<PortalBilling | null>(null);
   const [brains, setBrains] = useState<BrainSummary[]>([]);
@@ -310,6 +368,51 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!config) {
+      return;
+    }
+
+    let cancelled = false;
+    let retryHandle: number | null = null;
+    let attempts = 0;
+
+    const syncGoogleAuth = () => {
+      if (cancelled) {
+        return;
+      }
+
+      if (!config.hostedAuthConfigured || !config.firebaseProjectId || !config.firebaseApiKey) {
+        setFirebaseAuth(null);
+        setGoogleAuthStatus('Configure Firebase project and API key values before enabling browser auth.');
+        return;
+      }
+
+      const auth = initializeFirebaseAuth(config);
+      if (auth) {
+        setFirebaseAuth(auth);
+        setGoogleAuthStatus('Google sign-in uses the Firebase Authentication provider settings for this project.');
+        return;
+      }
+
+      setFirebaseAuth(null);
+      setGoogleAuthStatus('Waiting for the Firebase browser auth SDK to load.');
+      if (attempts < 20) {
+        attempts += 1;
+        retryHandle = window.setTimeout(syncGoogleAuth, 250);
+      }
+    };
+
+    syncGoogleAuth();
+
+    return () => {
+      cancelled = true;
+      if (retryHandle !== null) {
+        window.clearTimeout(retryHandle);
+      }
+    };
+  }, [config]);
+
+  useEffect(() => {
     const syncFromLocation = () => {
       const resolved = resolveViewFromHash(window.location.hash, authSession);
       setActiveView(resolved);
@@ -340,13 +443,27 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (authSession) {
+      setAuthError(null);
+      setAuthPendingAction(null);
+    } else {
+      setAuthActionMessage(null);
+      setAuthError(null);
+      setAuthPendingAction(null);
+    }
+  }, [authSession]);
+
+  useEffect(() => {
     if (!authSession) {
+      setAuthError(null);
+      setAuthPendingAction(null);
       setContext(null);
       setBilling(null);
       setBrains([]);
       setTokens([]);
       setWorkspaceError(null);
       setActiveBrainId('');
+      setFirebaseAuth(null);
       setCreatedToken(null);
       setAccountActionMessage(null);
       setToolQueryBrainId('');
@@ -1071,6 +1188,111 @@ function App() {
       setVersionError(error instanceof Error ? error.message : 'Failed to restore the selected version.');
     }
   }
+  async function handleAuthenticate(endpoint: '/portal-auth/login' | '/portal-auth/register', action: Exclude<AuthPendingAction, null>) {
+    const email = authEmailInput.trim();
+    const password = authPasswordInput;
+
+    if (!email || !password) {
+      setAuthError('Email and password are required.');
+      return;
+    }
+
+    setAuthPendingAction(action);
+    setAuthError(null);
+    setAuthActionMessage(null);
+
+    try {
+      const session = buildStoredAuthSession(await postJson(endpoint, {
+        email,
+        password,
+      }) as PortalAuthResponse);
+
+      saveStoredAuthSession(session);
+      setAuthSession(session);
+      setAuthPasswordInput('');
+      setAuthActionMessage(action === 'signin' ? 'Signed in.' : 'Account created and signed in.');
+      navigateToView('documents', session, setActiveView);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Authentication failed.');
+    } finally {
+      setAuthPendingAction(null);
+    }
+  }
+
+  async function handleSignIn() {
+    await handleAuthenticate('/portal-auth/login', 'signin');
+  }
+
+  async function handleCreateAccount() {
+    await handleAuthenticate('/portal-auth/register', 'register');
+  }
+
+  async function handleGoogleSignIn() {
+    if (!config?.hostedAuthConfigured) {
+      setAuthError('Configure Firebase project and API key values before using Google sign-in.');
+      return;
+    }
+
+    const auth = firebaseAuth ?? initializeFirebaseAuth(config);
+    if (!auth) {
+      setAuthError('Firebase browser auth is not ready yet. Try again in a moment.');
+      setGoogleAuthStatus('Waiting for the Firebase browser auth SDK to load.');
+      return;
+    }
+
+    setFirebaseAuth(auth);
+    setAuthPendingAction('google');
+    setAuthError(null);
+    setAuthActionMessage('Starting Google sign-in...');
+
+    try {
+      const provider = new window.firebase!.auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+
+      const userCredential = await auth.signInWithPopup(provider);
+      const user = userCredential?.user;
+      if (!user) {
+        throw new Error('Google authentication did not return a Firebase user.');
+      }
+
+      const session = await buildStoredAuthSessionFromFirebaseUser(user);
+      saveStoredAuthSession(session);
+      setAuthSession(session);
+      setAuthEmailInput(session.email || authEmailInput);
+      setAuthPasswordInput('');
+      setAuthActionMessage('Signed in with Google.');
+      navigateToView('documents', session, setActiveView);
+    } catch (error) {
+      setAuthError(normalizeFirebaseClientError(error));
+      setAuthActionMessage(null);
+    } finally {
+      setAuthPendingAction(null);
+    }
+  }
+
+  async function handleSignOut() {
+    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Sign out and discard unsaved document changes?')) {
+      return;
+    }
+
+    clearStoredAuthSession();
+
+    try {
+      if (firebaseAuth) {
+        await firebaseAuth.signOut();
+      }
+    } catch {
+      // Local browser session is already cleared; ignore Firebase sign-out errors.
+    }
+
+    setAuthSession(null);
+    setAuthPasswordInput('');
+    setCreatedToken(null);
+    setAccountActionMessage(null);
+    setAuthActionMessage('Signed out of the browser session.');
+    navigateToView('signin', null, setActiveView);
+  }
+
   async function handleRefreshSession() {
     try {
       await getValidSession();
@@ -1290,7 +1512,7 @@ function App() {
             >
               Refresh Workspace
             </button>
-            <button type="button" className="button button-danger" onClick={handleClearSession} disabled={!authSession}>
+            <button type="button" className="button button-danger" onClick={handleSignOut} disabled={!authSession}>
               Clear Session
             </button>
           </div>
@@ -1340,7 +1562,22 @@ function App() {
 
       <main className="portal-main">
         {!authSession ? (
-          <SignedOutState activeDefinition={activeDefinition} />
+          <SignedOutState
+            activeDefinition={activeDefinition}
+            authActionMessage={authActionMessage}
+            authEmailInput={authEmailInput}
+            authError={authError}
+            authPasswordInput={authPasswordInput}
+            authPendingAction={authPendingAction}
+            config={config}
+            googleAuthReady={Boolean(firebaseAuth)}
+            googleAuthStatus={googleAuthStatus}
+            onAuthEmailInputChange={setAuthEmailInput}
+            onAuthPasswordInputChange={setAuthPasswordInput}
+            onCreateAccount={handleCreateAccount}
+            onGoogleSignIn={handleGoogleSignIn}
+            onSignIn={handleSignIn}
+          />
         ) : activeView === 'documents' ? (
           <DocumentsView
             activeBrain={activeBrain}
@@ -1435,7 +1672,7 @@ function App() {
             onDismissCreatedToken={() => setCreatedToken(null)}
             onRefreshSession={handleRefreshSession}
             onRevokeToken={handleRevokeToken}
-            onSignOut={handleClearSession}
+            onSignOut={handleSignOut}
             onRequestWriteScopeChange={setRequestWriteScope}
             onTokenExpiresAtInputChange={setTokenExpiresAtInput}
             onTokenNameInputChange={setTokenNameInput}
@@ -1461,39 +1698,128 @@ function App() {
 
 type SignedOutStateProps = {
   activeDefinition: ViewDefinition;
+  authActionMessage: string | null;
+  authEmailInput: string;
+  authError: string | null;
+  authPasswordInput: string;
+  authPendingAction: AuthPendingAction;
+  config: PortalConfig | null;
+  googleAuthReady: boolean;
+  googleAuthStatus: string;
+  onAuthEmailInputChange: (value: string) => void;
+  onAuthPasswordInputChange: (value: string) => void;
+  onCreateAccount: () => Promise<void>;
+  onGoogleSignIn: () => Promise<void>;
+  onSignIn: () => Promise<void>;
 };
 
-function SignedOutState({ activeDefinition }: SignedOutStateProps) {
+function SignedOutState({
+  activeDefinition,
+  authActionMessage,
+  authEmailInput,
+  authError,
+  authPasswordInput,
+  authPendingAction,
+  config,
+  googleAuthReady,
+  googleAuthStatus,
+  onAuthEmailInputChange,
+  onAuthPasswordInputChange,
+  onCreateAccount,
+  onGoogleSignIn,
+  onSignIn
+}: SignedOutStateProps) {
+  const hostedAuthAvailable = config?.hostedAuthConfigured !== false;
+  const authDisabled = !hostedAuthAvailable || authPendingAction !== null;
+  const googleAuthDisabled = authPendingAction !== null || !hostedAuthAvailable || !googleAuthReady;
+
   return (
     <section className="portal-layout">
-      <article className="panel portal-hero">
-        <p className="eyebrow">Sign In</p>
-        <h2>The portal uses the same browser session contract.</h2>
-        <p className="summary-detail">
-          Use the classic portal if you need the older sign-in surface. This app reads the same stored browser session and tenant bootstrap endpoints.
-        </p>
-        <ul className="feature-list">
-          {activeDefinition.bullets.map((bullet) => (
-            <li key={bullet}>{bullet}</li>
-          ))}
-        </ul>
-        <div className="action-row">
-          <button type="button" className="button button-primary" onClick={() => window.location.assign('/legacy')}>
-            Open Classic Sign-In
-          </button>
-        </div>
-      </article>
-
-      <section className="portal-grid">
-        <article className="panel slice-card">
-          <p className="panel-label">Current Contract</p>
-          <h3>Same storage key and refresh flow</h3>
-          <p>The portal reads `opencortex.portal.auth_session` and reuses `/portal-auth/refresh` before calling tenant APIs.</p>
+      <section className="auth-layout">
+        <article className="panel portal-hero auth-intro">
+          <p className="eyebrow">Sign In</p>
+          <h2>Authenticate directly into the React portal.</h2>
+          <p className="summary-detail auth-copy">
+            This host now owns its email and password entry flow. It writes the same browser session contract, then loads workspace state without sending you back through the classic shell.
+          </p>
+          <ul className="feature-list">
+            {activeDefinition.bullets.map((bullet) => (
+              <li key={bullet}>{bullet}</li>
+            ))}
+          </ul>
+          <div className="feature-stack">
+            <article className="slice-card feature-card">
+              <p className="panel-label">Session Contract</p>
+              <h3>Same storage key, new entry surface</h3>
+              <p>The React portal writes the shared auth session itself and still reuses the refresh endpoint before tenant API calls.</p>
+            </article>
+            <article className="slice-card feature-card">
+              <p className="panel-label">Fallback</p>
+              <h3>Classic shell remains available</h3>
+              <p>The classic portal still lives at /legacy, but it is no longer required just to start a session.</p>
+            </article>
+          </div>
         </article>
-        <article className="panel slice-card">
-          <p className="panel-label">Cutover Rule</p>
-          <h3>Legacy Fallback</h3>
-          <p>The classic portal remains available at `/legacy` for fallback access.</p>
+
+        <article className="panel auth-panel">
+          <p className="panel-label">Portal Access</p>
+          <h3>Sign in with hosted auth</h3>
+          <p className="summary-detail">
+            Use the same hosted email/password backend the classic portal uses today.
+          </p>
+          <form className="session-form" onSubmit={(event) => {
+            event.preventDefault();
+            void onSignIn();
+          }}>
+            <label className="field" htmlFor="auth-email">
+              <span>Email</span>
+              <input
+                id="auth-email"
+                type="email"
+                value={authEmailInput}
+                onChange={(event) => onAuthEmailInputChange(event.target.value)}
+                autoComplete="email"
+                placeholder="you@company.com"
+                disabled={authDisabled}
+              />
+            </label>
+            <label className="field" htmlFor="auth-password">
+              <span>Password</span>
+              <input
+                id="auth-password"
+                type="password"
+                value={authPasswordInput}
+                onChange={(event) => onAuthPasswordInputChange(event.target.value)}
+                autoComplete="current-password"
+                placeholder="Enter your password"
+                disabled={authDisabled}
+              />
+            </label>
+            {authError ? <p className="banner error-banner" role="alert">{authError}</p> : null}
+            {authActionMessage ? <p className="banner info-banner session-status">{authActionMessage}</p> : null}
+            {!hostedAuthAvailable ? (
+              <p className="banner error-banner" role="alert">
+                Hosted auth is not configured for this portal host yet.
+              </p>
+            ) : null}
+            <div className="action-row">
+              <button type="submit" className="button button-primary" disabled={authDisabled}>
+                {authPendingAction === 'signin' ? 'Signing In...' : 'Sign In'}
+              </button>
+              <button type="button" className="button" onClick={() => void onCreateAccount()} disabled={authDisabled}>
+                {authPendingAction === 'register' ? 'Creating Account...' : 'Create Account'}
+              </button>
+            </div>
+          </form>
+          <div className="google-auth-panel">
+            <p className="summary-detail">{googleAuthStatus}</p>
+            <button type="button" className="button google-signin-button" onClick={() => void onGoogleSignIn()} disabled={googleAuthDisabled}>
+              {authPendingAction === 'google' ? 'Connecting to Google...' : 'Continue with Google'}
+            </button>
+          </div>
+          <p className="auth-fallback-note">
+            Need the previous shell for comparison? <a href="/legacy">Open the classic portal</a>.
+          </p>
         </article>
       </section>
     </section>
@@ -2597,6 +2923,74 @@ function clearStoredAuthSession() {
   window.localStorage.removeItem(storageKey);
 }
 
+function saveStoredAuthSession(session: StoredAuthSession) {
+  window.localStorage.setItem(storageKey, JSON.stringify(session));
+}
+
+function buildStoredAuthSession(session: PortalAuthResponse): StoredAuthSession {
+  return {
+    idToken: session.idToken,
+    refreshToken: session.refreshToken,
+    email: session.email,
+    displayName: session.displayName || session.email.split('@', 1)[0] || '',
+    expiresAt: session.expiresAt || buildExpiryTimestamp(session.expiresIn)
+  };
+}
+
+function initializeFirebaseAuth(config: PortalConfig): FirebaseAuthInstance | null {
+  if (!config.firebaseProjectId || !config.firebaseApiKey) {
+    return null;
+  }
+
+  if (!window.firebase?.initializeApp || !window.firebase?.auth) {
+    return null;
+  }
+
+  if (!window.firebase.apps.length) {
+    window.firebase.initializeApp({
+      apiKey: config.firebaseApiKey,
+      authDomain: config.firebaseAuthDomain,
+      projectId: config.firebaseProjectId,
+    });
+  }
+
+  return window.firebase.auth();
+}
+
+function normalizeFirebaseClientError(error: unknown) {
+  const candidate = error as { code?: string; message?: string };
+  const code = candidate?.code || '';
+
+  switch (code) {
+    case 'auth/popup-closed-by-user':
+      return 'Google sign-in was cancelled before it completed.';
+    case 'auth/cancelled-popup-request':
+      return 'Another Google sign-in attempt is already in progress.';
+    case 'auth/operation-not-allowed':
+      return 'Google sign-in is not enabled for this Firebase project.';
+    case 'auth/unauthorized-domain':
+      return 'This portal origin is not authorized in Firebase Authentication.';
+    default:
+      return candidate?.message || 'Google sign-in failed.';
+  }
+}
+
+async function buildStoredAuthSessionFromFirebaseUser(user: FirebaseUser): Promise<StoredAuthSession> {
+  const [idToken, idTokenResult] = await Promise.all([
+    user.getIdToken(),
+    user.getIdTokenResult(),
+  ]);
+
+  return buildStoredAuthSession({
+    idToken,
+    refreshToken: user.refreshToken || '',
+    email: user.email || '',
+    displayName: user.displayName || '',
+    expiresAt: idTokenResult?.expirationTime || '',
+    expiresIn: '3600'
+  });
+}
+
 async function ensureValidSession(session: StoredAuthSession) {
   if (isSessionFresh(session)) {
     return session;
@@ -2610,7 +3004,7 @@ async function ensureValidSession(session: StoredAuthSession) {
     expiresAt: buildExpiryTimestamp(refreshed.expiresIn)
   };
 
-  window.localStorage.setItem(storageKey, JSON.stringify(updatedSession));
+  saveStoredAuthSession(updatedSession);
   return updatedSession;
 }
 
@@ -3149,6 +3543,7 @@ function handleClearSession() {
 }
 
 export default App;
+
 
 
 
