@@ -463,7 +463,6 @@ function App() {
       setTokens([]);
       setWorkspaceError(null);
       setActiveBrainId('');
-      setFirebaseAuth(null);
       setCreatedToken(null);
       setAccountActionMessage(null);
       setToolQueryBrainId('');
@@ -3543,7 +3542,6 @@ function handleClearSession() {
 }
 
 export default App;
-
 
 
 
