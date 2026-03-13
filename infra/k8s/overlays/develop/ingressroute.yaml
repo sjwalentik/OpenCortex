@@ -12,12 +12,6 @@ spec:
   entryPoints:
     - websecure
   routes:
-    # Portal - main site
-    - match: Host(`${DOMAIN}`)
-      kind: Rule
-      services:
-        - name: opencortex-portal
-          port: 8080
     # API - under /api path
     - match: Host(`${DOMAIN}`) && PathPrefix(`/api`)
       kind: Rule
@@ -31,6 +25,18 @@ spec:
       kind: Rule
       services:
         - name: opencortex-mcp
+          port: 8080
+    # MCP diagnostics - public tool inventory
+    - match: Host(`${DOMAIN}`) && Path(`/tool-manifest`)
+      kind: Rule
+      services:
+        - name: opencortex-mcp
+          port: 8080
+    # Portal - main site
+    - match: Host(`${DOMAIN}`)
+      kind: Rule
+      services:
+        - name: opencortex-portal
           port: 8080
   tls:
     certResolver: le
