@@ -148,6 +148,10 @@ jobs:
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -k infra/k8s/overlays/develop
+          kubectl set image deployment/opencortex-api api=${{ env.IMAGE_PREFIX }}/api:${{ env.IMAGE_TAG }} -n opencortex-develop
+          kubectl set image deployment/opencortex-portal portal=${{ env.IMAGE_PREFIX }}/portal:${{ env.IMAGE_TAG }} -n opencortex-develop
+          kubectl set image deployment/opencortex-mcp mcp=${{ env.IMAGE_PREFIX }}/mcp:${{ env.IMAGE_TAG }} -n opencortex-develop
+          kubectl set image deployment/opencortex-workers workers=${{ env.IMAGE_PREFIX }}/workers:${{ env.IMAGE_TAG }} -n opencortex-develop
 
       - name: Wait for rollout
         run: |
