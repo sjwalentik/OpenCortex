@@ -17,6 +17,8 @@ COPY src/OpenCortex.Workers/OpenCortex.Workers.csproj src/OpenCortex.Workers/
 RUN --mount=type=cache,target=/root/.nuget/packages \
     --mount=type=cache,target=/root/.local/share/NuGet/v3-cache \
     for attempt in 1 2 3; do \
+      NUGET_ENHANCED_MAX_NETWORK_TRY_COUNT=1 \
+      NUGET_ENHANCED_NETWORK_RETRY_DELAY_MILLISECONDS=1000 \
       dotnet restore src/OpenCortex.Workers/OpenCortex.Workers.csproj --disable-parallel && exit 0; \
       if [ "$attempt" -eq 3 ]; then exit 1; fi; \
       sleep $((attempt * 10)); \
