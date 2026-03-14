@@ -31,8 +31,10 @@ COPY src/OpenCortex.Indexer/ src/OpenCortex.Indexer/
 COPY src/OpenCortex.Retrieval/ src/OpenCortex.Retrieval/
 COPY src/OpenCortex.Api/ src/OpenCortex.Api/
 
-# Build and publish
-RUN dotnet publish src/OpenCortex.Api/OpenCortex.Api.csproj \
+# Build and publish using the same NuGet caches populated during restore.
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    --mount=type=cache,target=/root/.local/share/NuGet/v3-cache \
+    dotnet publish src/OpenCortex.Api/OpenCortex.Api.csproj \
     -c Release \
     -o /app/publish \
     --no-restore \

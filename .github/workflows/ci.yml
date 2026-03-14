@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, opencortex-deploy]
 
     steps:
       - name: Checkout
@@ -27,7 +27,7 @@ jobs:
         run: dotnet test -c Release --no-restore --verbosity normal
 
   build-frontend:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, opencortex-deploy]
 
     steps:
       - name: Checkout

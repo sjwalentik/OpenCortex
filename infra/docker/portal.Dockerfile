@@ -45,8 +45,10 @@ COPY src/OpenCortex.Portal/ src/OpenCortex.Portal/
 # Copy frontend build output to wwwroot (Vite outputs to ../wwwroot/app relative to Frontend dir)
 COPY --from=frontend-build /wwwroot/app src/OpenCortex.Portal/wwwroot/app/
 
-# Build and publish
-RUN dotnet publish src/OpenCortex.Portal/OpenCortex.Portal.csproj \
+# Build and publish using the same NuGet caches populated during restore.
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    --mount=type=cache,target=/root/.local/share/NuGet/v3-cache \
+    dotnet publish src/OpenCortex.Portal/OpenCortex.Portal.csproj \
     -c Release \
     -o /app/publish \
     --no-restore \
