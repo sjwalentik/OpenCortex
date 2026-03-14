@@ -5,17 +5,27 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@tiptap/extension-placeholder": "^3.20.1",
+    "@tiptap/react": "^3.20.1",
+    "@tiptap/starter-kit": "^3.20.1",
+    "marked": "^17.0.4",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "turndown": "^7.2.2"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "latest",
+    "jsdom": "^28.1.0",
     "typescript": "latest",
-    "vite": "latest"
+    "vite": "latest",
+    "vitest": "^4.1.0"
   }
 }
