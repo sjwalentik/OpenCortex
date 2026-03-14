@@ -8,8 +8,14 @@ WORKDIR /src
 # Copy solution and project files first for better layer caching
 COPY OpenCortex.sln ./
 COPY src/OpenCortex.Core/OpenCortex.Core.csproj src/OpenCortex.Core/
+COPY src/OpenCortex.Conversations/OpenCortex.Conversations.csproj src/OpenCortex.Conversations/
 COPY src/OpenCortex.Persistence.Postgres/OpenCortex.Persistence.Postgres.csproj src/OpenCortex.Persistence.Postgres/
 COPY src/OpenCortex.Indexer/OpenCortex.Indexer.csproj src/OpenCortex.Indexer/
+COPY src/OpenCortex.Providers.Abstractions/OpenCortex.Providers.Abstractions.csproj src/OpenCortex.Providers.Abstractions/
+COPY src/OpenCortex.Providers.Anthropic/OpenCortex.Providers.Anthropic.csproj src/OpenCortex.Providers.Anthropic/
+COPY src/OpenCortex.Providers.OpenAI/OpenCortex.Providers.OpenAI.csproj src/OpenCortex.Providers.OpenAI/
+COPY src/OpenCortex.Providers.Ollama/OpenCortex.Providers.Ollama.csproj src/OpenCortex.Providers.Ollama/
+COPY src/OpenCortex.Orchestration/OpenCortex.Orchestration.csproj src/OpenCortex.Orchestration/
 COPY src/OpenCortex.Retrieval/OpenCortex.Retrieval.csproj src/OpenCortex.Retrieval/
 COPY src/OpenCortex.Api/OpenCortex.Api.csproj src/OpenCortex.Api/
 
@@ -26,8 +32,14 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
 
 # Copy source code
 COPY src/OpenCortex.Core/ src/OpenCortex.Core/
+COPY src/OpenCortex.Conversations/ src/OpenCortex.Conversations/
 COPY src/OpenCortex.Persistence.Postgres/ src/OpenCortex.Persistence.Postgres/
 COPY src/OpenCortex.Indexer/ src/OpenCortex.Indexer/
+COPY src/OpenCortex.Providers.Abstractions/ src/OpenCortex.Providers.Abstractions/
+COPY src/OpenCortex.Providers.Anthropic/ src/OpenCortex.Providers.Anthropic/
+COPY src/OpenCortex.Providers.OpenAI/ src/OpenCortex.Providers.OpenAI/
+COPY src/OpenCortex.Providers.Ollama/ src/OpenCortex.Providers.Ollama/
+COPY src/OpenCortex.Orchestration/ src/OpenCortex.Orchestration/
 COPY src/OpenCortex.Retrieval/ src/OpenCortex.Retrieval/
 COPY src/OpenCortex.Api/ src/OpenCortex.Api/
 
