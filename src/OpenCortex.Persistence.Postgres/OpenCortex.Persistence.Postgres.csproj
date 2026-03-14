@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OpenCortex.Core\OpenCortex.Core.csproj" />
+    <ProjectReference Include="..\OpenCortex.Conversations\OpenCortex.Conversations.csproj" />
   </ItemGroup>
 
   <ItemGroup>

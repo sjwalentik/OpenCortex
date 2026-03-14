@@ -5,6 +5,12 @@
     <ProjectReference Include="..\OpenCortex.Indexer\OpenCortex.Indexer.csproj" />
     <ProjectReference Include="..\OpenCortex.Retrieval\OpenCortex.Retrieval.csproj" />
     <ProjectReference Include="..\OpenCortex.Persistence.Postgres\OpenCortex.Persistence.Postgres.csproj" />
+    <ProjectReference Include="..\OpenCortex.Providers.Abstractions\OpenCortex.Providers.Abstractions.csproj" />
+    <ProjectReference Include="..\OpenCortex.Providers.Anthropic\OpenCortex.Providers.Anthropic.csproj" />
+    <ProjectReference Include="..\OpenCortex.Providers.OpenAI\OpenCortex.Providers.OpenAI.csproj" />
+    <ProjectReference Include="..\OpenCortex.Providers.Ollama\OpenCortex.Providers.Ollama.csproj" />
+    <ProjectReference Include="..\OpenCortex.Orchestration\OpenCortex.Orchestration.csproj" />
+    <ProjectReference Include="..\OpenCortex.Conversations\OpenCortex.Conversations.csproj" />
   </ItemGroup>
 
   <ItemGroup>

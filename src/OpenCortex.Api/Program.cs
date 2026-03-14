@@ -3,14 +3,20 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using OpenCortex.Api;
+using OpenCortex.Conversations;
+using OpenCortex.Core;
 using OpenCortex.Core.Configuration;
+using OpenCortex.Core.OAuth;
 using OpenCortex.Core.Embeddings;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Query;
 using OpenCortex.Core.Security;
 using OpenCortex.Core.Tenancy;
 using OpenCortex.Indexer.Indexing;
+using OpenCortex.Orchestration;
+using OpenCortex.Orchestration.Routing;
 using OpenCortex.Persistence.Postgres;
+using OpenCortex.Providers.Abstractions;
 using OpenCortex.Retrieval.Execution;
 using Stripe;
 using BillingPortalSessionService = Stripe.BillingPortal.SessionService;
@@ -577,6 +583,48 @@ builder.Services.AddCors(cors =>
         }
     });
 });
+
+// ---------------------------------------------------------------------------
+// Multi-model orchestration services
+// ---------------------------------------------------------------------------
+
+var orchestrationConfig = builder.Configuration.GetSection("OpenCortex:Orchestration");
+// Register orchestration services
+builder.Services.AddOrchestration(orchestrationConfig.Key);
+
+// Register HTTP clients for providers (used by UserProviderFactory)
+builder.Services.AddHttpClient("Anthropic");
+builder.Services.AddHttpClient("OpenAI");
+builder.Services.AddHttpClient("Ollama");
+
+// Register credential encryption for user provider configs
+var encryptionKey = builder.Configuration["OpenCortex:Security:EncryptionKey"];
+if (!string.IsNullOrEmpty(encryptionKey))
+{
+    builder.Services.AddSingleton<ICredentialEncryption>(new AesCredentialEncryption(encryptionKey));
+}
+else
+{
+    // Fallback for development - generate a key warning
+    validationErrors.Add("OpenCortex:Security:EncryptionKey is not set. User provider configs will not be encrypted properly.");
+    builder.Services.AddSingleton<ICredentialEncryption>(new AesCredentialEncryption("DEVELOPMENT_KEY_DO_NOT_USE_IN_PRODUCTION"));
+}
+
+// Register user provider configuration repository
+builder.Services.AddScoped<IUserProviderConfigRepository>(sp =>
+    new PostgresUserProviderConfigRepository(connectionFactory));
+
+// Register OAuth service for provider authentication
+builder.Services.Configure<ProviderOAuthConfig>(builder.Configuration.GetSection(ProviderOAuthConfig.SectionName));
+builder.Services.AddHttpClient<IProviderOAuthService, ProviderOAuthService>();
+
+// Register user provider factory (creates providers with user credentials)
+builder.Services.AddScoped<IUserProviderFactory, UserProviderFactory>();
+
+// Register conversation services
+builder.Services.AddConversations();
+builder.Services.AddScoped<IConversationRepository>(sp =>
+    new PostgresConversationRepository(connectionFactory));
 
 var app = builder.Build();
 
@@ -1843,6 +1891,13 @@ else
         return Results.Ok(new { brainId, count = documents.Count, documents });
     });
 }
+
+// ---------------------------------------------------------------------------
+// Chat and orchestration endpoints
+// ---------------------------------------------------------------------------
+
+app.MapChatEndpoints(hostedAuthConfigured);
+app.MapProviderConfigEndpoints();
 
 app.Run();
 
