@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # OpenCortex Portal Dockerfile
 # Multi-stage build with React frontend and ASP.NET backend
 
@@ -26,8 +27,10 @@ COPY OpenCortex.sln ./
 COPY src/OpenCortex.Core/OpenCortex.Core.csproj src/OpenCortex.Core/
 COPY src/OpenCortex.Portal/OpenCortex.Portal.csproj src/OpenCortex.Portal/
 
-# Restore dependencies. Retry transient NuGet failures on CI runners.
-RUN for attempt in 1 2 3; do \
+# Restore dependencies. Cache NuGet state and retry transient CI network failures.
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    --mount=type=cache,target=/root/.local/share/NuGet/v3-cache \
+    for attempt in 1 2 3; do \
       dotnet restore src/OpenCortex.Portal/OpenCortex.Portal.csproj --disable-parallel && exit 0; \
       if [ "$attempt" -eq 3 ]; then exit 1; fi; \
       sleep $((attempt * 10)); \
