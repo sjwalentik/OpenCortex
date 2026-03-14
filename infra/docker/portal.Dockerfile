@@ -26,8 +26,12 @@ COPY OpenCortex.sln ./
 COPY src/OpenCortex.Core/OpenCortex.Core.csproj src/OpenCortex.Core/
 COPY src/OpenCortex.Portal/OpenCortex.Portal.csproj src/OpenCortex.Portal/
 
-# Restore dependencies
-RUN dotnet restore src/OpenCortex.Portal/OpenCortex.Portal.csproj
+# Restore dependencies. Retry transient NuGet failures on CI runners.
+RUN for attempt in 1 2 3; do \
+      dotnet restore src/OpenCortex.Portal/OpenCortex.Portal.csproj --disable-parallel && exit 0; \
+      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+      sleep $((attempt * 10)); \
+    done
 
 # Copy source code
 COPY src/OpenCortex.Core/ src/OpenCortex.Core/
