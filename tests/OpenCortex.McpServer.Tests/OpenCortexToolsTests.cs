@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using OpenCortex.Core.Authoring;
 using OpenCortex.Core.Brains;
@@ -125,6 +126,45 @@ public sealed class OpenCortexToolsTests
     }
 
     [Fact]
+    public async Task QueryBrain_SanitizesNonFiniteScoresBeforeSerialization()
+    {
+        var catalog = new StubBrainCatalogStore(new Dictionary<string, IReadOnlyList<BrainSummary>>
+        {
+            ["cus_test"] =
+            [
+                new BrainSummary("my-brain", "My Brain", "my-brain", "Filesystem", "active", 0),
+            ],
+        });
+        var executor = new OqlQueryExecutor(new StubDocumentQueryStore(
+            new RetrievalResultRecord(
+                "doc-1",
+                "my-brain",
+                "docs/plan.md",
+                "Plan",
+                "chunk-1",
+                "snippet",
+                double.PositiveInfinity,
+                "semantic similarity",
+                new ScoreBreakdown(2.0, double.PositiveInfinity, double.NegativeInfinity))));
+
+        var result = await BuildTools(
+                catalog: catalog,
+                executor: executor,
+                subscriptionStore: new StubSubscriptionStore(planId: "pro"))
+            .query_brain("FROM brain(\"my-brain\") SEARCH \"quota\"", CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(0.0, result.MaxScore);
+        Assert.Equal(0.0, result.MinScore);
+        Assert.Single(result.Results);
+        Assert.Equal(0.0, result.Results[0].Score);
+        Assert.Equal(2.0, result.Results[0].Breakdown.Keyword);
+        Assert.Equal(0.0, result.Results[0].Breakdown.Semantic);
+        Assert.Equal(0.0, result.Results[0].Breakdown.Graph);
+        Assert.Null(Record.Exception(() => JsonSerializer.Serialize(result)));
+    }
+
+    [Fact]
     public async Task GetBrain_ReturnsBrainDetail_WhenFound()
     {
         var detail = new BrainDetail(
@@ -212,6 +252,20 @@ public sealed class OpenCortexToolsTests
 
         Assert.NotNull(result.Error);
         Assert.Contains("document_id or canonical_path", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsStructuredFailure_WhenStoreThrows()
+    {
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            managedDocumentStore: new ThrowingManagedDocumentStore())
+            .get_document("brain-write", "mdoc_broken", null, CancellationToken.None);
+
+        Assert.NotNull(result.Error);
+        Assert.Contains("Document retrieval failed", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("boom", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -308,9 +362,9 @@ public sealed class OpenCortexToolsTests
             indexingService: indexingService,
             httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
             .save_document(
-                null,
                 "projects/OpenCortex/frontend-portal-direction.md",
                 "# Direction\n\nReact + TypeScript",
+                null,
                 null,
                 new Dictionary<string, string> { ["project"] = "OpenCortex" },
                 "published",
@@ -351,9 +405,9 @@ public sealed class OpenCortexToolsTests
             indexingService: indexingService,
             httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
             .save_document(
-                "brain-write",
                 "projects/OpenCortex/frontend-portal-direction.md",
                 "new content",
+                "brain-write",
                 "OpenCortex Frontend Direction",
                 null,
                 "published",
@@ -386,9 +440,9 @@ public sealed class OpenCortexToolsTests
             subscriptionStore: new StubSubscriptionStore(planId: "pro"),
             httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
             .save_document(
-                null,
                 "projects/OpenCortex/frontend-portal-direction.md",
                 "content",
+                null,
                 null,
                 null,
                 "draft",
@@ -984,6 +1038,42 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
             .ToArray();
         return string.Join('-', new string(chars).Split(new[] { '-' }, StringSplitOptions.RemoveEmptyEntries));
     }
+}
+
+internal sealed class ThrowingManagedDocumentStore : IManagedDocumentStore
+{
+    public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(string customerId, string brainId, int limit = 200, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<int> CountActiveManagedDocumentsAsync(string customerId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<IReadOnlyList<ManagedDocumentDetail>> ListManagedDocumentsForIndexingAsync(string customerId, string brainId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<ManagedDocumentDetail?> GetManagedDocumentAsync(string customerId, string brainId, string managedDocumentId, CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException("boom");
+
+    public Task<ManagedDocumentDetail?> GetManagedDocumentByCanonicalPathAsync(string customerId, string brainId, string canonicalPath, CancellationToken cancellationToken = default)
+        => throw new InvalidOperationException("boom");
+
+    public Task<IReadOnlyList<ManagedDocumentVersionSummary>> ListManagedDocumentVersionsAsync(string customerId, string brainId, string managedDocumentId, int limit = 50, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<ManagedDocumentVersionDetail?> GetManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<ManagedDocumentDetail> CreateManagedDocumentAsync(ManagedDocumentCreateRequest request, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<ManagedDocumentDetail?> UpdateManagedDocumentAsync(ManagedDocumentUpdateRequest request, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<bool> SoftDeleteManagedDocumentAsync(string customerId, string brainId, string managedDocumentId, string userId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<ManagedDocumentDetail?> RestoreManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, string userId, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
 }
 
 internal sealed class StubManagedContentBrainIndexingService : IManagedContentBrainIndexingService

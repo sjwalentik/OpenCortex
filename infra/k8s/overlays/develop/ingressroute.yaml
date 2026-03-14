@@ -1,5 +1,5 @@
 # Traefik IngressRoute for OpenCortex Develop
-# Domain is templated via envsubst in the deploy workflow
+# Domain is templated by the deploy workflow before apply
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -12,12 +12,6 @@ spec:
   entryPoints:
     - websecure
   routes:
-    # Portal - main site
-    - match: Host(`${DOMAIN}`)
-      kind: Rule
-      services:
-        - name: opencortex-portal
-          port: 8080
     # API - under /api path
     - match: Host(`${DOMAIN}`) && PathPrefix(`/api`)
       kind: Rule
@@ -29,13 +23,23 @@ spec:
     # MCP Server - under /mcp path
     - match: Host(`${DOMAIN}`) && PathPrefix(`/mcp`)
       kind: Rule
-      middlewares:
-        - name: strip-mcp-prefix
       services:
         - name: opencortex-mcp
           port: 8080
+    # MCP diagnostics - public tool inventory
+    - match: Host(`${DOMAIN}`) && Path(`/tool-manifest`)
+      kind: Rule
+      services:
+        - name: opencortex-mcp
+          port: 8080
+    # Portal - main site
+    - match: Host(`${DOMAIN}`)
+      kind: Rule
+      services:
+        - name: opencortex-portal
+          port: 8080
   tls:
-    certResolver: letsencrypt
+    certResolver: le
 
 ---
 # HTTP to HTTPS redirect
@@ -55,10 +59,21 @@ spec:
       kind: Rule
       middlewares:
         - name: redirect-https
-          namespace: traefik
       services:
         - name: opencortex-portal
           port: 8080
+
+---
+# Middleware to strip /api prefix
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: opencortex-develop
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
 
 ---
 # Middleware to strip /api prefix
@@ -71,18 +86,6 @@ spec:
   stripPrefix:
     prefixes:
       - /api
-
----
-# Middleware to strip /mcp prefix
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: strip-mcp-prefix
-  namespace: opencortex-develop
-spec:
-  stripPrefix:
-    prefixes:
-      - /mcp
 
 ---
 # Security headers middleware

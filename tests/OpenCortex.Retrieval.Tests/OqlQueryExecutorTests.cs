@@ -116,6 +116,25 @@ public sealed class OqlQueryExecutorTests
         Assert.Equal(10, store.LastQuery?.Limit);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_SummaryClampsNonFiniteScoresToZero()
+    {
+        var store = new FakeDocumentQueryStore(keywordScore: double.PositiveInfinity);
+        var executor = new OqlQueryExecutor(store);
+
+        const string oql = """
+            FROM brain("sample-team")
+            SEARCH "retention"
+            LIMIT 3
+            """;
+
+        var result = await executor.ExecuteAsync(oql);
+
+        Assert.Equal(0.0, result.Summary.MaxScore);
+        Assert.Equal(0.0, result.Summary.MinScore);
+        Assert.Equal(0, result.Summary.ResultsWithKeywordSignal);
+    }
+
     private sealed class FakeDocumentQueryStore : IDocumentQueryStore
     {
         private readonly double _keywordScore;

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # OpenCortex Portal Dockerfile
 # Multi-stage build with React frontend and ASP.NET backend
 
@@ -26,18 +27,28 @@ COPY OpenCortex.sln ./
 COPY src/OpenCortex.Core/OpenCortex.Core.csproj src/OpenCortex.Core/
 COPY src/OpenCortex.Portal/OpenCortex.Portal.csproj src/OpenCortex.Portal/
 
-# Restore dependencies
-RUN dotnet restore src/OpenCortex.Portal/OpenCortex.Portal.csproj
+# Restore dependencies. Cache NuGet state and retry transient CI network failures.
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    --mount=type=cache,target=/root/.local/share/NuGet/v3-cache \
+    for attempt in 1 2 3; do \
+      NUGET_ENHANCED_MAX_NETWORK_TRY_COUNT=1 \
+      NUGET_ENHANCED_NETWORK_RETRY_DELAY_MILLISECONDS=1000 \
+      dotnet restore src/OpenCortex.Portal/OpenCortex.Portal.csproj --disable-parallel && exit 0; \
+      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+      sleep $((attempt * 10)); \
+    done
 
 # Copy source code
 COPY src/OpenCortex.Core/ src/OpenCortex.Core/
 COPY src/OpenCortex.Portal/ src/OpenCortex.Portal/
 
-# Copy frontend build output to wwwroot
-COPY --from=frontend-build /frontend/dist src/OpenCortex.Portal/wwwroot/app/
+# Copy frontend build output to wwwroot (Vite outputs to ../wwwroot/app relative to Frontend dir)
+COPY --from=frontend-build /wwwroot/app src/OpenCortex.Portal/wwwroot/app/
 
-# Build and publish
-RUN dotnet publish src/OpenCortex.Portal/OpenCortex.Portal.csproj \
+# Build and publish using the same NuGet caches populated during restore.
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    --mount=type=cache,target=/root/.local/share/NuGet/v3-cache \
+    dotnet publish src/OpenCortex.Portal/OpenCortex.Portal.csproj \
     -c Release \
     -o /app/publish \
     --no-restore \

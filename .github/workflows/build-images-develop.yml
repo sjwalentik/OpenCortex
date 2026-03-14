@@ -1,0 +1,81 @@
+name: Build Develop Images
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ vars.CONTAINER_REGISTRY || 'ghcr.io/sjwalentik/opencortex' }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/api:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/api:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Portal image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/portal.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/portal:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/portal:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push MCP image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/mcp.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/mcp:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/mcp:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Workers image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/workers.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/workers:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/workers:develop
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

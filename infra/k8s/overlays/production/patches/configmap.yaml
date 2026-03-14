@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opencortex-config
+  namespace: opencortex
+data:
+  HOSTED_AUTH_ENABLED: "true"
+  STRIPE_ENABLED: "true"
+  API_INTERNAL_URL: "http://opencortex-api:8080"
+  MCP_INTERNAL_URL: "http://opencortex-mcp:8080"

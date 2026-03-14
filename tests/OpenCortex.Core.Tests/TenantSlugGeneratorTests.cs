@@ -147,7 +147,7 @@ public sealed class TenantSlugGeneratorTests
     {
         var slug = TenantSlugGenerator.BuildBrainSlug("alice", "cust_12345678");
 
-        Assert.Equal("personal-alice-12345678", slug);
+        Assert.Equal("personal-brain-alice-ust_12345678", slug);
     }
 
     // -------------------------------------------------------------------------

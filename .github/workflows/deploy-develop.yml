@@ -1,90 +1,41 @@
 name: Deploy to Develop
 
 on:
-  push:
-    branches: [develop]
+  workflow_run:
+    workflows: ["Build Develop Images"]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy. Defaults to develop.
+        required: false
+        type: string
 
 env:
-  REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ vars.CONTAINER_REGISTRY || 'ghcr.io/sjwalentik/opencortex' }}
-  IMAGE_TAG: ${{ github.sha }}
   DOMAIN: ${{ vars.DEVELOP_DOMAIN || 'opencortex.walentik.net' }}
+  DEVELOP_DB_HOST: ${{ vars.DEVELOP_DB_HOST || 'opencortex-postgres.opencortex.svc.cluster.local' }}
+  IMAGE_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.image_tag || 'develop' }}
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
-
-      - name: Build and push API image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infra/docker/api.Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/api:${{ env.IMAGE_TAG }}
-            ${{ env.IMAGE_PREFIX }}/api:develop
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push Portal image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infra/docker/portal.Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/portal:${{ env.IMAGE_TAG }}
-            ${{ env.IMAGE_PREFIX }}/portal:develop
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push MCP image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infra/docker/mcp.Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/mcp:${{ env.IMAGE_TAG }}
-            ${{ env.IMAGE_PREFIX }}/mcp:develop
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push Workers image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infra/docker/workers.Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/workers:${{ env.IMAGE_TAG }}
-            ${{ env.IMAGE_PREFIX }}/workers:develop
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   deploy:
-    needs: build-and-push
-    runs-on: self-hosted
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop')
+    runs-on: [self-hosted, linux, x64, opencortex-deploy]
     environment: develop
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
 
       - name: Create namespace
         run: |
@@ -101,13 +52,14 @@ jobs:
 
       - name: Create secrets from GitHub secrets
         run: |
-          # Database credentials
+          DB_CONNECTION_STRING="${{ secrets.DB_CONNECTION_STRING }}"
+          DB_CONNECTION_STRING="${DB_CONNECTION_STRING/Host=opencortex-postgres;/Host=${{ env.DEVELOP_DB_HOST }};}"
+
           kubectl create secret generic opencortex-db-credentials \
             --namespace=opencortex-develop \
-            --from-literal=connection-string="${{ secrets.DB_CONNECTION_STRING }}" \
+            --from-literal=connection-string="${DB_CONNECTION_STRING}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          # Firebase credentials
           kubectl create secret generic opencortex-firebase \
             --namespace=opencortex-develop \
             --from-literal=project-id="${{ secrets.FIREBASE_PROJECT_ID }}" \
@@ -116,7 +68,6 @@ jobs:
             --from-literal=admin-email-patterns="${{ secrets.FIREBASE_ADMIN_EMAIL_PATTERNS }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          # Stripe credentials (optional)
           kubectl create secret generic opencortex-stripe \
             --namespace=opencortex-develop \
             --from-literal=secret-key="${{ secrets.STRIPE_SECRET_KEY }}" \
@@ -124,7 +75,6 @@ jobs:
             --from-literal=app-base-url="https://${{ env.DOMAIN }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          # Embeddings credentials
           kubectl create secret generic opencortex-embeddings \
             --namespace=opencortex-develop \
             --from-literal=api-key="${{ secrets.EMBEDDINGS_API_KEY }}" \
@@ -134,11 +84,15 @@ jobs:
       - name: Generate IngressRoute from template
         run: |
           export DOMAIN="${{ env.DOMAIN }}"
-          envsubst < infra/k8s/overlays/develop/ingressroute.yaml | kubectl apply -f -
+          sed "s|\${DOMAIN}|${DOMAIN}|g" infra/k8s/overlays/develop/ingressroute.yaml | kubectl apply -f -
 
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -k infra/k8s/overlays/develop
+          kubectl set image deployment/opencortex-api api=${{ env.IMAGE_PREFIX }}/api:${{ env.IMAGE_TAG }} -n opencortex-develop
+          kubectl set image deployment/opencortex-portal portal=${{ env.IMAGE_PREFIX }}/portal:${{ env.IMAGE_TAG }} -n opencortex-develop
+          kubectl set image deployment/opencortex-mcp mcp=${{ env.IMAGE_PREFIX }}/mcp:${{ env.IMAGE_TAG }} -n opencortex-develop
+          kubectl set image deployment/opencortex-workers workers=${{ env.IMAGE_PREFIX }}/workers:${{ env.IMAGE_TAG }} -n opencortex-develop
 
       - name: Wait for rollout
         run: |

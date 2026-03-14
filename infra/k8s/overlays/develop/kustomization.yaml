@@ -6,7 +6,7 @@ namespace: opencortex-develop
 resources:
   - ../../base
   - namespace.yaml
-  # Note: ingressroute.yaml is applied separately via envsubst in the deploy workflow
+  # Note: ingressroute.yaml is applied separately with domain substitution in the deploy workflow
 
 commonLabels:
   app.kubernetes.io/instance: develop
@@ -30,15 +30,4 @@ patches:
   - path: patches/replicas.yaml
   - path: patches/resources.yaml
   - path: patches/image-pull-secret.yaml
-
-configMapGenerator:
-  - name: opencortex-config
-    behavior: merge
-    literals:
-      - HOSTED_AUTH_ENABLED=true
-      - STRIPE_ENABLED=false
-      - API_INTERNAL_URL=http://opencortex-api:8080
-      - MCP_INTERNAL_URL=http://opencortex-mcp:8080
-      - EMBEDDINGS_PROVIDER=ollama
-      - EMBEDDINGS_MODEL=nomic-embed-text
-      - EMBEDDINGS_DIMENSIONS=768
+  - path: patches/configmap.yaml
