@@ -1,5 +1,5 @@
 import { act, useMemo, useState } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Editor as TiptapEditor } from '@tiptap/react';
 
@@ -164,6 +164,7 @@ function DocumentsViewHarness({ onEditorReady }: { onEditorReady?: (editor: Tipt
       onDraftChange={handleDraftChange}
       onExportDocument={() => {}}
       onImportDocument={() => {}}
+      onOpenDocumentLink={() => {}}
       onRefreshDocuments={() => {}}
       onRefreshVersions={() => {}}
       onRestoreVersion={() => {}}
@@ -235,4 +236,83 @@ describe('DocumentsView', () => {
     expect(screen.queryByText('Rendered Document')).toBeNull();
     expect(container.querySelector('.document-editor-shell')?.closest('label')).toBeNull();
   });
+
+  it('opens internal document links from rendered version previews', () => {
+    const handleOpenDocumentLink = vi.fn();
+
+    render(
+      <DocumentsView
+        activeBrain={brain}
+        activeBrainId={brain.brainId}
+        brains={[brain]}
+        documentDraft={buildEmptyDocumentDraft()}
+        documentError={null}
+        documentFilter=""
+        documentGroups={buildGroups([])}
+        documentIsDirty={false}
+        documentLoading={false}
+        documentSaveMessage="Ready."
+        documentSaveState="info"
+        documentVersions={[
+          {
+            managedDocumentVersionId: 'version-1',
+            createdAt: '2026-03-13T12:00:00Z',
+            snapshotKind: 'snapshot',
+            status: 'published',
+            wordCount: 5,
+            snapshotBy: 'Steph',
+          },
+        ]}
+        documents={[]}
+        documentsError={null}
+        documentsLoading={false}
+        filteredDocuments={[]}
+        isCreatingDocument={false}
+        onChangeBrain={() => {}}
+        onChangeDocumentFilter={() => {}}
+        onCreateDocument={() => {}}
+        onDeleteDocument={() => {}}
+        onDraftChange={() => {}}
+        onExportDocument={() => {}}
+        onImportDocument={() => {}}
+        onOpenDocumentLink={handleOpenDocumentLink}
+        onRefreshDocuments={() => {}}
+        onRefreshVersions={() => {}}
+        onRestoreVersion={() => {}}
+        onRevertDocument={() => {}}
+        onSaveDocument={() => {}}
+        onSelectDocument={() => {}}
+        onSelectVersion={() => {}}
+        selectedDocument={{
+          managedDocumentId: 'doc-existing',
+          title: 'Existing Doc',
+          slug: 'daily/existing-doc',
+          canonicalPath: 'daily/existing-doc.md',
+          status: 'published',
+          updatedAt: '2026-03-13T12:00:00Z',
+          content: '# Existing Doc',
+          frontmatter: {},
+        }}
+        selectedDocumentId="doc-existing"
+        selectedVersion={{
+          managedDocumentVersionId: 'version-1',
+          createdAt: '2026-03-13T12:00:00Z',
+          snapshotKind: 'snapshot',
+          status: 'published',
+          wordCount: 5,
+          snapshotBy: 'Steph',
+          content: 'See [Roadmap](projects/opencortex/roadmap)',
+        }}
+        selectedVersionId="version-1"
+        versionError={null}
+        versionLoading={false}
+        versionsError={null}
+        versionsLoading={false}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'Roadmap' }));
+    expect(handleOpenDocumentLink).toHaveBeenCalledWith('projects/opencortex/roadmap.md');
+  });
 });
+

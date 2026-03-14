@@ -1,7 +1,8 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import type { Editor as TiptapEditor } from '@tiptap/react';
 
 import { MarkdownTiptapEditor } from './MarkdownTiptapEditor';
+import { isExternalLinkHref, normalizeDocumentLinkPath } from './documentLinks';
 import type { DocumentDetail, DocumentDraft, DocumentSummary } from './documentDraft';
 
 export type BrainSummary = {
@@ -59,6 +60,7 @@ export type DocumentsViewProps = {
   onDraftChange: <K extends keyof DocumentDraft>(field: K, value: DocumentDraft[K]) => void;
   onExportDocument: () => void;
   onImportDocument: (file: File | null) => void;
+  onOpenDocumentLink?: (canonicalPath: string) => void;
   onRefreshDocuments: () => void;
   onRefreshVersions: () => void;
   onRestoreVersion: () => void;
@@ -102,6 +104,7 @@ export function DocumentsView({
   onDraftChange,
   onExportDocument,
   onImportDocument,
+  onOpenDocumentLink,
   onRefreshDocuments,
   onRefreshVersions,
   onRestoreVersion,
@@ -141,6 +144,26 @@ export function DocumentsView({
     : selectedDocument
       ? `${selectedDocument.status || 'draft'} | ${selectedDocument.slug || '(no slug)'} | ${selectedDocument.canonicalPath || '(no canonical path)'} | updated ${formatDateTime(selectedDocument.updatedAt)}`
       : 'Select a document to inspect or edit its content.';
+
+  function handleRenderedMarkdownClick(event: ReactMouseEvent<HTMLElement>) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const link = target.closest('a[data-document-path]');
+    if (!(link instanceof HTMLAnchorElement)) {
+      return;
+    }
+
+    const canonicalPath = normalizeDocumentLinkPath(link.dataset.documentPath || link.getAttribute('href') || '');
+    if (!canonicalPath) {
+      return;
+    }
+
+    event.preventDefault();
+    onOpenDocumentLink?.(canonicalPath);
+  }
 
   return (
     <section className="portal-layout">
@@ -343,6 +366,7 @@ export function DocumentsView({
                 placeholder="Write Markdown content here."
                 disabled={!activeBrainId}
                 onEditorReady={onDocumentEditorReady}
+                onOpenDocumentLink={onOpenDocumentLink}
                 onChange={(value) => onDraftChange('content', value)}
               />
             </div>
@@ -410,7 +434,7 @@ export function DocumentsView({
                               </div>
                             </div>
                             {versionLoading && !showInlinePreview ? <p className="document-save-status">Loading selected version...</p> : null}
-                            <div className="markdown-preview version-preview" dangerouslySetInnerHTML={showInlinePreview ? renderedVersionMarkup : { __html: '<p>Loading selected version...</p>' }} />
+                            <div className="markdown-preview version-preview" onClick={handleRenderedMarkdownClick} dangerouslySetInnerHTML={showInlinePreview ? renderedVersionMarkup : { __html: '<p>Loading selected version...</p>' }} />
                           </section>
                         ) : null}
                       </article>
@@ -456,6 +480,7 @@ function renderMarkdown(markdown: string) {
   const blocks: string[] = [];
   let paragraph: string[] = [];
   let listItems: string[] = [];
+  let orderedListItems: string[] = [];
   let codeFence: string[] | null = null;
 
   const flushParagraph = () => {
@@ -476,6 +501,15 @@ function renderMarkdown(markdown: string) {
     listItems = [];
   };
 
+  const flushOrderedList = () => {
+    if (orderedListItems.length === 0) {
+      return;
+    }
+
+    blocks.push(`<ol>${orderedListItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join('')}</ol>`);
+    orderedListItems = [];
+  };
+
   const flushCodeFence = () => {
     if (codeFence === null) {
       return;
@@ -489,6 +523,7 @@ function renderMarkdown(markdown: string) {
     if (line.startsWith('```')) {
       flushParagraph();
       flushList();
+      flushOrderedList();
       if (codeFence === null) {
         codeFence = [];
       } else {
@@ -507,6 +542,7 @@ function renderMarkdown(markdown: string) {
     if (!trimmed) {
       flushParagraph();
       flushList();
+      flushOrderedList();
       continue;
     }
 
@@ -514,6 +550,7 @@ function renderMarkdown(markdown: string) {
     if (headingMatch) {
       flushParagraph();
       flushList();
+      flushOrderedList();
       const level = headingMatch[1].length;
       blocks.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
       continue;
@@ -521,13 +558,23 @@ function renderMarkdown(markdown: string) {
 
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
       flushParagraph();
+      flushOrderedList();
       listItems.push(trimmed.slice(2).trim());
+      continue;
+    }
+
+    const orderedListMatch = trimmed.match(/^\d+\.\s+(.*)$/);
+    if (orderedListMatch) {
+      flushParagraph();
+      flushList();
+      orderedListItems.push(orderedListMatch[1].trim());
       continue;
     }
 
     if (trimmed.startsWith('> ')) {
       flushParagraph();
       flushList();
+      flushOrderedList();
       blocks.push(`<blockquote><p>${renderInlineMarkdown(trimmed.slice(2).trim())}</p></blockquote>`);
       continue;
     }
@@ -537,6 +584,7 @@ function renderMarkdown(markdown: string) {
 
   flushParagraph();
   flushList();
+  flushOrderedList();
   flushCodeFence();
   return blocks.join('');
 }
@@ -546,7 +594,21 @@ function renderInlineMarkdown(value: string) {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_match, label, href) => renderMarkdownLink(label, href));
+}
+
+function renderMarkdownLink(label: string, href: string) {
+  const documentPath = normalizeDocumentLinkPath(href);
+  if (documentPath) {
+    const escapedPath = escapeHtml(documentPath);
+    return `<a href="#${escapedPath}" data-document-path="${escapedPath}">${label}</a>`;
+  }
+
+  if (isExternalLinkHref(href)) {
+    return `<a href="${href}" target="_blank" rel="noreferrer">${label}</a>`;
+  }
+
+  return label;
 }
 
 function escapeHtml(value: unknown) {

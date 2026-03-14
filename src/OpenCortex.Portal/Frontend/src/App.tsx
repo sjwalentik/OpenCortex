@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DocumentsView } from './DocumentsView';
+import { normalizeDocumentLinkPath } from './documentLinks';
 import { buildDocumentExportFileName, buildDocumentPayload, buildDraftFromDocument, buildEmptyDocumentDraft, buildMarkdownExport, hasUnsavedDocumentChanges, normalizeDocumentDraft, parseImportedMarkdown } from './documentDraft';
 
 type PortalView = 'signin' | 'documents' | 'account' | 'usage' | 'tools';
@@ -967,6 +968,54 @@ function App() {
     setDocumentSaveMessage('Loading document...');
   }
 
+  async function handleOpenDocumentLink(rawPath: string) {
+    const canonicalPath = normalizeDocumentLinkPath(rawPath);
+    if (!canonicalPath) {
+      setDocumentSaveState('warn');
+      setDocumentSaveMessage('Enter a valid managed document path like daily/notes.md.');
+      return;
+    }
+
+    if (!activeBrainId) {
+      setDocumentSaveState('warn');
+      setDocumentSaveMessage('Select a managed-content brain before opening document links.');
+      return;
+    }
+
+    if (!confirmDiscardDocumentChanges(documentIsDirty, `Open '${canonicalPath}' and discard unsaved changes?`)) {
+      return;
+    }
+
+    const existingDocument = documents.find((document) => {
+      const candidatePath = normalizeDocumentLinkPath(document.canonicalPath || document.slug || '');
+      return candidatePath === canonicalPath;
+    });
+
+    if (existingDocument?.managedDocumentId) {
+      handleSelectDocument(existingDocument.managedDocumentId);
+      return;
+    }
+
+    try {
+      const session = await getValidSession();
+      const resolvedDocument = await portalFetch(
+        `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/by-path?canonicalPath=${encodeURIComponent(canonicalPath)}`,
+        session.idToken
+      ) as DocumentDetail;
+
+      setIsCreatingDocument(false);
+      setSelectedDocumentId(resolvedDocument.managedDocumentId);
+      setSelectedVersionId(null);
+      setSelectedVersion(null);
+      setDocumentSaveState('info');
+      setDocumentSaveMessage(`Loading '${resolvedDocument.title || resolvedDocument.canonicalPath || canonicalPath}'...`);
+      setDocumentRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setDocumentSaveState('error');
+      setDocumentSaveMessage(error instanceof Error ? error.message : `Failed to open '${canonicalPath}'.`);
+    }
+  }
+
   function handleCreateDocument() {
     if (!confirmDiscardDocumentChanges(documentIsDirty, 'Create a new document and discard unsaved changes?')) {
       return;
@@ -1605,6 +1654,7 @@ function App() {
             onDraftChange={handleDraftChange}
             onExportDocument={handleExportDocument}
             onImportDocument={handleImportDocument}
+            onOpenDocumentLink={handleOpenDocumentLink}
             onRefreshDocuments={() => setDocumentRefreshNonce((value) => value + 1)}
             onRefreshVersions={handleRefreshVersions}
             onRestoreVersion={handleRestoreVersion}

@@ -50,6 +50,8 @@ describe('MarkdownTiptapEditor', () => {
 
     expect(screen.getByRole('toolbar', { name: 'Markdown editor controls' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Bold' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Link' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Numbers' })).toBeTruthy();
 
     await waitFor(() => {
       const editor = container.querySelector('.tiptap-editor');
@@ -128,6 +130,7 @@ describe('MarkdownTiptapEditor', () => {
 
     expect(editorInstance?.getHTML()).toBe(originalHtml);
   });
+
   it('applies inline marks from the toolbar while preserving the current selection', async () => {
     let editorInstance: TiptapEditor | null = null;
 
@@ -179,6 +182,132 @@ describe('MarkdownTiptapEditor', () => {
       expect(editorInstance?.getHTML()).toContain('<code>');
       expect(editorInstance?.getHTML()).toContain('alpha beta');
       expect(screen.getByRole('button', { name: 'Code' }).getAttribute('aria-pressed')).toBe('true');
+    });
+  });
+
+  it('applies and removes links through the toolbar prompt handler', async () => {
+    const handleChange = vi.fn();
+    const requestLinkUrl = vi.fn()
+      .mockReturnValueOnce('example.com/docs')
+      .mockReturnValueOnce('');
+    let editorInstance: TiptapEditor | null = null;
+
+    render(
+      <MarkdownTiptapEditor
+        disabled={false}
+        onChange={handleChange}
+        onEditorReady={(editor) => {
+          if (editor) {
+            editorInstance = editor;
+          }
+        }}
+        placeholder="Write Markdown content here."
+        requestLinkUrl={requestLinkUrl}
+        value={'alpha beta'}
+      />
+    );
+
+    await waitFor(() => expect(editorInstance).toBeTruthy());
+
+    act(() => {
+      editorInstance?.commands.focus('start');
+      editorInstance?.commands.selectAll();
+    });
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Link' }));
+
+    await waitFor(() => {
+      expect(requestLinkUrl).toHaveBeenCalledWith('');
+      expect(editorInstance?.getHTML()).toContain('href="https://example.com/docs"');
+      expect(handleChange.mock.lastCall?.[0]).toContain('[alpha beta](https://example.com/docs)');
+    });
+
+    act(() => {
+      editorInstance?.commands.focus('start');
+    });
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Link' }));
+
+    await waitFor(() => {
+      expect(requestLinkUrl).toHaveBeenLastCalledWith('https://example.com/docs');
+      expect(editorInstance?.getHTML()).not.toContain('href="https://example.com/docs"');
+      expect(handleChange.mock.lastCall?.[0]).toBe('alpha beta');
+    });
+  });
+  it('applies internal document links and opens them with ctrl-click', async () => {
+    const handleChange = vi.fn();
+    const handleOpenDocumentLink = vi.fn();
+    const requestLinkUrl = vi.fn().mockReturnValueOnce('daily/linked-note');
+    let editorInstance: TiptapEditor | null = null;
+
+    const { container } = render(
+      <MarkdownTiptapEditor
+        disabled={false}
+        onChange={handleChange}
+        onEditorReady={(editor) => {
+          if (editor) {
+            editorInstance = editor;
+          }
+        }}
+        onOpenDocumentLink={handleOpenDocumentLink}
+        placeholder="Write Markdown content here."
+        requestLinkUrl={requestLinkUrl}
+        value={'alpha beta'}
+      />
+    );
+
+    await waitFor(() => expect(editorInstance).toBeTruthy());
+
+    act(() => {
+      editorInstance?.commands.focus('start');
+      editorInstance?.commands.selectAll();
+    });
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Link' }));
+
+    await waitFor(() => {
+      expect(editorInstance?.getHTML()).toContain('href="daily/linked-note.md"');
+      expect(handleChange.mock.lastCall?.[0]).toContain('[alpha beta](daily/linked-note.md)');
+    });
+
+    const internalLink = container.querySelector('a[href="daily/linked-note.md"]');
+    expect(internalLink).toBeTruthy();
+
+    fireEvent.click(internalLink!, { ctrlKey: true });
+    expect(handleOpenDocumentLink).toHaveBeenCalledWith('daily/linked-note.md');
+  });
+
+  it('supports ordered lists from the toolbar and preserves markdown numbering', async () => {
+    const handleChange = vi.fn();
+    let editorInstance: TiptapEditor | null = null;
+
+    render(
+      <MarkdownTiptapEditor
+        disabled={false}
+        onChange={handleChange}
+        onEditorReady={(editor) => {
+          if (editor) {
+            editorInstance = editor;
+          }
+        }}
+        placeholder="Write Markdown content here."
+        value={'alpha beta'}
+      />
+    );
+
+    await waitFor(() => expect(editorInstance).toBeTruthy());
+
+    act(() => {
+      editorInstance?.commands.focus('start');
+      editorInstance?.commands.selectAll();
+    });
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Numbers' }));
+
+    await waitFor(() => {
+      expect(editorInstance?.getHTML()).toContain('<ol>');
+      expect(handleChange).toHaveBeenCalled();
+      expect(handleChange.mock.lastCall?.[0]).toContain('1. alpha beta');
     });
   });
 
