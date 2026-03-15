@@ -10,5 +10,7 @@ public static class PostgresMigrationCatalog
         new("0004", "Managed content schema", "infra/postgres/migrations/0004_managed_content.sql"),
         new("0005", "API tokens schema", "infra/postgres/migrations/0005_api_tokens.sql"),
         new("0006", "Managed document versions schema", "infra/postgres/migrations/0006_managed_document_versions.sql"),
+        new("0007", "Conversations schema", "infra/postgres/migrations/0007_conversations.sql"),
+        new("0008", "User provider configuration schema", "infra/postgres/migrations/0008_user_provider_configs.sql"),
     ];
 }

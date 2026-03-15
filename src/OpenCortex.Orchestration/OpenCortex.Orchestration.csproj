@@ -19,6 +19,7 @@
     <ProjectReference Include="..\OpenCortex.Providers.Anthropic\OpenCortex.Providers.Anthropic.csproj" />
     <ProjectReference Include="..\OpenCortex.Providers.OpenAI\OpenCortex.Providers.OpenAI.csproj" />
     <ProjectReference Include="..\OpenCortex.Providers.Ollama\OpenCortex.Providers.Ollama.csproj" />
+    <ProjectReference Include="..\OpenCortex.Tools\OpenCortex.Tools.csproj" />
   </ItemGroup>
 
 </Project>

@@ -29,6 +29,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITaskClassifier, KeywordTaskClassifier>();
         services.AddSingleton<IModelRouter, DefaultRouter>();
         services.AddSingleton<IOrchestrationEngine, OrchestrationEngine>();
+        services.AddScoped<IUserOrchestrationService, UserOrchestrationService>();
+        services.AddScoped<IAgenticOrchestrationEngine, AgenticOrchestrationEngine>();
 
         return services;
     }
@@ -46,6 +48,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITaskClassifier, KeywordTaskClassifier>();
         services.AddSingleton<IModelRouter, DefaultRouter>();
         services.AddSingleton<IOrchestrationEngine, OrchestrationEngine>();
+        services.AddScoped<IUserOrchestrationService, UserOrchestrationService>();
+        services.AddScoped<IAgenticOrchestrationEngine, AgenticOrchestrationEngine>();
 
         return services;
     }

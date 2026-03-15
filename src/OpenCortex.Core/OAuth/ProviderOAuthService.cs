@@ -32,6 +32,7 @@ public sealed class ProviderOAuthService : IProviderOAuthService
         {
             "anthropic" => _config.Anthropic.IsConfigured,
             "openai" => _config.OpenAI.IsConfigured,
+            "github" => _config.GitHub.IsConfigured,
             _ => false
         };
     }
@@ -46,8 +47,8 @@ public sealed class ProviderOAuthService : IProviderOAuthService
 
         // Include user ID in state for callback correlation
         var stateValue = string.IsNullOrEmpty(state)
-            ? $"{userId}:{Guid.NewGuid()}"
-            : $"{userId}:{state}";
+            ? userId.ToString()
+            : $"{userId}:{Uri.EscapeDataString(state)}";
 
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["client_id"] = providerConfig.ClientId;
@@ -78,7 +79,14 @@ public sealed class ProviderOAuthService : IProviderOAuthService
                 ["client_secret"] = providerConfig.ClientSecret
             });
 
-            var response = await _httpClient.PostAsync(providerConfig.TokenEndpoint, requestContent, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Post, providerConfig.TokenEndpoint)
+            {
+                Content = requestContent
+            };
+            // GitHub requires Accept: application/json to return JSON instead of form-urlencoded
+            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+            var response = await _httpClient.SendAsync(request, cancellationToken);
             var content = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -237,6 +245,14 @@ public sealed class ProviderOAuthService : IProviderOAuthService
                 _config.OpenAI.AuthorizationEndpoint,
                 _config.OpenAI.TokenEndpoint,
                 _config.OpenAI.Scopes
+            ),
+            "github" when _config.GitHub.IsConfigured => new ProviderOAuthEndpoints(
+                _config.GitHub.ClientId,
+                _config.GitHub.ClientSecret,
+                _config.GitHub.RedirectUri,
+                _config.GitHub.AuthorizationEndpoint,
+                _config.GitHub.TokenEndpoint,
+                _config.GitHub.Scopes
             ),
             _ => null
         };

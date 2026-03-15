@@ -32,6 +32,21 @@ const emptyDomRectList = {
   [Symbol.iterator]: function* () {},
 };
 
+const availableDocumentLinks = [
+  {
+    managedDocumentId: 'doc-roadmap',
+    title: 'Roadmap',
+    slug: 'projects/opencortex/roadmap',
+    canonicalPath: 'projects/opencortex/roadmap.md',
+  },
+  {
+    managedDocumentId: 'doc-notes',
+    title: 'Daily Notes',
+    slug: 'daily/notes',
+    canonicalPath: 'daily/notes.md',
+  },
+];
+
 HTMLElement.prototype.getBoundingClientRect = () => emptyDomRect;
 HTMLElement.prototype.getClientRects = () => emptyDomRectList as DOMRectList;
 Range.prototype.getBoundingClientRect = () => emptyDomRect;
@@ -185,11 +200,8 @@ describe('MarkdownTiptapEditor', () => {
     });
   });
 
-  it('applies and removes links through the toolbar prompt handler', async () => {
+  it('applies and removes external links through the inline link picker', async () => {
     const handleChange = vi.fn();
-    const requestLinkUrl = vi.fn()
-      .mockReturnValueOnce('example.com/docs')
-      .mockReturnValueOnce('');
     let editorInstance: TiptapEditor | null = null;
 
     render(
@@ -202,7 +214,6 @@ describe('MarkdownTiptapEditor', () => {
           }
         }}
         placeholder="Write Markdown content here."
-        requestLinkUrl={requestLinkUrl}
         value={'alpha beta'}
       />
     );
@@ -215,9 +226,12 @@ describe('MarkdownTiptapEditor', () => {
     });
 
     fireEvent.mouseDown(screen.getByRole('button', { name: 'Link' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Link destination' }), {
+      target: { value: 'example.com/docs' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
-      expect(requestLinkUrl).toHaveBeenCalledWith('');
       expect(editorInstance?.getHTML()).toContain('href="https://example.com/docs"');
       expect(handleChange.mock.lastCall?.[0]).toContain('[alpha beta](https://example.com/docs)');
     });
@@ -227,21 +241,24 @@ describe('MarkdownTiptapEditor', () => {
     });
 
     fireEvent.mouseDown(screen.getByRole('button', { name: 'Link' }));
+    expect((screen.getByRole('textbox', { name: 'Link destination' }) as HTMLInputElement).value).toBe('https://example.com/docs');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
 
     await waitFor(() => {
-      expect(requestLinkUrl).toHaveBeenLastCalledWith('https://example.com/docs');
       expect(editorInstance?.getHTML()).not.toContain('href="https://example.com/docs"');
       expect(handleChange.mock.lastCall?.[0]).toBe('alpha beta');
     });
   });
-  it('applies internal document links and opens them with ctrl-click', async () => {
+
+  it('offers document suggestions and opens internal links with ctrl-click', async () => {
     const handleChange = vi.fn();
     const handleOpenDocumentLink = vi.fn();
-    const requestLinkUrl = vi.fn().mockReturnValueOnce('daily/linked-note');
     let editorInstance: TiptapEditor | null = null;
 
     const { container } = render(
       <MarkdownTiptapEditor
+        availableDocumentLinks={availableDocumentLinks}
+        currentDocumentPath="daily/current-note.md"
         disabled={false}
         onChange={handleChange}
         onEditorReady={(editor) => {
@@ -251,7 +268,6 @@ describe('MarkdownTiptapEditor', () => {
         }}
         onOpenDocumentLink={handleOpenDocumentLink}
         placeholder="Write Markdown content here."
-        requestLinkUrl={requestLinkUrl}
         value={'alpha beta'}
       />
     );
@@ -264,17 +280,21 @@ describe('MarkdownTiptapEditor', () => {
     });
 
     fireEvent.mouseDown(screen.getByRole('button', { name: 'Link' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Link destination' }), {
+      target: { value: 'road' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Roadmap/ }));
 
     await waitFor(() => {
-      expect(editorInstance?.getHTML()).toContain('href="daily/linked-note.md"');
-      expect(handleChange.mock.lastCall?.[0]).toContain('[alpha beta](daily/linked-note.md)');
+      expect(editorInstance?.getHTML()).toContain('href="projects/opencortex/roadmap.md"');
+      expect(handleChange.mock.lastCall?.[0]).toContain('[alpha beta](projects/opencortex/roadmap.md)');
     });
 
-    const internalLink = container.querySelector('a[href="daily/linked-note.md"]');
+    const internalLink = container.querySelector('a[href="projects/opencortex/roadmap.md"]');
     expect(internalLink).toBeTruthy();
 
     fireEvent.click(internalLink!, { ctrlKey: true });
-    expect(handleOpenDocumentLink).toHaveBeenCalledWith('daily/linked-note.md');
+    expect(handleOpenDocumentLink).toHaveBeenCalledWith('projects/opencortex/roadmap.md');
   });
 
   it('supports ordered lists from the toolbar and preserves markdown numbering', async () => {
@@ -356,3 +376,4 @@ describe('MarkdownTiptapEditor', () => {
     expect(editorInstance?.isEditable).toBe(false);
   });
 });
+

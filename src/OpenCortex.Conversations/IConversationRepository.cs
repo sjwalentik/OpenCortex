@@ -13,18 +13,18 @@ public interface IConversationRepository
     /// <summary>
     /// Get a conversation by ID.
     /// </summary>
-    Task<Conversation?> GetByIdAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<Conversation?> GetByIdAsync(string conversationId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get a conversation with its messages.
     /// </summary>
-    Task<Conversation?> GetWithMessagesAsync(Guid conversationId, int? messageLimit = null, CancellationToken cancellationToken = default);
+    Task<Conversation?> GetWithMessagesAsync(string conversationId, int? messageLimit = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// List conversations for a customer.
     /// </summary>
     Task<IReadOnlyList<Conversation>> ListAsync(
-        Guid customerId,
+        string customerId,
         ConversationStatus? status = null,
         int? limit = null,
         int? offset = null,
@@ -38,7 +38,7 @@ public interface IConversationRepository
     /// <summary>
     /// Delete (archive) a conversation.
     /// </summary>
-    Task DeleteAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string conversationId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Add a message to a conversation.
@@ -49,7 +49,7 @@ public interface IConversationRepository
     /// Get messages for a conversation.
     /// </summary>
     Task<IReadOnlyList<Message>> GetMessagesAsync(
-        Guid conversationId,
+        string conversationId,
         int? limit = null,
         int? offset = null,
         CancellationToken cancellationToken = default);
@@ -62,5 +62,5 @@ public interface IConversationRepository
     /// <summary>
     /// Count conversations for a customer.
     /// </summary>
-    Task<int> CountAsync(Guid customerId, ConversationStatus? status = null, CancellationToken cancellationToken = default);
+    Task<int> CountAsync(string customerId, ConversationStatus? status = null, CancellationToken cancellationToken = default);
 }

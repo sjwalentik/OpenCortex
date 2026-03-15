@@ -362,6 +362,8 @@ export function DocumentsView({
             <div className="field">
               <span>Markdown Content</span>
               <MarkdownTiptapEditor
+                availableDocumentLinks={documents}
+                currentDocumentPath={documentDraft.slug || selectedDocument?.canonicalPath || ''}
                 value={documentDraft.content}
                 placeholder="Write Markdown content here."
                 disabled={!activeBrainId}

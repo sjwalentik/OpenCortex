@@ -11,6 +11,8 @@
     <ProjectReference Include="..\OpenCortex.Providers.Ollama\OpenCortex.Providers.Ollama.csproj" />
     <ProjectReference Include="..\OpenCortex.Orchestration\OpenCortex.Orchestration.csproj" />
     <ProjectReference Include="..\OpenCortex.Conversations\OpenCortex.Conversations.csproj" />
+    <ProjectReference Include="..\OpenCortex.Tools\OpenCortex.Tools.csproj" />
+    <ProjectReference Include="..\OpenCortex.Tools.GitHub\OpenCortex.Tools.GitHub.csproj" />
   </ItemGroup>
 
   <ItemGroup>

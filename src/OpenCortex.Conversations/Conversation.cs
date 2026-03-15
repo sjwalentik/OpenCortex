@@ -6,24 +6,24 @@ namespace OpenCortex.Conversations;
 public sealed class Conversation
 {
     /// <summary>
-    /// Unique identifier for the conversation.
+    /// Unique identifier for the conversation (prefixed ID like "conv_xxx").
     /// </summary>
-    public Guid ConversationId { get; set; }
+    public string ConversationId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Brain ID for memory context.
+    /// Brain ID for memory context (prefixed ID like "brain_xxx").
     /// </summary>
-    public Guid? BrainId { get; set; }
+    public string? BrainId { get; set; }
 
     /// <summary>
-    /// Customer/tenant that owns this conversation.
+    /// Customer/tenant that owns this conversation (prefixed ID like "cust_xxx").
     /// </summary>
-    public Guid CustomerId { get; set; }
+    public string CustomerId { get; set; } = string.Empty;
 
     /// <summary>
-    /// User who created this conversation.
+    /// User who created this conversation (prefixed ID like "user_xxx").
     /// </summary>
-    public Guid? UserId { get; set; }
+    public string? UserId { get; set; }
 
     /// <summary>
     /// Title of the conversation (auto-generated or user-set).

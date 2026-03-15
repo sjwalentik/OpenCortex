@@ -2,8 +2,8 @@
 -- Description: Add conversations and messages tables for multi-model orchestration
 
 CREATE TABLE IF NOT EXISTS opencortex.conversations (
-    conversation_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    brain_id uuid NULL REFERENCES opencortex.brains(brain_id) ON DELETE SET NULL,
+    conversation_id text PRIMARY KEY,
+    brain_id text NULL REFERENCES opencortex.brains(brain_id) ON DELETE SET NULL,
     customer_id text NOT NULL REFERENCES opencortex.customers(customer_id) ON DELETE CASCADE,
     user_id text NULL REFERENCES opencortex.users(user_id) ON DELETE SET NULL,
     title text NULL,
@@ -34,9 +34,9 @@ CREATE INDEX IF NOT EXISTS ix_conversations_last_message
     WHERE status = 'active';
 
 CREATE TABLE IF NOT EXISTS opencortex.messages (
-    message_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id uuid NOT NULL REFERENCES opencortex.conversations(conversation_id) ON DELETE CASCADE,
-    parent_message_id uuid NULL REFERENCES opencortex.messages(message_id) ON DELETE SET NULL,
+    message_id text PRIMARY KEY,
+    conversation_id text NOT NULL REFERENCES opencortex.conversations(conversation_id) ON DELETE CASCADE,
+    parent_message_id text NULL REFERENCES opencortex.messages(message_id) ON DELETE SET NULL,
     role text NOT NULL,
     content text NULL,
     provider_id text NULL,
@@ -76,11 +76,11 @@ CREATE TRIGGER trg_message_update_conversation
 
 -- Rolling summary table for long conversations
 CREATE TABLE IF NOT EXISTS opencortex.conversation_summaries (
-    summary_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id uuid NOT NULL REFERENCES opencortex.conversations(conversation_id) ON DELETE CASCADE,
+    summary_id text PRIMARY KEY,
+    conversation_id text NOT NULL REFERENCES opencortex.conversations(conversation_id) ON DELETE CASCADE,
     summary_text text NOT NULL,
-    message_range_start uuid NOT NULL REFERENCES opencortex.messages(message_id),
-    message_range_end uuid NOT NULL REFERENCES opencortex.messages(message_id),
+    message_range_start text NOT NULL REFERENCES opencortex.messages(message_id),
+    message_range_end text NOT NULL REFERENCES opencortex.messages(message_id),
     message_count int NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
 );

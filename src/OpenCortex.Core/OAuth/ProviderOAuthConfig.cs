@@ -9,6 +9,7 @@ public sealed class ProviderOAuthConfig
 
     public AnthropicOAuthConfig Anthropic { get; set; } = new();
     public OpenAIOAuthConfig OpenAI { get; set; } = new();
+    public GitHubOAuthConfig GitHub { get; set; } = new();
 }
 
 public sealed class AnthropicOAuthConfig
@@ -77,6 +78,41 @@ public sealed class OpenAIOAuthConfig
     /// Required scopes for API access.
     /// </summary>
     public string[] Scopes { get; set; } = ["model.read", "model.request"];
+
+    public bool IsConfigured => !string.IsNullOrEmpty(ClientId) && !string.IsNullOrEmpty(ClientSecret);
+}
+
+public sealed class GitHubOAuthConfig
+{
+    /// <summary>
+    /// OAuth client ID from GitHub OAuth App.
+    /// </summary>
+    public string ClientId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// OAuth client secret (store in user secrets).
+    /// </summary>
+    public string ClientSecret { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Redirect URI registered with GitHub.
+    /// </summary>
+    public string RedirectUri { get; set; } = string.Empty;
+
+    /// <summary>
+    /// GitHub OAuth authorization endpoint.
+    /// </summary>
+    public string AuthorizationEndpoint { get; set; } = "https://github.com/login/oauth/authorize";
+
+    /// <summary>
+    /// GitHub OAuth token endpoint.
+    /// </summary>
+    public string TokenEndpoint { get; set; } = "https://github.com/login/oauth/access_token";
+
+    /// <summary>
+    /// Required scopes for repo access.
+    /// </summary>
+    public string[] Scopes { get; set; } = ["repo", "read:user"];
 
     public bool IsConfigured => !string.IsNullOrEmpty(ClientId) && !string.IsNullOrEmpty(ClientSecret);
 }

@@ -12,9 +12,9 @@ public interface IConversationService
     /// Create a new conversation.
     /// </summary>
     Task<Conversation> CreateConversationAsync(
-        Guid customerId,
-        Guid? userId = null,
-        Guid? brainId = null,
+        string customerId,
+        string? userId = null,
+        string? brainId = null,
         string? title = null,
         string? systemPrompt = null,
         CancellationToken cancellationToken = default);
@@ -22,13 +22,13 @@ public interface IConversationService
     /// <summary>
     /// Get a conversation by ID.
     /// </summary>
-    Task<Conversation?> GetConversationAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<Conversation?> GetConversationAsync(string conversationId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// List conversations for a customer.
     /// </summary>
     Task<IReadOnlyList<Conversation>> ListConversationsAsync(
-        Guid customerId,
+        string customerId,
         int? limit = null,
         int? offset = null,
         CancellationToken cancellationToken = default);
@@ -36,13 +36,13 @@ public interface IConversationService
     /// <summary>
     /// Archive a conversation.
     /// </summary>
-    Task ArchiveConversationAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task ArchiveConversationAsync(string conversationId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Add a user message to a conversation.
     /// </summary>
     Task<Message> AddUserMessageAsync(
-        Guid conversationId,
+        string conversationId,
         string content,
         CancellationToken cancellationToken = default);
 
@@ -50,7 +50,7 @@ public interface IConversationService
     /// Add an assistant message to a conversation.
     /// </summary>
     Task<Message> AddAssistantMessageAsync(
-        Guid conversationId,
+        string conversationId,
         ChatCompletion completion,
         string providerId,
         int? latencyMs = null,
@@ -60,14 +60,14 @@ public interface IConversationService
     /// Get messages for a conversation, formatted for the provider.
     /// </summary>
     Task<IReadOnlyList<ChatMessage>> GetMessagesForProviderAsync(
-        Guid conversationId,
+        string conversationId,
         int? limit = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update the conversation title.
     /// </summary>
-    Task UpdateTitleAsync(Guid conversationId, string title, CancellationToken cancellationToken = default);
+    Task UpdateTitleAsync(string conversationId, string title, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -87,16 +87,16 @@ public sealed class ConversationService : IConversationService
     }
 
     public async Task<Conversation> CreateConversationAsync(
-        Guid customerId,
-        Guid? userId = null,
-        Guid? brainId = null,
+        string customerId,
+        string? userId = null,
+        string? brainId = null,
         string? title = null,
         string? systemPrompt = null,
         CancellationToken cancellationToken = default)
     {
         var conversation = new Conversation
         {
-            ConversationId = Guid.NewGuid(),
+            ConversationId = $"conv_{Guid.NewGuid():N}",
             CustomerId = customerId,
             UserId = userId,
             BrainId = brainId,
@@ -114,13 +114,13 @@ public sealed class ConversationService : IConversationService
         return conversation;
     }
 
-    public Task<Conversation?> GetConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    public Task<Conversation?> GetConversationAsync(string conversationId, CancellationToken cancellationToken = default)
     {
         return _repository.GetWithMessagesAsync(conversationId, cancellationToken: cancellationToken);
     }
 
     public Task<IReadOnlyList<Conversation>> ListConversationsAsync(
-        Guid customerId,
+        string customerId,
         int? limit = null,
         int? offset = null,
         CancellationToken cancellationToken = default)
@@ -128,7 +128,7 @@ public sealed class ConversationService : IConversationService
         return _repository.ListAsync(customerId, ConversationStatus.Active, limit, offset, cancellationToken);
     }
 
-    public async Task ArchiveConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    public async Task ArchiveConversationAsync(string conversationId, CancellationToken cancellationToken = default)
     {
         var conversation = await _repository.GetByIdAsync(conversationId, cancellationToken);
         if (conversation is null) return;
@@ -140,13 +140,13 @@ public sealed class ConversationService : IConversationService
     }
 
     public async Task<Message> AddUserMessageAsync(
-        Guid conversationId,
+        string conversationId,
         string content,
         CancellationToken cancellationToken = default)
     {
         var message = new Message
         {
-            MessageId = Guid.NewGuid(),
+            MessageId = $"msg_{Guid.NewGuid():N}",
             ConversationId = conversationId,
             Role = MessageRole.User,
             Content = content,
@@ -167,7 +167,7 @@ public sealed class ConversationService : IConversationService
     }
 
     public async Task<Message> AddAssistantMessageAsync(
-        Guid conversationId,
+        string conversationId,
         ChatCompletion completion,
         string providerId,
         int? latencyMs = null,
@@ -175,7 +175,7 @@ public sealed class ConversationService : IConversationService
     {
         var message = new Message
         {
-            MessageId = Guid.NewGuid(),
+            MessageId = $"msg_{Guid.NewGuid():N}",
             ConversationId = conversationId,
             Role = MessageRole.Assistant,
             Content = completion.Content,
@@ -210,7 +210,7 @@ public sealed class ConversationService : IConversationService
     }
 
     public async Task<IReadOnlyList<ChatMessage>> GetMessagesForProviderAsync(
-        Guid conversationId,
+        string conversationId,
         int? limit = null,
         CancellationToken cancellationToken = default)
     {
@@ -230,7 +230,7 @@ public sealed class ConversationService : IConversationService
         }).ToList();
     }
 
-    public async Task UpdateTitleAsync(Guid conversationId, string title, CancellationToken cancellationToken = default)
+    public async Task UpdateTitleAsync(string conversationId, string title, CancellationToken cancellationToken = default)
     {
         var conversation = await _repository.GetByIdAsync(conversationId, cancellationToken);
         if (conversation is null) return;

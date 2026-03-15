@@ -37,6 +37,7 @@ public static class ProviderConfigEndpoints
                     isEnabled = c.IsEnabled,
                     hasCredentials = !string.IsNullOrEmpty(c.EncryptedApiKey) || !string.IsNullOrEmpty(c.EncryptedAccessToken),
                     settings = c.SettingsJson is not null ? JsonSerializer.Deserialize<UserProviderSettings>(c.SettingsJson) : null,
+                    tokenExpiresAt = c.TokenExpiresAt,
                     createdAt = c.CreatedAt,
                     updatedAt = c.UpdatedAt
                 })
@@ -66,6 +67,7 @@ public static class ProviderConfigEndpoints
                 isEnabled = config.IsEnabled,
                 hasCredentials = !string.IsNullOrEmpty(config.EncryptedApiKey) || !string.IsNullOrEmpty(config.EncryptedAccessToken),
                 settings = config.SettingsJson is not null ? JsonSerializer.Deserialize<UserProviderSettings>(config.SettingsJson) : null,
+                tokenExpiresAt = config.TokenExpiresAt,
                 createdAt = config.CreatedAt,
                 updatedAt = config.UpdatedAt
             });
@@ -84,39 +86,24 @@ public static class ProviderConfigEndpoints
             var customerId = GetCustomerId(user);
             if (userId is null || customerId is null) return Results.Unauthorized();
 
-            var config = new UserProviderConfig
-            {
-                CustomerId = customerId.Value,
-                UserId = userId.Value,
-                ProviderId = providerId.ToLowerInvariant(),
-                AuthType = request.AuthType ?? "api_key",
-                IsEnabled = request.IsEnabled ?? true
-            };
+            var existing = await repository.GetAsync(userId.Value, providerId, cancellationToken);
+            var config = MergeProviderConfig(
+                existing,
+                request,
+                customerId.Value,
+                userId.Value,
+                providerId,
+                encryption);
 
-            // Encrypt credentials
-            if (!string.IsNullOrEmpty(request.ApiKey))
+            UserProviderConfig saved;
+            try
             {
-                config.EncryptedApiKey = encryption.Encrypt(request.ApiKey);
+                saved = await repository.UpsertAsync(config, cancellationToken);
             }
-
-            if (!string.IsNullOrEmpty(request.AccessToken))
+            catch (InvalidOperationException ex)
             {
-                config.EncryptedAccessToken = encryption.Encrypt(request.AccessToken);
+                return BuildProviderConfigStorageUnavailableResult(ex);
             }
-
-            if (!string.IsNullOrEmpty(request.RefreshToken))
-            {
-                config.EncryptedRefreshToken = encryption.Encrypt(request.RefreshToken);
-            }
-
-            config.TokenExpiresAt = request.TokenExpiresAt;
-
-            if (request.Settings is not null)
-            {
-                config.SettingsJson = JsonSerializer.Serialize(request.Settings);
-            }
-
-            var saved = await repository.UpsertAsync(config, cancellationToken);
 
             return Results.Ok(new
             {
@@ -138,7 +125,14 @@ public static class ProviderConfigEndpoints
             var userId = GetUserId(user);
             if (userId is null) return Results.Unauthorized();
 
-            await repository.DeleteAsync(userId.Value, providerId, cancellationToken);
+            try
+            {
+                await repository.DeleteAsync(userId.Value, providerId, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BuildProviderConfigStorageUnavailableResult(ex);
+            }
 
             return Results.Ok(new { message = $"Provider '{providerId}' configuration deleted." });
         });
@@ -161,7 +155,14 @@ public static class ProviderConfigEndpoints
             }
 
             existing.IsEnabled = !existing.IsEnabled;
-            await repository.UpsertAsync(existing, cancellationToken);
+            try
+            {
+                await repository.UpsertAsync(existing, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BuildProviderConfigStorageUnavailableResult(ex);
+            }
 
             return Results.Ok(new
             {
@@ -203,6 +204,16 @@ public static class ProviderConfigEndpoints
                     "qwen3.5-35b-a3b-instruct",
                     null,
                     false
+                ),
+                new AvailableProvider(
+                    "github",
+                    "GitHub",
+                    oauthService.IsOAuthConfigured("github")
+                        ? new[] { "oauth", "api_key" }
+                        : new[] { "api_key" },
+                    null,
+                    "https://github.com/settings/tokens?type=beta",
+                    oauthService.IsOAuthConfigured("github")
                 )
             };
 
@@ -235,19 +246,12 @@ public static class ProviderConfigEndpoints
             string providerId,
             string code,
             string state,
-            ClaimsPrincipal user,
             IProviderOAuthService oauthService,
             IUserProviderConfigRepository repository,
             ICredentialEncryption encryption,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            var customerId = GetCustomerId(user);
-            if (userId is null || customerId is null) return Results.Unauthorized();
-
-            // Verify state contains the user ID
-            var stateParts = state.Split(':');
-            if (stateParts.Length < 1 || !Guid.TryParse(stateParts[0], out var stateUserId) || stateUserId != userId.Value)
+            if (!TryParseOAuthState(state, out var stateUserId, out var returnUrl))
             {
                 return Results.BadRequest(new { message = "Invalid OAuth state." });
             }
@@ -255,6 +259,15 @@ public static class ProviderConfigEndpoints
             var result = await oauthService.ExchangeCodeAsync(providerId, code, cancellationToken);
             if (!result.Success)
             {
+                if (!string.IsNullOrWhiteSpace(returnUrl))
+                {
+                    return Results.Redirect(BuildOAuthReturnUrl(
+                        returnUrl,
+                        providerId,
+                        isSuccess: false,
+                        error: result.ErrorDescription ?? result.Error ?? "OAuth token exchange failed."));
+                }
+
                 return Results.BadRequest(new
                 {
                     message = "OAuth token exchange failed.",
@@ -263,25 +276,46 @@ public static class ProviderConfigEndpoints
                 });
             }
 
+            var normalizedProviderId = providerId.ToLowerInvariant();
+            var existing = await repository.GetAsync(stateUserId, normalizedProviderId, cancellationToken);
+
             // Save the OAuth tokens
             var config = new UserProviderConfig
             {
-                CustomerId = customerId.Value,
-                UserId = userId.Value,
-                ProviderId = providerId.ToLowerInvariant(),
+                ConfigId = existing?.ConfigId ?? Guid.Empty,
+                CustomerId = existing?.CustomerId ?? stateUserId,
+                UserId = stateUserId,
+                ProviderId = normalizedProviderId,
                 AuthType = "oauth",
+                EncryptedApiKey = null,
                 EncryptedAccessToken = encryption.Encrypt(result.AccessToken!),
                 EncryptedRefreshToken = !string.IsNullOrEmpty(result.RefreshToken)
                     ? encryption.Encrypt(result.RefreshToken)
-                    : null,
-                TokenExpiresAt = result.ExpiresAt,
-                IsEnabled = true
+                    : existing?.EncryptedRefreshToken,
+                TokenExpiresAt = result.ExpiresAt ?? existing?.TokenExpiresAt,
+                SettingsJson = existing?.SettingsJson,
+                IsEnabled = true,
+                CreatedAt = existing?.CreatedAt ?? default
             };
 
-            await repository.UpsertAsync(config, cancellationToken);
+            try
+            {
+                await repository.UpsertAsync(config, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (!string.IsNullOrWhiteSpace(returnUrl))
+                {
+                    return Results.Redirect(BuildOAuthReturnUrl(returnUrl, providerId, isSuccess: false, error: ex.Message));
+                }
 
-            // Return URL from state if provided
-            var returnUrl = stateParts.Length > 1 ? stateParts[1] : null;
+                return BuildProviderConfigStorageUnavailableResult(ex);
+            }
+
+            if (!string.IsNullOrWhiteSpace(returnUrl))
+            {
+                return Results.Redirect(BuildOAuthReturnUrl(returnUrl, providerId, isSuccess: true));
+            }
 
             return Results.Ok(new
             {
@@ -289,7 +323,7 @@ public static class ProviderConfigEndpoints
                 providerId,
                 returnUrl
             });
-        });
+        }).AllowAnonymous();
 
         // Disconnect OAuth (revoke and delete)
         routes.MapPost("/{providerId}/oauth/disconnect", async (
@@ -317,7 +351,14 @@ public static class ProviderConfigEndpoints
             }
 
             // Delete the config
-            await repository.DeleteAsync(userId.Value, providerId, cancellationToken);
+            try
+            {
+                await repository.DeleteAsync(userId.Value, providerId, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BuildProviderConfigStorageUnavailableResult(ex);
+            }
 
             return Results.Ok(new { message = $"Disconnected from {providerId}." });
         });
@@ -361,7 +402,14 @@ public static class ProviderConfigEndpoints
             }
             config.TokenExpiresAt = result.ExpiresAt;
 
-            await repository.UpsertAsync(config, cancellationToken);
+            try
+            {
+                await repository.UpsertAsync(config, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BuildProviderConfigStorageUnavailableResult(ex);
+            }
 
             return Results.Ok(new
             {
@@ -403,6 +451,148 @@ public static class ProviderConfigEndpoints
         var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(input));
         return new Guid(hash);
     }
+
+    private static UserProviderConfig MergeProviderConfig(
+        UserProviderConfig? existing,
+        ProviderConfigRequest request,
+        Guid customerId,
+        Guid userId,
+        string providerId,
+        ICredentialEncryption encryption)
+    {
+        var normalizedProviderId = providerId.ToLowerInvariant();
+        var authType = string.IsNullOrWhiteSpace(request.AuthType)
+            ? existing?.AuthType ?? ResolveDefaultAuthType(normalizedProviderId)
+            : request.AuthType.Trim().ToLowerInvariant();
+
+        var config = existing ?? new UserProviderConfig
+        {
+            CustomerId = customerId,
+            UserId = userId,
+            ProviderId = normalizedProviderId
+        };
+
+        config.CustomerId = existing?.CustomerId ?? customerId;
+        config.UserId = userId;
+        config.ProviderId = normalizedProviderId;
+        config.AuthType = authType;
+        config.IsEnabled = request.IsEnabled ?? existing?.IsEnabled ?? true;
+
+        if (request.Settings is not null)
+        {
+            config.SettingsJson = JsonSerializer.Serialize(request.Settings);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ApiKey))
+        {
+            config.EncryptedApiKey = encryption.Encrypt(request.ApiKey.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.AccessToken))
+        {
+            config.EncryptedAccessToken = encryption.Encrypt(request.AccessToken.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.RefreshToken))
+        {
+            config.EncryptedRefreshToken = encryption.Encrypt(request.RefreshToken.Trim());
+        }
+
+        if (request.TokenExpiresAt.HasValue)
+        {
+            config.TokenExpiresAt = request.TokenExpiresAt;
+        }
+
+        switch (authType)
+        {
+            case "api_key":
+                config.EncryptedAccessToken = null;
+                config.EncryptedRefreshToken = null;
+                config.TokenExpiresAt = null;
+                break;
+            case "oauth":
+                config.EncryptedApiKey = null;
+                break;
+        }
+
+        return config;
+    }
+
+    private static bool TryParseOAuthState(string state, out Guid userId, out string? returnUrl)
+    {
+        userId = Guid.Empty;
+        returnUrl = null;
+
+        if (string.IsNullOrWhiteSpace(state))
+        {
+            return false;
+        }
+
+        var separatorIndex = state.IndexOf(':');
+        var userIdSegment = separatorIndex >= 0 ? state[..separatorIndex] : state;
+        if (!Guid.TryParse(userIdSegment, out userId))
+        {
+            return false;
+        }
+
+        if (separatorIndex < 0 || separatorIndex == state.Length - 1)
+        {
+            return true;
+        }
+
+        var encodedReturnUrl = state[(separatorIndex + 1)..];
+        returnUrl = NormalizeOAuthReturnUrl(Uri.UnescapeDataString(encodedReturnUrl));
+        return true;
+    }
+
+    private static string ResolveDefaultAuthType(string providerId)
+    {
+        return string.Equals(providerId, "ollama", StringComparison.OrdinalIgnoreCase)
+            ? "none"
+            : "api_key";
+    }
+
+    private static string? NormalizeOAuthReturnUrl(string returnUrl)
+    {
+        if (string.IsNullOrWhiteSpace(returnUrl))
+        {
+            return null;
+        }
+
+        var trimmed = returnUrl.Trim();
+        if (trimmed.StartsWith("/", StringComparison.Ordinal))
+        {
+            return trimmed;
+        }
+
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            return uri.ToString();
+        }
+
+        return null;
+    }
+
+    private static string BuildOAuthReturnUrl(string returnUrl, string providerId, bool isSuccess, string? error = null)
+    {
+        var fragmentIndex = returnUrl.IndexOf('#');
+        var hash = fragmentIndex >= 0 ? returnUrl[fragmentIndex..] : string.Empty;
+        var baseUrl = fragmentIndex >= 0 ? returnUrl[..fragmentIndex] : returnUrl;
+        var separator = baseUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+
+        var query = isSuccess
+            ? $"providerConnected={Uri.EscapeDataString(providerId)}&providerId={Uri.EscapeDataString(providerId)}"
+            : $"providerError={Uri.EscapeDataString(error ?? "OAuth failed.")}&providerId={Uri.EscapeDataString(providerId)}";
+
+        return $"{baseUrl}{separator}{query}{hash}";
+    }
+
+    private static IResult BuildProviderConfigStorageUnavailableResult(InvalidOperationException exception) =>
+        Results.Problem(
+            title: "Provider configuration storage is not ready.",
+            detail: exception.Message,
+            statusCode: StatusCodes.Status503ServiceUnavailable);
 }
 
 // Request DTOs

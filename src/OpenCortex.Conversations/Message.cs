@@ -8,14 +8,14 @@ namespace OpenCortex.Conversations;
 public sealed class Message
 {
     /// <summary>
-    /// Unique identifier for the message.
+    /// Unique identifier for the message (prefixed ID like "msg_xxx").
     /// </summary>
-    public Guid MessageId { get; set; }
+    public string MessageId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Conversation this message belongs to.
+    /// Conversation this message belongs to (prefixed ID like "conv_xxx").
     /// </summary>
-    public Guid ConversationId { get; set; }
+    public string ConversationId { get; set; } = string.Empty;
 
     /// <summary>
     /// Role of the message sender.
@@ -60,7 +60,7 @@ public sealed class Message
     /// <summary>
     /// Parent message ID (for branching conversations).
     /// </summary>
-    public Guid? ParentMessageId { get; set; }
+    public string? ParentMessageId { get; set; }
 
     /// <summary>
     /// Additional metadata as JSON.

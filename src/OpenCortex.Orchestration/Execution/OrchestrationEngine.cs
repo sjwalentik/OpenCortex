@@ -208,6 +208,17 @@ public sealed class OrchestrationEngine : IOrchestrationEngine
         var chatRequest = BuildChatRequest(request, routing);
         var isFirst = true;
 
+        yield return new OrchestrationStreamChunk
+        {
+            Chunk = new StreamChunk
+            {
+                IsComplete = false
+            },
+            ProviderId = routing.ProviderId,
+            Routing = routing
+        };
+        isFirst = false;
+
         await foreach (var chunk in provider.StreamAsync(chatRequest, cancellationToken))
         {
             yield return new OrchestrationStreamChunk
@@ -216,7 +227,6 @@ public sealed class OrchestrationEngine : IOrchestrationEngine
                 ProviderId = routing.ProviderId,
                 Routing = isFirst ? routing : null
             };
-            isFirst = false;
         }
     }
 

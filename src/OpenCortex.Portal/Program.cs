@@ -4,7 +4,10 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddHttpClient(PortalSettings.ApiHttpClientName);
+builder.Services.AddHttpClient(PortalSettings.ApiHttpClientName, client =>
+{
+    client.Timeout = Timeout.InfiniteTimeSpan;
+});
 builder.Services.AddHttpClient(PortalSettings.FirebaseHttpClientName);
 
 var app = builder.Build();
@@ -232,9 +235,13 @@ app.MapMethods("/portal-api/{**path}", ["GET", "POST", "PUT", "DELETE"], async (
         HttpCompletionOption.ResponseHeadersRead,
         cancellationToken);
 
-    var responseBody = await downstreamResponse.Content.ReadAsStringAsync(cancellationToken);
-    var contentType = downstreamResponse.Content.Headers.ContentType?.ToString() ?? "application/json";
-    return Results.Content(responseBody, contentType, Encoding.UTF8, (int)downstreamResponse.StatusCode);
+    httpContext.Response.StatusCode = (int)downstreamResponse.StatusCode;
+    CopyDownstreamResponseHeaders(downstreamResponse, httpContext.Response);
+
+    await using var downstreamStream = await downstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
+    await downstreamStream.CopyToAsync(httpContext.Response.Body, cancellationToken);
+
+    return Results.Empty;
 });
 
 app.Run();
@@ -337,19 +344,30 @@ static bool IsAllowedPortalApiPath(string path, string method)
     return normalizedMethod switch
     {
         "GET" =>
-            normalizedPath is "tenant/me" or "tenant/brains" or "tenant/billing/plan" or "tenant/tokens"
+            normalizedPath is "tenant/me" or "tenant/brains" or "tenant/billing/plan" or "tenant/tokens" or "tenant/conversations"
             || normalizedPath.StartsWith("tenant/brains/", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(normalizedPath, "tenant/query", StringComparison.OrdinalIgnoreCase),
+            || normalizedPath.StartsWith("tenant/conversations/", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedPath, "tenant/query", StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.StartsWith("api/chat/", StringComparison.OrdinalIgnoreCase)
+            || IsProviderConfigPath(normalizedPath),
         "POST" =>
-            normalizedPath is "tenant/tokens"
+            normalizedPath is "tenant/tokens" or "tenant/conversations"
             || string.Equals(normalizedPath, "tenant/query", StringComparison.OrdinalIgnoreCase)
             || IsTenantBrainDocumentCollectionPath(normalizedPath)
             || IsTenantBrainDocumentRestorePath(normalizedPath)
-            || IsTenantBrainReindexPath(normalizedPath),
-        "PUT" => IsTenantBrainDocumentItemPath(normalizedPath),
+            || IsTenantBrainReindexPath(normalizedPath)
+            || IsChatCompletionPath(normalizedPath)
+            || IsProviderConfigTogglePath(normalizedPath)
+            || IsProviderConfigOAuthActionPath(normalizedPath),
+        "PUT" =>
+            IsTenantBrainDocumentItemPath(normalizedPath)
+            || IsProviderConfigItemPath(normalizedPath),
+        "PATCH" => IsTenantConversationItemPath(normalizedPath),
         "DELETE" =>
             normalizedPath.StartsWith("tenant/tokens/", StringComparison.OrdinalIgnoreCase)
-            || IsTenantBrainDocumentItemPath(normalizedPath),
+            || IsTenantBrainDocumentItemPath(normalizedPath)
+            || IsTenantConversationItemPath(normalizedPath)
+            || IsProviderConfigItemPath(normalizedPath),
         _ => false,
     };
 }
@@ -390,6 +408,97 @@ static bool IsTenantBrainReindexPath(string normalizedPath)
         && string.Equals(segments[0], "tenant", StringComparison.OrdinalIgnoreCase)
         && string.Equals(segments[1], "brains", StringComparison.OrdinalIgnoreCase)
         && string.Equals(segments[3], "reindex", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsTenantConversationItemPath(string normalizedPath)
+{
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 3
+        && string.Equals(segments[0], "tenant", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "conversations", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsChatCompletionPath(string normalizedPath)
+{
+    return string.Equals(normalizedPath, "api/chat/completions", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(normalizedPath, "api/chat/completions/stream", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsProviderConfigPath(string normalizedPath)
+{
+    // Matches: api/providers/config, api/providers/config/, api/providers/config/available, api/providers/config/{providerId}
+    return string.Equals(normalizedPath, "api/providers/config", StringComparison.OrdinalIgnoreCase)
+        || normalizedPath.StartsWith("api/providers/config/", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsProviderConfigItemPath(string normalizedPath)
+{
+    // Matches: api/providers/config/{providerId} (exactly 4 segments)
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 4
+        && string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "providers", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[2], "config", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(segments[3], "available", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsProviderConfigTogglePath(string normalizedPath)
+{
+    // Matches: api/providers/config/{providerId}/toggle
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 5
+        && string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "providers", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[2], "config", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[4], "toggle", StringComparison.OrdinalIgnoreCase);
+}
+
+static void CopyDownstreamResponseHeaders(HttpResponseMessage downstreamResponse, HttpResponse response)
+{
+    foreach (var header in downstreamResponse.Headers)
+    {
+        if (IsHopByHopHeader(header.Key))
+        {
+            continue;
+        }
+
+        response.Headers[header.Key] = header.Value.ToArray();
+    }
+
+    foreach (var header in downstreamResponse.Content.Headers)
+    {
+        if (IsHopByHopHeader(header.Key))
+        {
+            continue;
+        }
+
+        response.Headers[header.Key] = header.Value.ToArray();
+    }
+
+    response.Headers.Remove("transfer-encoding");
+}
+
+static bool IsHopByHopHeader(string headerName) =>
+    headerName.Equals("Connection", StringComparison.OrdinalIgnoreCase)
+    || headerName.Equals("Keep-Alive", StringComparison.OrdinalIgnoreCase)
+    || headerName.Equals("Proxy-Authenticate", StringComparison.OrdinalIgnoreCase)
+    || headerName.Equals("Proxy-Authorization", StringComparison.OrdinalIgnoreCase)
+    || headerName.Equals("TE", StringComparison.OrdinalIgnoreCase)
+    || headerName.Equals("Trailer", StringComparison.OrdinalIgnoreCase)
+    || headerName.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase)
+    || headerName.Equals("Upgrade", StringComparison.OrdinalIgnoreCase);
+
+static bool IsProviderConfigOAuthActionPath(string normalizedPath)
+{
+    // Matches: api/providers/config/{providerId}/oauth/disconnect or /refresh
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 6
+        && string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "providers", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[2], "config", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[4], "oauth", StringComparison.OrdinalIgnoreCase)
+        && (string.Equals(segments[5], "disconnect", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(segments[5], "refresh", StringComparison.OrdinalIgnoreCase));
 }
 
 internal sealed record PortalLoginRequest(string Email, string Password);

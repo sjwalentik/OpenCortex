@@ -46,8 +46,8 @@ public sealed class PostgresConversationRepository : IConversationRepository
 
         command.Parameters.AddWithValue("conversation_id", conversation.ConversationId);
         command.Parameters.AddWithValue("brain_id", (object?)conversation.BrainId ?? DBNull.Value);
-        command.Parameters.AddWithValue("customer_id", conversation.CustomerId.ToString());
-        command.Parameters.AddWithValue("user_id", (object?)conversation.UserId?.ToString() ?? DBNull.Value);
+        command.Parameters.AddWithValue("customer_id", conversation.CustomerId);
+        command.Parameters.AddWithValue("user_id", (object?)conversation.UserId ?? DBNull.Value);
         command.Parameters.AddWithValue("title", (object?)conversation.Title ?? DBNull.Value);
         command.Parameters.AddWithValue("system_prompt", (object?)conversation.SystemPrompt ?? DBNull.Value);
         command.Parameters.AddWithValue("status", conversation.Status.ToString().ToLowerInvariant());
@@ -58,14 +58,14 @@ public sealed class PostgresConversationRepository : IConversationRepository
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (await reader.ReadAsync(cancellationToken))
         {
-            conversation.ConversationId = reader.GetGuid(0);
+            conversation.ConversationId = reader.GetString(0);
             conversation.CreatedAt = reader.GetDateTime(1);
         }
 
         return conversation;
     }
 
-    public async Task<Conversation?> GetByIdAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    public async Task<Conversation?> GetByIdAsync(string conversationId, CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -97,7 +97,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
         return null;
     }
 
-    public async Task<Conversation?> GetWithMessagesAsync(Guid conversationId, int? messageLimit = null, CancellationToken cancellationToken = default)
+    public async Task<Conversation?> GetWithMessagesAsync(string conversationId, int? messageLimit = null, CancellationToken cancellationToken = default)
     {
         var conversation = await GetByIdAsync(conversationId, cancellationToken);
         if (conversation is null) return null;
@@ -107,7 +107,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
     }
 
     public async Task<IReadOnlyList<Conversation>> ListAsync(
-        Guid customerId,
+        string customerId,
         ConversationStatus? status = null,
         int? limit = null,
         int? offset = null,
@@ -140,7 +140,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
             LIMIT @limit OFFSET @offset;
             """;
 
-        command.Parameters.AddWithValue("customer_id", customerId.ToString());
+        command.Parameters.AddWithValue("customer_id", customerId);
         if (status.HasValue)
         {
             command.Parameters.AddWithValue("status", status.Value.ToString().ToLowerInvariant());
@@ -186,7 +186,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task DeleteAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(string conversationId, CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -253,7 +253,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (await reader.ReadAsync(cancellationToken))
         {
-            message.MessageId = reader.GetGuid(0);
+            message.MessageId = reader.GetString(0);
             message.CreatedAt = reader.GetDateTime(1);
         }
 
@@ -261,7 +261,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
     }
 
     public async Task<IReadOnlyList<Message>> GetMessagesAsync(
-        Guid conversationId,
+        string conversationId,
         int? limit = null,
         int? offset = null,
         CancellationToken cancellationToken = default)
@@ -324,7 +324,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task<int> CountAsync(Guid customerId, ConversationStatus? status = null, CancellationToken cancellationToken = default)
+    public async Task<int> CountAsync(string customerId, ConversationStatus? status = null, CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
@@ -339,7 +339,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
             SELECT COUNT(*) FROM {_connectionFactory.Schema}.conversations {whereClause};
             """;
 
-        command.Parameters.AddWithValue("customer_id", customerId.ToString());
+        command.Parameters.AddWithValue("customer_id", customerId);
         if (status.HasValue)
         {
             command.Parameters.AddWithValue("status", status.Value.ToString().ToLowerInvariant());
@@ -353,10 +353,10 @@ public sealed class PostgresConversationRepository : IConversationRepository
     {
         return new Conversation
         {
-            ConversationId = reader.GetGuid(0),
-            BrainId = reader.IsDBNull(1) ? null : reader.GetGuid(1),
-            CustomerId = Guid.Parse(reader.GetString(2)),
-            UserId = reader.IsDBNull(3) ? null : Guid.Parse(reader.GetString(3)),
+            ConversationId = reader.GetString(0),
+            BrainId = reader.IsDBNull(1) ? null : reader.GetString(1),
+            CustomerId = reader.GetString(2),
+            UserId = reader.IsDBNull(3) ? null : reader.GetString(3),
             Title = reader.IsDBNull(4) ? null : reader.GetString(4),
             SystemPrompt = reader.IsDBNull(5) ? null : reader.GetString(5),
             Status = Enum.Parse<ConversationStatus>(reader.GetString(6), ignoreCase: true),
@@ -370,9 +370,9 @@ public sealed class PostgresConversationRepository : IConversationRepository
     {
         return new Message
         {
-            MessageId = reader.GetGuid(0),
-            ConversationId = reader.GetGuid(1),
-            ParentMessageId = reader.IsDBNull(2) ? null : reader.GetGuid(2),
+            MessageId = reader.GetString(0),
+            ConversationId = reader.GetString(1),
+            ParentMessageId = reader.IsDBNull(2) ? null : reader.GetString(2),
             Role = Enum.Parse<MessageRole>(reader.GetString(3), ignoreCase: true),
             Content = reader.IsDBNull(4) ? null : reader.GetString(4),
             ProviderId = reader.IsDBNull(5) ? null : reader.GetString(5),

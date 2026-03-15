@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChatView } from './ChatView';
 import { DocumentsView } from './DocumentsView';
 import { normalizeDocumentLinkPath } from './documentLinks';
 import { buildDocumentExportFileName, buildDocumentPayload, buildDraftFromDocument, buildEmptyDocumentDraft, buildMarkdownExport, hasUnsavedDocumentChanges, normalizeDocumentDraft, parseImportedMarkdown } from './documentDraft';
 
-type PortalView = 'signin' | 'documents' | 'account' | 'usage' | 'tools';
+type PortalView = 'signin' | 'documents' | 'chat' | 'account' | 'usage' | 'tools';
 
 type PortalConfig = {
   apiBaseUrlConfigured: boolean;
@@ -117,6 +118,50 @@ type TokenSummary = {
 type CreatedTokenState = {
   token: string;
   meta: string;
+};
+
+type ProviderSettings = {
+  defaultModel?: string | null;
+  baseUrl?: string | null;
+  maxTokens?: number | null;
+  temperature?: number | null;
+};
+
+type ConfiguredProviderSummary = {
+  providerId: string;
+  authType?: string;
+  isEnabled: boolean;
+  hasCredentials: boolean;
+  settings?: ProviderSettings | null;
+  tokenExpiresAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type AvailableProvider = {
+  providerId: string;
+  name: string;
+  authTypes: string[];
+  defaultModel: string;
+  configUrl?: string | null;
+  oauthConfigured?: boolean;
+  OAuthConfigured?: boolean;
+};
+
+type AvailableProviderResponse = {
+  providers?: AvailableProvider[];
+};
+
+type ConfiguredProviderResponse = {
+  count?: number;
+  providers?: ConfiguredProviderSummary[];
+};
+
+type ProviderEditorState = {
+  authType: string;
+  apiKey: string;
+  defaultModel: string;
+  baseUrl: string;
 };
 
 type DocumentSummary = {
@@ -242,6 +287,16 @@ const viewDefinitions: Record<PortalView, ViewDefinition> = {
       'Tiptap comes after current behavior survives intact.'
     ]
   },
+  chat: {
+    id: 'chat',
+    title: 'Chat',
+    lead: 'Converse with AI models through intelligent routing and streaming responses.',
+    bullets: [
+      'Multi-model orchestration routes to the best provider.',
+      'Real-time streaming with activity indicators.',
+      'Conversation history persists across sessions.'
+    ]
+  },
   account: {
     id: 'account',
     title: 'Account',
@@ -274,7 +329,7 @@ const viewDefinitions: Record<PortalView, ViewDefinition> = {
   }
 };
 
-const orderedViews: PortalView[] = ['signin', 'documents', 'account', 'usage', 'tools'];
+const orderedViews: PortalView[] = ['signin', 'documents', 'chat', 'account', 'usage', 'tools'];
 
 function App() {
   const [config, setConfig] = useState<PortalConfig | null>(null);
@@ -291,6 +346,8 @@ function App() {
   const [billing, setBilling] = useState<PortalBilling | null>(null);
   const [brains, setBrains] = useState<BrainSummary[]>([]);
   const [tokens, setTokens] = useState<TokenSummary[]>([]);
+  const [availableProviders, setAvailableProviders] = useState<AvailableProvider[]>([]);
+  const [configuredProviders, setConfiguredProviders] = useState<ConfiguredProviderSummary[]>([]);
   const [activeView, setActiveView] = useState<PortalView>(resolveViewFromHash(window.location.hash, loadStoredAuthSession()));
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -457,6 +514,35 @@ function App() {
   }, [authSession]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const providerConnected = params.get('providerConnected');
+    const providerError = params.get('providerError');
+    const providerId = params.get('providerId');
+
+    if (!providerConnected && !providerError) {
+      return;
+    }
+
+    const providerLabel = providerId || providerConnected || 'provider';
+    setAccountActionMessage(providerConnected
+      ? `${providerLabel} connected successfully.`
+      : providerError || `Failed to connect ${providerLabel}.`);
+
+    if (authSession) {
+      navigateToView('account', authSession, setActiveView);
+      setRefreshNonce((value) => value + 1);
+    }
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete('providerConnected');
+    nextUrl.searchParams.delete('providerError');
+    nextUrl.searchParams.delete('providerId');
+    const search = nextUrl.searchParams.toString();
+    const hash = nextUrl.hash || '#account';
+    window.history.replaceState(null, '', `${nextUrl.pathname}${search ? `?${search}` : ''}${hash}`);
+  }, [authSession]);
+
+  useEffect(() => {
     if (!authSession) {
       setAuthError(null);
       setAuthPendingAction(null);
@@ -464,6 +550,8 @@ function App() {
       setBilling(null);
       setBrains([]);
       setTokens([]);
+      setAvailableProviders([]);
+      setConfiguredProviders([]);
       setWorkspaceError(null);
       setActiveBrainId('');
       setCreatedToken(null);
@@ -494,11 +582,13 @@ function App() {
           setAuthSession(session);
         }
 
-        const [workspaceContext, workspaceBilling, workspaceBrains, workspaceTokens] = await Promise.all([
+        const [workspaceContext, workspaceBilling, workspaceBrains, workspaceTokens, providerCatalog, providerConfigs] = await Promise.all([
           portalFetch('/portal-api/tenant/me', session.idToken),
           portalFetch('/portal-api/tenant/billing/plan', session.idToken),
           portalFetch('/portal-api/tenant/brains', session.idToken),
-          portalFetch('/portal-api/tenant/tokens', session.idToken)
+          portalFetch('/portal-api/tenant/tokens', session.idToken),
+          portalFetch('/portal-api/api/providers/config/available', session.idToken),
+          portalFetch('/portal-api/api/providers/config/', session.idToken)
         ]);
 
         if (cancelled) {
@@ -509,11 +599,15 @@ function App() {
           .filter((brain) => String(brain.mode || '').toLowerCase() === 'managed-content'
             && String(brain.status || '').toLowerCase() !== 'retired');
         const nextTokens = (((workspaceTokens as { tokens?: TokenSummary[] }).tokens) || []);
+        const nextAvailableProviders = (((providerCatalog as AvailableProviderResponse).providers) || []);
+        const nextConfiguredProviders = (((providerConfigs as ConfiguredProviderResponse).providers) || []);
 
         setContext(workspaceContext as PortalContext);
         setBilling(workspaceBilling as PortalBilling);
         setBrains(nextBrains);
         setTokens(nextTokens);
+        setAvailableProviders(nextAvailableProviders);
+        setConfiguredProviders(nextConfiguredProviders);
       } catch (error) {
         if (cancelled) {
           return;
@@ -526,6 +620,8 @@ function App() {
           setBilling(null);
           setBrains([]);
           setTokens([]);
+          setAvailableProviders([]);
+          setConfiguredProviders([]);
         }
 
         setWorkspaceError(error instanceof Error ? error.message : 'Failed to load workspace.');
@@ -1345,12 +1441,102 @@ function App() {
 
   async function handleRefreshSession() {
     try {
-      await getValidSession();
+      const session = await getValidSession();
       setRefreshNonce((value) => value + 1);
       setAccountActionMessage('Session refreshed.');
+      return session.idToken;
     } catch (error) {
       setAccountActionMessage(error instanceof Error ? error.message : 'Failed to refresh session.');
+      return null;
     }
+  }
+
+  async function handleSaveProviderConfig(providerId: string, editor: ProviderEditorState) {
+    try {
+      const session = await getValidSession();
+      const request = buildProviderConfigRequest(providerId, editor, configuredProviders);
+      await portalFetch(`/portal-api/api/providers/config/${encodeURIComponent(providerId)}`, session.idToken, {
+        method: 'PUT',
+        body: JSON.stringify(request),
+      });
+      setAccountActionMessage(`${providerId} settings saved.`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to save ${providerId} settings.`);
+    }
+  }
+
+  async function handleToggleProvider(providerId: string) {
+    try {
+      const session = await getValidSession();
+      await portalFetch(`/portal-api/api/providers/config/${encodeURIComponent(providerId)}/toggle`, session.idToken, {
+        method: 'POST',
+      });
+      setAccountActionMessage(`${providerId} availability updated.`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to update ${providerId}.`);
+    }
+  }
+
+  async function handleDeleteProvider(providerId: string) {
+    if (!window.confirm(`Delete the stored ${providerId} configuration?`)) {
+      return;
+    }
+
+    try {
+      const session = await getValidSession();
+      await portalFetch(`/portal-api/api/providers/config/${encodeURIComponent(providerId)}`, session.idToken, {
+        method: 'DELETE',
+      });
+      setAccountActionMessage(`${providerId} configuration deleted.`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to delete ${providerId}.`);
+    }
+  }
+
+  async function handleStartProviderOAuth(providerId: string) {
+    try {
+      const session = await getValidSession();
+      const returnUrl = buildPortalOAuthReturnUrl();
+      const response = await portalFetch(
+        `/portal-api/api/providers/config/${encodeURIComponent(providerId)}/oauth/authorize?returnUrl=${encodeURIComponent(returnUrl)}`,
+        session.idToken) as { authorizationUrl?: string };
+
+      if (!response.authorizationUrl) {
+        throw new Error(`No OAuth authorization URL was returned for ${providerId}.`);
+      }
+
+      window.location.assign(response.authorizationUrl);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to start OAuth for ${providerId}.`);
+    }
+  }
+
+  async function handleDisconnectProviderOAuth(providerId: string) {
+    if (!window.confirm(`Disconnect ${providerId} and remove the stored OAuth token?`)) {
+      return;
+    }
+
+    try {
+      const session = await getValidSession();
+      await portalFetch(`/portal-api/api/providers/config/${encodeURIComponent(providerId)}/oauth/disconnect`, session.idToken, {
+        method: 'POST',
+      });
+      setAccountActionMessage(`${providerId} disconnected.`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to disconnect ${providerId}.`);
+    }
+  }
+
+  function handleOpenProviderSettings() {
+    if (!authSession) {
+      return;
+    }
+
+    navigateToView('account', authSession, setActiveView);
   }
 
   async function handleCreateToken() {
@@ -1513,6 +1699,10 @@ function App() {
     () => tokens.filter((token) => !token.revokedAt).length,
     [tokens]
   );
+  const hasConfiguredProviders = useMemo(
+    () => configuredProviders.some((provider) => isProviderReady(provider)),
+    [configuredProviders]
+  );
   const activeToken = useMemo(
     () => tokens.find((token) => !token.revokedAt) ?? null,
     [tokens]
@@ -1671,6 +1861,14 @@ function App() {
             versionsError={versionsError}
             versionsLoading={versionsLoading}
           />
+        ) : activeView === 'chat' ? (
+          <ChatView
+            authSession={authSession}
+            activeBrainId={activeBrainId}
+            hasConfiguredProviders={hasConfiguredProviders}
+            onOpenProviderSettings={handleOpenProviderSettings}
+            onRefreshSession={handleRefreshSession}
+          />
         ) : activeView === 'usage' ? (
           <UsageView
             activeBrainId={activeBrainId}
@@ -1715,16 +1913,23 @@ function App() {
           <AccountView
             accountActionMessage={accountActionMessage}
             authSession={authSession}
+            availableProviders={availableProviders}
             billing={billing}
+            configuredProviders={configuredProviders}
             context={context}
             createdToken={createdToken}
             onCopyCreatedToken={handleCopyCreatedToken}
             onCreateToken={handleCreateToken}
+            onDeleteProvider={handleDeleteProvider}
+            onDisconnectProviderOAuth={handleDisconnectProviderOAuth}
             onDismissCreatedToken={() => setCreatedToken(null)}
             onRefreshSession={handleRefreshSession}
-            onRevokeToken={handleRevokeToken}
-            onSignOut={handleSignOut}
             onRequestWriteScopeChange={setRequestWriteScope}
+            onRevokeToken={handleRevokeToken}
+            onSaveProviderConfig={handleSaveProviderConfig}
+            onSignOut={handleSignOut}
+            onStartProviderOAuth={handleStartProviderOAuth}
+            onToggleProvider={handleToggleProvider}
             onTokenExpiresAtInputChange={setTokenExpiresAtInput}
             onTokenNameInputChange={setTokenNameInput}
             requestWriteScope={requestWriteScope}
@@ -2210,91 +2415,26 @@ function ToolsView({
     </section>
   );
 }
-function buildMcpToolManifestUrl(baseUrl: string) {
-  if (!baseUrl) {
-    return '';
-  }
-
-  return baseUrl.endsWith('/mcp')
-    ? `${baseUrl.slice(0, -4)}/tool-manifest`
-    : `${baseUrl.replace(/\/$/, '')}/tool-manifest`;
-}
-
-function buildMcpConfigSnippet(url: string, tokenName: string) {
-  return JSON.stringify({
-    mcpServers: {
-      OpenCortex: {
-        url: url || 'https://your-mcp-host/mcp',
-        headers: {
-          Authorization: 'Bearer oct_replace_with_token',
-        },
-        notes: `Token label: ${tokenName}`,
-      },
-    },
-  }, null, 2);
-}
-
-function buildToolOql(brainId: string, search: string, rank: string, where: string, limit: string) {
-  if (!brainId) {
-    return '';
-  }
-
-  const lines = [`FROM brain("${brainId}")`];
-  if (search.trim()) {
-    lines.push(`SEARCH "${search.trim()}"`);
-  }
-  if (where.trim()) {
-    lines.push(`WHERE ${where.trim()}`);
-  }
-  lines.push(`RANK ${rank || 'hybrid'}`);
-  lines.push(`LIMIT ${limit || '5'}`);
-  return lines.join('\n');
-}
-
-function getToolResultKey(result: ToolQueryResultItem) {
-  return result.documentId || `${result.brainId || ''}::${result.canonicalPath || ''}`;
-}
-
-function renderToolFetchState(result: ToolQueryResultItem, fetchState: ToolFetchedDocumentState | null) {
-  if (!result.documentId && !result.canonicalPath) {
-    return <div className="empty-state">This result does not expose a retrievable document id or canonical path.</div>;
-  }
-
-  if (!fetchState) {
-    return <p className="tool-fetch-note">Fetch the stored document to inspect the full markdown behind this ranked snippet.</p>;
-  }
-
-  if (fetchState.status === 'loading') {
-    return <div className="empty-state">Fetching full document...</div>;
-  }
-
-  if (fetchState.status === 'error') {
-    return <div className="empty-state">{fetchState.message || 'Document fetch failed.'}</div>;
-  }
-
-  const document = fetchState.document;
-  return (
-    <>
-      <div className="tool-document-meta">
-        {document?.status || 'draft'} | {document?.canonicalPath || ''} | {String((document as { wordCount?: number } | undefined)?.wordCount ?? 0)} words | updated {formatDateTime(document?.updatedAt)}
-      </div>
-      <div className="tool-document-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(document?.content || '') }} />
-    </>
-  );
-}
 type AccountViewProps = {
   accountActionMessage: string | null;
   authSession: StoredAuthSession;
+  availableProviders: AvailableProvider[];
   billing: PortalBilling | null;
+  configuredProviders: ConfiguredProviderSummary[];
   context: PortalContext | null;
   createdToken: CreatedTokenState | null;
   onCopyCreatedToken: () => void;
   onCreateToken: () => void;
+  onDeleteProvider: (providerId: string) => Promise<void>;
+  onDisconnectProviderOAuth: (providerId: string) => Promise<void>;
   onDismissCreatedToken: () => void;
-  onRefreshSession: () => void;
+  onRefreshSession: () => Promise<string | null>;
   onRequestWriteScopeChange: (value: boolean) => void;
   onRevokeToken: (apiTokenId: string) => void;
+  onSaveProviderConfig: (providerId: string, editor: ProviderEditorState) => Promise<void>;
   onSignOut: () => void;
+  onStartProviderOAuth: (providerId: string) => Promise<void>;
+  onToggleProvider: (providerId: string) => Promise<void>;
   onTokenExpiresAtInputChange: (value: string) => void;
   onTokenNameInputChange: (value: string) => void;
   requestWriteScope: boolean;
@@ -2306,16 +2446,23 @@ type AccountViewProps = {
 function AccountView({
   accountActionMessage,
   authSession,
+  availableProviders,
   billing,
+  configuredProviders,
   context,
   createdToken,
   onCopyCreatedToken,
   onCreateToken,
+  onDeleteProvider,
+  onDisconnectProviderOAuth,
   onDismissCreatedToken,
   onRefreshSession,
   onRequestWriteScopeChange,
   onRevokeToken,
+  onSaveProviderConfig,
   onSignOut,
+  onStartProviderOAuth,
+  onToggleProvider,
   onTokenExpiresAtInputChange,
   onTokenNameInputChange,
   requestWriteScope,
@@ -2324,14 +2471,48 @@ function AccountView({
   tokens
 }: AccountViewProps) {
   const activeTokenCount = tokens.filter((token) => !token.revokedAt).length;
+  const configuredProviderMap = useMemo(
+    () => new Map(configuredProviders.map((provider) => [provider.providerId, provider])),
+    [configuredProviders]
+  );
+  const [providerEditors, setProviderEditors] = useState<Record<string, ProviderEditorState>>(() =>
+    buildProviderEditors(availableProviders, configuredProviders)
+  );
+  const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setProviderEditors(buildProviderEditors(availableProviders, configuredProviders));
+  }, [availableProviders, configuredProviders]);
+
+  function updateProviderEditor(providerId: string, patch: Partial<ProviderEditorState>) {
+    setProviderEditors((current) => ({
+      ...current,
+      [providerId]: {
+        ...(current[providerId] || buildProviderEditorState(
+          availableProviders.find((provider) => provider.providerId === providerId) || null,
+          configuredProviderMap.get(providerId) || null
+        )),
+        ...patch,
+      },
+    }));
+  }
+
+  async function runProviderAction(providerId: string, action: () => Promise<void>) {
+    setPendingProviderId(providerId);
+    try {
+      await action();
+    } finally {
+      setPendingProviderId((current) => (current === providerId ? null : current));
+    }
+  }
 
   return (
     <section className="portal-layout">
       <article className="panel portal-hero">
         <p className="eyebrow">Account</p>
-        <h2>Tenant settings and token access are now using live account data.</h2>
+        <h2>Session controls, provider access, and MCP tokens now live in one place.</h2>
         <p className="summary-detail">
-          Session controls, workspace posture, MCP token issuance, and token revocation now live in the main portal experience.
+          Chat uses your own provider settings now, so this page is where model access, browser session posture, and MCP token issuance meet.
         </p>
       </article>
 
@@ -2355,7 +2536,7 @@ function AccountView({
 
           <p className="summary-detail">{accountActionMessage || 'Session details appear after sign-in.'}</p>
           <div className="action-row">
-            <button type="button" className="button" onClick={onRefreshSession}>Refresh Session</button>
+            <button type="button" className="button" onClick={() => void onRefreshSession()}>Refresh Session</button>
             <button type="button" className="button button-danger" onClick={onSignOut}>Sign Out</button>
           </div>
         </section>
@@ -2388,7 +2569,7 @@ function AccountView({
                 <span>Request <code>mcp:write</code> when the effective plan allows it.</span>
               </label>
             </div>
-            <button type="button" className="button button-primary" onClick={onCreateToken}>Create Token</button>
+            <button type="button" className="button button-primary" onClick={() => void onCreateToken()}>Create Token</button>
           </div>
 
           {createdToken ? (
@@ -2402,11 +2583,194 @@ function AccountView({
               </div>
               <textarea readOnly rows={4} value={createdToken.token} className="document-content-editor" />
               <div className="action-row">
-                <button type="button" className="button button-primary" onClick={onCopyCreatedToken}>Copy Token</button>
+                <button type="button" className="button button-primary" onClick={() => void onCopyCreatedToken()}>Copy Token</button>
               </div>
             </section>
           ) : null}
         </section>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>Provider Settings</h3>
+            <p className="summary-detail">Connect Anthropic or OpenAI with OAuth or API keys, or point Ollama at a remote endpoint.</p>
+          </div>
+        </div>
+
+        {availableProviders.length === 0 ? (
+          <div className="empty-state">Provider catalog is not available yet.</div>
+        ) : (
+          <div className="provider-card-list">
+            {availableProviders.map((provider) => {
+              const configured = configuredProviderMap.get(provider.providerId) || null;
+              const editor = providerEditors[provider.providerId] || buildProviderEditorState(provider, configured);
+              const pending = pendingProviderId === provider.providerId;
+              const supportsApiKey = provider.authTypes.includes('api_key');
+              const supportsOAuth = provider.authTypes.includes('oauth') && isProviderOAuthConfigured(provider);
+              const isOllama = provider.providerId === 'ollama';
+              const isOAuthMode = editor.authType === 'oauth';
+              const statusClass = configured
+                ? (configured.isEnabled ? 'status-chip-active' : 'status-chip-expired')
+                : 'status-chip-revoked';
+              const statusLabel = configured
+                ? (configured.isEnabled ? 'Enabled' : 'Disabled')
+                : 'Not Configured';
+              const hasOAuthConnection = configured?.authType === 'oauth' && configured.hasCredentials;
+              const description = configured
+                ? (hasOAuthConnection
+                  ? 'OAuth token stored for this provider.'
+                  : configured.hasCredentials
+                    ? 'Stored credentials are available.'
+                    : isOllama && configured.settings?.baseUrl
+                      ? 'Remote endpoint is configured.'
+                      : 'Configuration exists but still needs credentials or endpoint details.')
+                : 'No saved configuration yet.';
+
+              return (
+                <article key={provider.providerId} className="provider-card">
+                  <div className="token-record-header">
+                    <div>
+                      <h3>{provider.name}</h3>
+                      <p className="summary-detail">{description}</p>
+                    </div>
+                    <span className={`status-chip ${statusClass}`}>{statusLabel}</span>
+                  </div>
+
+                  <div className="provider-card-meta">
+                    <span><code>{provider.providerId}</code></span>
+                    <span>Default {provider.defaultModel}</span>
+                    {configured?.updatedAt ? <span>Updated {formatDateTime(configured.updatedAt || undefined)}</span> : null}
+                    {configured?.tokenExpiresAt ? <span>Token Expires {formatDateTime(configured.tokenExpiresAt || undefined)}</span> : null}
+                    {provider.configUrl ? (
+                      <a href={provider.configUrl} target="_blank" rel="noreferrer">Get API Key</a>
+                    ) : null}
+                  </div>
+
+                  {provider.authTypes.length > 1 ? (
+                    <label className="field">
+                      <span>Authentication</span>
+                      <select
+                        value={editor.authType}
+                        onChange={(event) => updateProviderEditor(provider.providerId, { authType: event.target.value })}
+                        disabled={pending}
+                      >
+                        {provider.authTypes.map((authType) => (
+                          <option key={authType} value={authType}>{formatProviderAuthType(authType)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="summary-detail provider-auth-note">Authentication: {formatProviderAuthType(editor.authType)}</p>
+                  )}
+
+                  <div className="provider-form-grid">
+                    <label className="field">
+                      <span>Default Model</span>
+                      <input
+                        type="text"
+                        value={editor.defaultModel}
+                        onChange={(event) => updateProviderEditor(provider.providerId, { defaultModel: event.target.value })}
+                        placeholder={provider.defaultModel}
+                        disabled={pending}
+                      />
+                    </label>
+
+                    {isOllama ? (
+                      <label className="field">
+                        <span>Base URL</span>
+                        <input
+                          type="url"
+                          value={editor.baseUrl}
+                          onChange={(event) => updateProviderEditor(provider.providerId, { baseUrl: event.target.value })}
+                          placeholder="http://localhost:11434"
+                          disabled={pending}
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+
+                  {supportsApiKey && !isOAuthMode ? (
+                    <label className="field">
+                      <span>API Key</span>
+                      <input
+                        type="password"
+                        value={editor.apiKey}
+                        onChange={(event) => updateProviderEditor(provider.providerId, { apiKey: event.target.value })}
+                        placeholder={configured?.hasCredentials ? 'Leave blank to keep the stored key' : 'Paste API key'}
+                        disabled={pending}
+                      />
+                    </label>
+                  ) : null}
+
+                  {supportsOAuth && isOAuthMode ? (
+                    <p className="summary-detail provider-auth-note">
+                      OAuth uses a browser redirect. Save any default model changes, then connect the provider for this account.
+                    </p>
+                  ) : null}
+
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => void runProviderAction(provider.providerId, async () => {
+                        await onSaveProviderConfig(provider.providerId, editor);
+                        updateProviderEditor(provider.providerId, { apiKey: '' });
+                      })}
+                      disabled={pending}
+                    >
+                      Save Settings
+                    </button>
+                    {supportsOAuth && isOAuthMode ? (
+                      hasOAuthConnection ? (
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, () => onDisconnectProviderOAuth(provider.providerId))}
+                          disabled={pending}
+                        >
+                          Disconnect OAuth
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, async () => {
+                            await onSaveProviderConfig(provider.providerId, editor);
+                            await onStartProviderOAuth(provider.providerId);
+                          })}
+                          disabled={pending}
+                        >
+                          Connect OAuth
+                        </button>
+                      )
+                    ) : null}
+                    {configured ? (
+                      <button
+                        type="button"
+                        className="button"
+                        onClick={() => void runProviderAction(provider.providerId, () => onToggleProvider(provider.providerId))}
+                        disabled={pending}
+                      >
+                        {configured.isEnabled ? 'Disable' : 'Enable'}
+                      </button>
+                    ) : null}
+                    {configured ? (
+                      <button
+                        type="button"
+                        className="button button-danger"
+                        onClick={() => void runProviderAction(provider.providerId, () => onDeleteProvider(provider.providerId))}
+                        disabled={pending}
+                      >
+                        Delete
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="panel">
@@ -2453,6 +2817,7 @@ function AccountView({
     </section>
   );
 }
+
 type UsageViewProps = {
   activeBrainId: string;
   authSession: StoredAuthSession;
@@ -2510,6 +2875,7 @@ function UsageView({ activeBrainId, authSession, billing, context }: UsageViewPr
     </section>
   );
 }
+
 function navigateToView(view: PortalView, authSession: StoredAuthSession | null, setActiveView: (view: PortalView) => void) {
   const resolved = canNavigateToView(view, authSession) ? view : resolveDefaultView(authSession);
   const nextHash = `#${resolved}`;
@@ -2694,6 +3060,101 @@ async function postJson(url: string, body: unknown) {
   return payload;
 }
 
+function buildProviderEditors(
+  availableProviders: AvailableProvider[],
+  configuredProviders: ConfiguredProviderSummary[]
+) {
+  return availableProviders.reduce<Record<string, ProviderEditorState>>((accumulator, provider) => {
+    const configured = configuredProviders.find((candidate) => candidate.providerId === provider.providerId) || null;
+    accumulator[provider.providerId] = buildProviderEditorState(provider, configured);
+    return accumulator;
+  }, {});
+}
+
+function buildProviderEditorState(
+  provider: AvailableProvider | null,
+  configured: ConfiguredProviderSummary | null
+): ProviderEditorState {
+  const defaultAuthType = configured?.authType
+    || (provider?.authTypes.includes('api_key') ? 'api_key' : provider?.authTypes[0] || 'api_key');
+
+  return {
+    authType: defaultAuthType,
+    apiKey: '',
+    defaultModel: configured?.settings?.defaultModel || provider?.defaultModel || '',
+    baseUrl: configured?.settings?.baseUrl || '',
+  };
+}
+
+function buildProviderConfigRequest(
+  providerId: string,
+  editor: ProviderEditorState,
+  configuredProviders: ConfiguredProviderSummary[]
+) {
+  const configured = configuredProviders.find((candidate) => candidate.providerId === providerId) || null;
+  const settings: Record<string, unknown> = {};
+  const defaultModel = editor.defaultModel.trim();
+  const baseUrl = editor.baseUrl.trim();
+
+  if (defaultModel) {
+    settings.defaultModel = defaultModel;
+  }
+
+  if (baseUrl) {
+    settings.baseUrl = baseUrl;
+  }
+
+  const request: Record<string, unknown> = {
+    authType: editor.authType,
+    isEnabled: configured?.isEnabled ?? true,
+  };
+
+  if (Object.keys(settings).length > 0) {
+    request.settings = settings;
+  }
+
+  if (editor.authType === 'api_key' && editor.apiKey.trim()) {
+    request.apiKey = editor.apiKey.trim();
+  }
+
+  return request;
+}
+
+function isProviderReady(provider: ConfiguredProviderSummary) {
+  if (!provider.isEnabled) {
+    return false;
+  }
+
+  const authType = String(provider.authType || '').toLowerCase();
+  if (provider.providerId === 'ollama' || authType === 'none') {
+    return Boolean(provider.settings?.baseUrl?.trim());
+  }
+
+  return provider.hasCredentials;
+}
+
+function isProviderOAuthConfigured(provider: AvailableProvider) {
+  return Boolean(provider.oauthConfigured ?? provider.OAuthConfigured);
+}
+
+function formatProviderAuthType(authType: string) {
+  switch (String(authType || '').toLowerCase()) {
+    case 'api_key':
+      return 'API Key';
+    case 'oauth':
+      return 'OAuth';
+    case 'none':
+      return 'None';
+    default:
+      return authType || 'Unknown';
+  }
+}
+
+function buildPortalOAuthReturnUrl() {
+  return new URL('/app#account', window.location.origin).toString();
+}
+
+
 function extractErrorMessage(payload: unknown, status: number) {
   if (typeof payload === 'string' && payload.trim()) {
     return payload;
@@ -2815,6 +3276,20 @@ function isCurrentDocumentVersion(document: DocumentDetail | null, version: Docu
 
   return documentTimestamp === versionTimestamp;
 }
+function confirmDiscardDocumentChanges(isDirty: boolean, message: string) {
+  return !isDirty || window.confirm(message);
+}
+
+function downloadTextFile(fileName: string, content: string, contentType: string) {
+  const blob = new Blob([content], { type: contentType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
 function getTokenStatus(token: TokenSummary) {
   if (token.revokedAt) {
     return { label: 'Revoked', className: 'status-chip-revoked' };
@@ -2946,6 +3421,79 @@ function escapeHtml(value: unknown) {
     .replace(/"/g, '&quot;');
 }
 
+function buildMcpToolManifestUrl(baseUrl: string) {
+  if (!baseUrl) {
+    return '';
+  }
+
+  return baseUrl.endsWith('/mcp')
+    ? `${baseUrl.slice(0, -4)}/tool-manifest`
+    : `${baseUrl.replace(/\/$/, '')}/tool-manifest`;
+}
+
+function buildMcpConfigSnippet(url: string, tokenName: string) {
+  return JSON.stringify({
+    mcpServers: {
+      OpenCortex: {
+        url: url || 'https://your-mcp-host/mcp',
+        headers: {
+          Authorization: 'Bearer oct_replace_with_token',
+        },
+        notes: `Token label: ${tokenName}`,
+      },
+    },
+  }, null, 2);
+}
+
+function buildToolOql(brainId: string, search: string, rank: string, where: string, limit: string) {
+  if (!brainId) {
+    return '';
+  }
+
+  const lines = [`FROM brain("${brainId}")`];
+  if (search.trim()) {
+    lines.push(`SEARCH "${search.trim()}"`);
+  }
+  if (where.trim()) {
+    lines.push(`WHERE ${where.trim()}`);
+  }
+  lines.push(`RANK ${rank || 'hybrid'}`);
+  lines.push(`LIMIT ${limit || '5'}`);
+  return lines.join('\n');
+}
+
+function getToolResultKey(result: ToolQueryResultItem) {
+  return result.documentId || `${result.brainId || ''}::${result.canonicalPath || ''}`;
+}
+
+function renderToolFetchState(result: ToolQueryResultItem, fetchState: ToolFetchedDocumentState | null) {
+  if (!result.documentId && !result.canonicalPath) {
+    return <div className="empty-state">This result does not expose a retrievable document id or canonical path.</div>;
+  }
+
+  if (!fetchState) {
+    return <p className="tool-fetch-note">Fetch the stored document to inspect the full markdown behind this ranked snippet.</p>;
+  }
+
+  if (fetchState.status === 'loading') {
+    return <div className="empty-state">Fetching full document...</div>;
+  }
+
+  if (fetchState.status === 'error') {
+    return <div className="empty-state">{fetchState.message || 'Document fetch failed.'}</div>;
+  }
+
+  const document = fetchState.document;
+  return (
+    <>
+      <div className="tool-document-meta">
+        {document?.status || 'draft'} | {document?.canonicalPath || ''} | {String((document as { wordCount?: number } | undefined)?.wordCount ?? 0)} words | updated {formatDateTime(document?.updatedAt)}
+      </div>
+      <div className="tool-document-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(document?.content || '') }} />
+    </>
+  );
+}
+
 function formatDateTime(value?: string) {
   if (!value) {
     return 'Unknown';
@@ -2975,6 +3523,21 @@ function handleClearSession() {
 }
 
 export default App;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

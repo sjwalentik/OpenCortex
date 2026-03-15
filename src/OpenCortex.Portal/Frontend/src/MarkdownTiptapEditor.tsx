@@ -1,20 +1,22 @@
-import type { MouseEvent as ReactMouseEvent } from 'react';
-import { useEffect, useMemo, useRef } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import { EditorContent, type Editor as TiptapEditor, useEditor, useEditorState } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 
 import { normalizeDocumentLinkPath, normalizeEditorLinkHref } from './documentLinks';
+import type { DocumentSummary } from './documentDraft';
 import { convertHtmlToMarkdown, convertMarkdownToEditorHtml, createMarkdownTurndownService, normalizeEditorMarkdown } from './documentMarkdown';
 
 export type MarkdownTiptapEditorProps = {
+  availableDocumentLinks?: DocumentSummary[];
+  currentDocumentPath?: string;
   disabled: boolean;
   onChange: (value: string) => void;
   onEditorReady?: (editor: TiptapEditor | null) => void;
   onOpenDocumentLink?: (canonicalPath: string) => void;
   placeholder: string;
-  requestLinkUrl?: (currentHref: string) => string | null;
   value: string;
 };
 
@@ -40,6 +42,11 @@ type ToolbarState = {
   isCodeBlock: boolean;
 };
 
+type SelectionRange = {
+  from: number;
+  to: number;
+};
+
 const defaultToolbarState: ToolbarState = {
   isParagraph: false,
   isHeading1: false,
@@ -56,16 +63,64 @@ const defaultToolbarState: ToolbarState = {
 };
 
 export function MarkdownTiptapEditor({
+  availableDocumentLinks = [],
+  currentDocumentPath,
   disabled,
   onChange,
   onEditorReady,
   onOpenDocumentLink,
   placeholder,
-  requestLinkUrl,
   value,
 }: MarkdownTiptapEditorProps) {
   const turndownService = useMemo(() => createMarkdownTurndownService(), []);
   const lastSyncedMarkdownRef = useRef(normalizeEditorMarkdown(value));
+  const linkSelectionRef = useRef<SelectionRange | null>(null);
+  const linkInputRef = useRef<HTMLInputElement | null>(null);
+  const [isLinkPickerOpen, setIsLinkPickerOpen] = useState(false);
+  const [linkPickerValue, setLinkPickerValue] = useState('');
+  const [linkPickerInitialHref, setLinkPickerInitialHref] = useState('');
+  const normalizedCurrentDocumentPath = useMemo(
+    () => normalizeDocumentLinkPath(currentDocumentPath || ''),
+    [currentDocumentPath]
+  );
+  const normalizedAvailableDocumentLinks = useMemo(() => {
+    const seenPaths = new Set<string>();
+
+    return availableDocumentLinks
+      .map((document) => {
+        const canonicalPath = normalizeDocumentLinkPath(document.canonicalPath || document.slug || '');
+        if (!canonicalPath || canonicalPath === normalizedCurrentDocumentPath || seenPaths.has(canonicalPath)) {
+          return null;
+        }
+
+        seenPaths.add(canonicalPath);
+        return {
+          canonicalPath,
+          managedDocumentId: document.managedDocumentId,
+          slug: document.slug || '',
+          title: document.title || '',
+        };
+      })
+      .filter((document): document is {
+        canonicalPath: string;
+        managedDocumentId: string;
+        slug: string;
+        title: string;
+      } => document !== null);
+  }, [availableDocumentLinks, normalizedCurrentDocumentPath]);
+  const filteredLinkSuggestions = useMemo(() => {
+    const query = linkPickerValue.trim().toLowerCase();
+    if (!query) {
+      return normalizedAvailableDocumentLinks.slice(0, 8);
+    }
+
+    return normalizedAvailableDocumentLinks
+      .filter((document) => {
+        return [document.title, document.slug, document.canonicalPath]
+          .some((value) => value.toLowerCase().includes(query));
+      })
+      .slice(0, 8);
+  }, [linkPickerValue, normalizedAvailableDocumentLinks]);
   const editor = useEditor({
     immediatelyRender: true,
     extensions: [
@@ -152,33 +207,108 @@ export function MarkdownTiptapEditor({
     lastSyncedMarkdownRef.current = normalizedValue;
   }, [editor, value]);
 
-  function handleLinkActivate() {
+  useEffect(() => {
+    if (!isLinkPickerOpen) {
+      return;
+    }
+
+    linkInputRef.current?.focus();
+    linkInputRef.current?.select();
+  }, [isLinkPickerOpen]);
+
+  useEffect(() => {
+    if (!disabled) {
+      return;
+    }
+
+    closeLinkPicker();
+  }, [disabled]);
+
+  function closeLinkPicker() {
+    setIsLinkPickerOpen(false);
+    setLinkPickerValue('');
+    setLinkPickerInitialHref('');
+    linkSelectionRef.current = null;
+  }
+
+  function handleLinkButtonActivate() {
     if (!editor) {
       return;
     }
 
-    const currentHref = String(editor.getAttributes('link').href || '');
-    const requestedHref = requestLinkUrl
-      ? requestLinkUrl(currentHref)
-      : window.prompt('Enter a URL or document path like daily/notes.md. Leave blank to remove the current link.', currentHref);
-
-    if (requestedHref === null) {
+    if (isLinkPickerOpen) {
+      closeLinkPicker();
       return;
     }
 
-    const normalizedHref = normalizeEditorLinkHref(requestedHref);
+    const currentHref = String(editor.getAttributes('link').href || '');
+    const selection = editor.state.selection;
+    linkSelectionRef.current = {
+      from: selection.from,
+      to: selection.to,
+    };
+    setLinkPickerInitialHref(currentHref);
+    setLinkPickerValue(currentHref);
+    setIsLinkPickerOpen(true);
+  }
+
+  function buildLinkCommandChain() {
+    if (!editor) {
+      return null;
+    }
+
+    const chain = editor.chain().focus();
+    const selection = linkSelectionRef.current;
+    if (selection) {
+      chain.setTextSelection(selection);
+    }
+
+    if (linkPickerInitialHref) {
+      chain.extendMarkRange('link');
+    }
+
+    return chain;
+  }
+
+  function applyLinkValue(rawValue: string) {
+    const normalizedHref = normalizeEditorLinkHref(rawValue);
+    const chain = buildLinkCommandChain();
+    if (!chain) {
+      return;
+    }
 
     if (!normalizedHref) {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      if (linkPickerInitialHref) {
+        chain.unsetLink().run();
+      }
+      closeLinkPicker();
       return;
     }
 
-    if (editor.isActive('link')) {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: normalizedHref }).run();
+    chain.setLink({ href: normalizedHref }).run();
+    closeLinkPicker();
+  }
+
+  function handleLinkInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applyLinkValue(linkPickerValue);
       return;
     }
 
-    editor.chain().focus().setLink({ href: normalizedHref }).run();
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeLinkPicker();
+    }
+  }
+
+  function handlePickerButtonMouseDown(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+  }
+
+  function handleSuggestionSelect(canonicalPath: string) {
+    setLinkPickerValue(canonicalPath);
+    applyLinkValue(canonicalPath);
   }
 
   function handleEditorSurfaceClick(event: ReactMouseEvent<HTMLDivElement>) {
@@ -250,9 +380,9 @@ export function MarkdownTiptapEditor({
         />
         <EditorToolbarButton
           label="Link"
-          active={toolbarState.isLink}
+          active={toolbarState.isLink || isLinkPickerOpen}
           disabled={disabled}
-          onActivate={handleLinkActivate}
+          onActivate={handleLinkButtonActivate}
         />
         <EditorToolbarButton
           label="Bullets"
@@ -286,11 +416,75 @@ export function MarkdownTiptapEditor({
         />
       </div>
 
+      {isLinkPickerOpen ? (
+        <div className="editor-link-picker" role="group" aria-label="Link picker">
+          <div className="editor-link-picker-row">
+            <input
+              ref={linkInputRef}
+              type="text"
+              className="editor-link-input"
+              aria-label="Link destination"
+              placeholder="Search documents or paste a URL/path"
+              value={linkPickerValue}
+              onChange={(event) => setLinkPickerValue(event.target.value)}
+              onKeyDown={handleLinkInputKeyDown}
+            />
+            <button
+              type="button"
+              className="button"
+              onMouseDown={handlePickerButtonMouseDown}
+              onClick={() => applyLinkValue(linkPickerValue)}
+              disabled={!linkPickerValue.trim()}
+            >
+              Apply
+            </button>
+            <button
+              type="button"
+              className="button"
+              onMouseDown={handlePickerButtonMouseDown}
+              onClick={() => applyLinkValue('')}
+              disabled={!linkPickerInitialHref}
+            >
+              Remove
+            </button>
+            <button
+              type="button"
+              className="button"
+              onMouseDown={handlePickerButtonMouseDown}
+              onClick={closeLinkPicker}
+            >
+              Close
+            </button>
+          </div>
+
+          {filteredLinkSuggestions.length > 0 ? (
+            <div className="editor-link-suggestion-list" role="list" aria-label="Document link suggestions">
+              {filteredLinkSuggestions.map((document) => (
+                <button
+                  key={document.managedDocumentId}
+                  type="button"
+                  className="editor-link-suggestion"
+                  onMouseDown={handlePickerButtonMouseDown}
+                  onClick={() => handleSuggestionSelect(document.canonicalPath)}
+                >
+                  <span className="editor-link-suggestion-title">{document.title || document.canonicalPath}</span>
+                  <span className="editor-link-suggestion-meta">{document.canonicalPath}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          <p className="summary-detail editor-link-picker-note">
+            Type a URL, or search the current document rail and pick a managed document path.
+          </p>
+        </div>
+      ) : null}
+
       <div className="document-editor-surface" onClickCapture={handleEditorSurfaceClick}>
         <EditorContent editor={editor} />
       </div>
       <p className="summary-detail editor-shell-note">
-        Rich editing stays inside Tiptap, but document save and export still persist Markdown. Use canonical paths like daily/notes.md for internal links, then Ctrl+click to open them.
+        Rich editing stays inside Tiptap, but document save and export still persist Markdown. Use the Link picker for managed documents, then Ctrl+click to open them.
       </p>
     </div>
   );
@@ -329,4 +523,3 @@ function EditorToolbarButton({
     </button>
   );
 }
-

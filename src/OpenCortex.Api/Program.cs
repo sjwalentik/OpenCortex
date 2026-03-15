@@ -16,8 +16,13 @@ using OpenCortex.Indexer.Indexing;
 using OpenCortex.Orchestration;
 using OpenCortex.Orchestration.Routing;
 using OpenCortex.Persistence.Postgres;
+using OpenCortex.Providers.Anthropic;
+using OpenCortex.Providers.OpenAI;
+using OpenCortex.Providers.Ollama;
 using OpenCortex.Providers.Abstractions;
 using OpenCortex.Retrieval.Execution;
+using OpenCortex.Tools;
+using OpenCortex.Tools.GitHub;
 using Stripe;
 using BillingPortalSessionService = Stripe.BillingPortal.SessionService;
 using BillingPortalSessionCreateOptions = Stripe.BillingPortal.SessionCreateOptions;
@@ -547,6 +552,16 @@ builder.Services.AddRateLimiter(rateLimiter =>
                 Window = TimeSpan.FromMinutes(1),
             }));
 
+    // Chat gets its own bucket so portal page activity does not starve completions.
+    rateLimiter.AddPolicy("chat-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
     // Webhook limit (50 per minute - defensive against replay)
     rateLimiter.AddPolicy("webhooks", context =>
         RateLimitPartition.GetFixedWindowLimiter(
@@ -597,6 +612,29 @@ builder.Services.AddHttpClient("Anthropic");
 builder.Services.AddHttpClient("OpenAI");
 builder.Services.AddHttpClient("Ollama");
 
+// Register static model providers only when hosted auth is disabled.
+// Hosted mode now resolves providers from each user's stored configuration.
+if (!hostedAuthConfigured)
+{
+    var anthropicApiKey = builder.Configuration["OpenCortex:Providers:Anthropic:ApiKey"];
+    if (!string.IsNullOrWhiteSpace(anthropicApiKey))
+    {
+        builder.Services.AddAnthropicProvider("OpenCortex:Providers:Anthropic");
+    }
+
+    var openAiApiKey = builder.Configuration["OpenCortex:Providers:OpenAI:ApiKey"];
+    if (!string.IsNullOrWhiteSpace(openAiApiKey))
+    {
+        builder.Services.AddOpenAIProvider("OpenCortex:Providers:OpenAI");
+    }
+
+    var ollamaEndpoint = builder.Configuration["OpenCortex:Providers:Ollama:Endpoint"];
+    if (!string.IsNullOrWhiteSpace(ollamaEndpoint))
+    {
+        builder.Services.AddOllamaProvider("OpenCortex:Providers:Ollama");
+    }
+}
+
 // Register credential encryption for user provider configs
 var encryptionKey = builder.Configuration["OpenCortex:Security:EncryptionKey"];
 if (!string.IsNullOrEmpty(encryptionKey))
@@ -620,6 +658,14 @@ builder.Services.AddHttpClient<IProviderOAuthService, ProviderOAuthService>();
 
 // Register user provider factory (creates providers with user credentials)
 builder.Services.AddScoped<IUserProviderFactory, UserProviderFactory>();
+
+// Register user credential service (provides decrypted credentials for tool execution)
+builder.Services.AddScoped<OpenCortex.Core.Credentials.IUserCredentialService,
+    OpenCortex.Core.Credentials.UserCredentialService>();
+
+// Register tools infrastructure
+builder.Services.AddTools();
+builder.Services.AddGitHubTools();
 
 // Register conversation services
 builder.Services.AddConversations();
@@ -1777,6 +1823,9 @@ if (hostedAuthConfigured)
 
         return Results.Ok(new { message = $"Document '{managedDocumentId}' was deleted." });
     });
+
+    // Conversation management endpoints
+    tenantRoutes.MapConversationEndpoints();
 
     tenantRoutes.MapPost("/brains/{brainId}/documents/{managedDocumentId}/versions/{managedDocumentVersionId}/restore", async (
         string brainId,
