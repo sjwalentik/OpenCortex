@@ -90,6 +90,14 @@ jobs:
         run: |
           kubectl apply -k k8s/agent-workspaces/
 
+      - name: Delete deployments for selector migration
+        run: |
+          # One-time migration: selectors changed from commonLabels to labels
+          # Kubernetes doesn't allow selector changes, so we must delete and recreate
+          # This step can be removed after successful deployment
+          kubectl delete deployment opencortex-api opencortex-portal opencortex-mcp opencortex-workers \
+            -n opencortex-develop --ignore-not-found
+
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -k infra/k8s/overlays/develop
