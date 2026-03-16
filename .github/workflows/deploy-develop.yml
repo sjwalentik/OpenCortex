@@ -96,7 +96,9 @@ jobs:
           # Kubernetes doesn't allow selector changes, so we must delete and recreate
           # This step can be removed after successful deployment
           kubectl delete deployment opencortex-api opencortex-portal opencortex-mcp opencortex-workers \
-            -n opencortex-develop --ignore-not-found
+            -n opencortex-develop --ignore-not-found --wait=true
+          # Give k8s a moment to finalize deletion
+          sleep 5
 
       - name: Deploy to Kubernetes
         run: |
