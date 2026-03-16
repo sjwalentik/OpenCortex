@@ -102,7 +102,7 @@ jobs:
 
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -k infra/k8s/overlays/develop
+          kubectl apply -k infra/k8s/overlays/develop --server-side --force-conflicts
           kubectl set image deployment/opencortex-api api=${{ env.IMAGE_PREFIX }}/api:${{ env.IMAGE_TAG }} -n opencortex-develop
           kubectl set image deployment/opencortex-portal portal=${{ env.IMAGE_PREFIX }}/portal:${{ env.IMAGE_TAG }} -n opencortex-develop
           kubectl set image deployment/opencortex-mcp mcp=${{ env.IMAGE_PREFIX }}/mcp:${{ env.IMAGE_TAG }} -n opencortex-develop
