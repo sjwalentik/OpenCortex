@@ -143,6 +143,11 @@ public sealed record AgenticOrchestrationResult
     /// Error message if execution failed.
     /// </summary>
     public string? Error { get; init; }
+
+    /// <summary>
+    /// Comprehensive telemetry for observability.
+    /// </summary>
+    public AgenticTelemetry? Telemetry { get; init; }
 }
 
 /// <summary>
@@ -205,6 +210,48 @@ public sealed record AgenticToolResultEvent : AgenticStreamEvent
 }
 
 /// <summary>
+/// A new iteration is starting.
+/// </summary>
+public sealed record AgenticIterationStartEvent : AgenticStreamEvent
+{
+    /// <summary>
+    /// Iteration number (1-based).
+    /// </summary>
+    public required int Iteration { get; init; }
+
+    /// <summary>
+    /// Trace ID for correlation.
+    /// </summary>
+    public required string TraceId { get; init; }
+}
+
+/// <summary>
+/// An iteration completed (LLM call finished).
+/// </summary>
+public sealed record AgenticIterationCompleteEvent : AgenticStreamEvent
+{
+    /// <summary>
+    /// Iteration number (1-based).
+    /// </summary>
+    public required int Iteration { get; init; }
+
+    /// <summary>
+    /// Duration of this iteration.
+    /// </summary>
+    public required TimeSpan Duration { get; init; }
+
+    /// <summary>
+    /// Token usage for this iteration.
+    /// </summary>
+    public required TokenUsage TokenUsage { get; init; }
+
+    /// <summary>
+    /// Whether tool calls were made.
+    /// </summary>
+    public required bool HasToolCalls { get; init; }
+}
+
+/// <summary>
 /// Agentic execution completed.
 /// </summary>
 public sealed record AgenticCompleteEvent : AgenticStreamEvent
@@ -229,4 +276,77 @@ public sealed record AgenticErrorEvent : AgenticStreamEvent
     /// Current iteration when error occurred.
     /// </summary>
     public int Iteration { get; init; }
+
+    /// <summary>
+    /// Trace ID for correlation.
+    /// </summary>
+    public string? TraceId { get; init; }
+}
+
+/// <summary>
+/// Workspace is being provisioned (pod/container starting).
+/// </summary>
+public sealed record AgenticWorkspaceProvisioningEvent : AgenticStreamEvent
+{
+    /// <summary>
+    /// Current provisioning status.
+    /// </summary>
+    public required string Status { get; init; }
+
+    /// <summary>
+    /// Human-readable message.
+    /// </summary>
+    public required string Message { get; init; }
+
+    /// <summary>
+    /// Trace ID for correlation.
+    /// </summary>
+    public required string TraceId { get; init; }
+}
+
+/// <summary>
+/// Workspace is ready for tool execution.
+/// </summary>
+public sealed record AgenticWorkspaceReadyEvent : AgenticStreamEvent
+{
+    /// <summary>
+    /// Pod or container name.
+    /// </summary>
+    public string? PodName { get; init; }
+
+    /// <summary>
+    /// Container ID if Docker.
+    /// </summary>
+    public string? ContainerId { get; init; }
+
+    /// <summary>
+    /// Time taken to provision.
+    /// </summary>
+    public required TimeSpan StartupDuration { get; init; }
+
+    /// <summary>
+    /// Trace ID for correlation.
+    /// </summary>
+    public required string TraceId { get; init; }
+}
+
+/// <summary>
+/// Workspace provisioning failed.
+/// </summary>
+public sealed record AgenticWorkspaceErrorEvent : AgenticStreamEvent
+{
+    /// <summary>
+    /// Error message.
+    /// </summary>
+    public required string Error { get; init; }
+
+    /// <summary>
+    /// Whether the error is retryable.
+    /// </summary>
+    public bool Retryable { get; init; }
+
+    /// <summary>
+    /// Trace ID for correlation.
+    /// </summary>
+    public required string TraceId { get; init; }
 }

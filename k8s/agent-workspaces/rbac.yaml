@@ -1,0 +1,90 @@
+# ServiceAccount for OpenCortex API to manage agent workspaces
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opencortex-workspace-manager
+  namespace: opencortex-develop  # Namespace where the API runs
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: api
+---
+# Role to manage pods and PVCs in agent-workspaces namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workspace-manager
+  namespace: agent-workspaces
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: agent-workspaces
+rules:
+  # Pod management
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # PVC management
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # Secret management (for credentials)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # NetworkPolicy management (per-user network policies)
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+---
+# Bind the role to the service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opencortex-workspace-manager
+  namespace: agent-workspaces
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: agent-workspaces
+subjects:
+  - kind: ServiceAccount
+    name: opencortex-workspace-manager
+    namespace: opencortex-develop  # Namespace where the API runs
+roleRef:
+  kind: Role
+  name: workspace-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+# Role in opencortex namespace to manage the namespace itself
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opencortex-namespace-manager
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: api
+rules:
+  # Namespace read access (to check if agent-workspaces exists)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opencortex-namespace-manager
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: api
+subjects:
+  - kind: ServiceAccount
+    name: opencortex-workspace-manager
+    namespace: opencortex
+roleRef:
+  kind: ClusterRole
+  name: opencortex-namespace-manager
+  apiGroup: rbac.authorization.k8s.io

@@ -79,3 +79,15 @@ jobs:
             ${{ env.IMAGE_PREFIX }}/workers:develop
           cache-from: type=gha,scope=build-develop-workers
           cache-to: type=gha,mode=max,scope=build-develop-workers
+
+      - name: Build and push Agent Runtime image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/agent-runtime.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/agent-runtime:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/agent-runtime:develop
+          cache-from: type=gha,scope=build-develop-agent-runtime
+          cache-to: type=gha,mode=max,scope=build-develop-agent-runtime

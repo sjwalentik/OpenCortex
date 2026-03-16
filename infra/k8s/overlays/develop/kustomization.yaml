@@ -31,3 +31,4 @@ patches:
   - path: patches/resources.yaml
   - path: patches/image-pull-secret.yaml
   - path: patches/configmap.yaml
+  - path: patches/api-workspace.yaml

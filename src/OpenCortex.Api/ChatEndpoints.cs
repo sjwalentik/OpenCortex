@@ -1055,7 +1055,64 @@ public static class ChatEndpoints
             t.Error,
             durationMs = (int)t.Duration.TotalMilliseconds
         }),
-        error = result.Error
+        error = result.Error,
+        telemetry = result.Telemetry is not null ? new
+        {
+            traceId = result.Telemetry.TraceId,
+            startedAt = result.Telemetry.StartedAt,
+            completedAt = result.Telemetry.CompletedAt,
+            totalDurationMs = (int)result.Telemetry.TotalDuration.TotalMilliseconds,
+            llmDurationMs = (int)result.Telemetry.LlmDuration.TotalMilliseconds,
+            toolDurationMs = (int)result.Telemetry.ToolDuration.TotalMilliseconds,
+            tokenUsage = new
+            {
+                totalPromptTokens = result.Telemetry.TokenUsage.TotalPromptTokens,
+                totalCompletionTokens = result.Telemetry.TokenUsage.TotalCompletionTokens,
+                totalTokens = result.Telemetry.TokenUsage.TotalTokens,
+                byIteration = result.Telemetry.TokenUsage.ByIteration.Select(i => new
+                {
+                    iteration = i.Iteration,
+                    promptTokens = i.PromptTokens,
+                    completionTokens = i.CompletionTokens,
+                    totalTokens = i.TotalTokens,
+                    model = i.Model
+                })
+            },
+            iterations = result.Telemetry.Iterations.Select(i => new
+            {
+                iteration = i.Iteration,
+                startedAt = i.StartedAt,
+                llmDurationMs = (int)i.LlmDuration.TotalMilliseconds,
+                toolDurationMs = (int)i.ToolDuration.TotalMilliseconds,
+                totalDurationMs = (int)i.TotalDuration.TotalMilliseconds,
+                tokenUsage = new
+                {
+                    promptTokens = i.TokenUsage.PromptTokens,
+                    completionTokens = i.TokenUsage.CompletionTokens,
+                    totalTokens = i.TokenUsage.TotalTokens
+                },
+                toolCalls = i.ToolCallNames,
+                hasToolCalls = i.HasToolCalls,
+                contentLength = i.ContentLength,
+                finishReason = i.FinishReason
+            }),
+            toolExecutions = result.Telemetry.ToolExecutions.Select(t => new
+            {
+                toolCallId = t.ToolCallId,
+                toolName = t.ToolName,
+                iteration = t.Iteration,
+                startedAt = t.StartedAt,
+                durationMs = (int)t.Duration.TotalMilliseconds,
+                success = t.Success,
+                error = t.Error,
+                inputSize = t.InputSize,
+                outputSize = t.OutputSize,
+                category = t.Category
+            }),
+            llmCallCount = result.Telemetry.LlmCallCount,
+            toolCallCount = result.Telemetry.ToolCallCount,
+            success = result.Telemetry.Success
+        } : null
     };
 
     private static async Task<StreamChatCompletionResult> StreamAgenticCompletionAsync(
@@ -1090,6 +1147,50 @@ public static class ChatEndpoints
             {
                 switch (evt)
                 {
+                    case AgenticWorkspaceProvisioningEvent wsProvisioningEvent:
+                        await WriteChatStreamEventAsync(response, new
+                        {
+                            eventType = "workspace_provisioning",
+                            status = wsProvisioningEvent.Status,
+                            message = wsProvisioningEvent.Message,
+                            traceId = wsProvisioningEvent.TraceId,
+                            timestamp = wsProvisioningEvent.Timestamp
+                        }, writeLock, cancellationToken);
+                        break;
+
+                    case AgenticWorkspaceReadyEvent wsReadyEvent:
+                        await WriteChatStreamEventAsync(response, new
+                        {
+                            eventType = "workspace_ready",
+                            podName = wsReadyEvent.PodName,
+                            containerId = wsReadyEvent.ContainerId,
+                            startupDurationMs = (int)wsReadyEvent.StartupDuration.TotalMilliseconds,
+                            traceId = wsReadyEvent.TraceId,
+                            timestamp = wsReadyEvent.Timestamp
+                        }, writeLock, cancellationToken);
+                        break;
+
+                    case AgenticWorkspaceErrorEvent wsErrorEvent:
+                        await WriteChatStreamEventAsync(response, new
+                        {
+                            eventType = "workspace_error",
+                            error = wsErrorEvent.Error,
+                            retryable = wsErrorEvent.Retryable,
+                            traceId = wsErrorEvent.TraceId,
+                            timestamp = wsErrorEvent.Timestamp
+                        }, writeLock, cancellationToken);
+                        break;
+
+                    case AgenticIterationStartEvent iterStartEvent:
+                        await WriteChatStreamEventAsync(response, new
+                        {
+                            eventType = "iteration_start",
+                            iteration = iterStartEvent.Iteration,
+                            traceId = iterStartEvent.TraceId,
+                            timestamp = iterStartEvent.Timestamp
+                        }, writeLock, cancellationToken);
+                        break;
+
                     case AgenticTextEvent textEvent:
                         fullContent.Append(textEvent.Content);
                         await WriteChatStreamEventAsync(response, new
@@ -1098,6 +1199,23 @@ public static class ChatEndpoints
                             contentDelta = textEvent.Content,
                             iteration = textEvent.Iteration,
                             timestamp = textEvent.Timestamp
+                        }, writeLock, cancellationToken);
+                        break;
+
+                    case AgenticIterationCompleteEvent iterCompleteEvent:
+                        await WriteChatStreamEventAsync(response, new
+                        {
+                            eventType = "iteration_complete",
+                            iteration = iterCompleteEvent.Iteration,
+                            durationMs = (int)iterCompleteEvent.Duration.TotalMilliseconds,
+                            tokenUsage = new
+                            {
+                                promptTokens = iterCompleteEvent.TokenUsage.PromptTokens,
+                                completionTokens = iterCompleteEvent.TokenUsage.CompletionTokens,
+                                totalTokens = iterCompleteEvent.TokenUsage.TotalTokens
+                            },
+                            hasToolCalls = iterCompleteEvent.HasToolCalls,
+                            timestamp = iterCompleteEvent.Timestamp
                         }, writeLock, cancellationToken);
                         break;
 
@@ -1138,6 +1256,7 @@ public static class ChatEndpoints
                         usage = completeEvent.Result.Completion.Usage;
                         succeeded = string.IsNullOrEmpty(completeEvent.Result.Error);
 
+                        var telemetry = completeEvent.Result.Telemetry;
                         await WriteChatStreamEventAsync(response, new
                         {
                             eventType = "complete",
@@ -1147,7 +1266,23 @@ public static class ChatEndpoints
                             reachedMaxIterations = completeEvent.Result.ReachedMaxIterations,
                             durationMs = (int)completeEvent.Result.Duration.TotalMilliseconds,
                             toolExecutionCount = completeEvent.Result.ToolExecutions.Count,
-                            timestamp = completeEvent.Timestamp
+                            timestamp = completeEvent.Timestamp,
+                            telemetry = telemetry is not null ? new
+                            {
+                                traceId = telemetry.TraceId,
+                                totalDurationMs = (int)telemetry.TotalDuration.TotalMilliseconds,
+                                llmDurationMs = (int)telemetry.LlmDuration.TotalMilliseconds,
+                                toolDurationMs = (int)telemetry.ToolDuration.TotalMilliseconds,
+                                tokenUsage = new
+                                {
+                                    totalPromptTokens = telemetry.TokenUsage.TotalPromptTokens,
+                                    totalCompletionTokens = telemetry.TokenUsage.TotalCompletionTokens,
+                                    totalTokens = telemetry.TokenUsage.TotalTokens
+                                },
+                                llmCallCount = telemetry.LlmCallCount,
+                                toolCallCount = telemetry.ToolCallCount,
+                                success = telemetry.Success
+                            } : null
                         }, writeLock, cancellationToken);
                         break;
 
@@ -1157,6 +1292,7 @@ public static class ChatEndpoints
                             eventType = "error",
                             error = errorEvent.Error,
                             iteration = errorEvent.Iteration,
+                            traceId = errorEvent.TraceId,
                             timestamp = errorEvent.Timestamp
                         }, writeLock, cancellationToken);
                         break;

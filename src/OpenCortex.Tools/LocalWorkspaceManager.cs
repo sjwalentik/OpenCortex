@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -12,7 +13,10 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
     private readonly ToolsOptions _options;
     private readonly ILogger<LocalWorkspaceManager> _logger;
     private readonly Dictionary<Guid, string> _workspaceCache = new();
+    private readonly Dictionary<Guid, DateTime> _lastActivity = new();
     private readonly object _lock = new();
+
+    public bool SupportsContainerIsolation => false;
 
     public LocalWorkspaceManager(
         IOptions<ToolsOptions> options,
@@ -123,6 +127,7 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
         lock (_lock)
         {
             _workspaceCache.Remove(userId);
+            _lastActivity.Remove(userId);
         }
 
         var workspacePath = Path.Combine(GetAbsoluteBasePath(), userId.ToString("N"));
@@ -133,6 +138,130 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
             _logger.LogInformation("Deleted workspace for user {UserId}", userId);
         }
 
+        return Task.CompletedTask;
+    }
+
+    public async Task<WorkspaceStatus> EnsureRunningAsync(
+        Guid userId,
+        IReadOnlyDictionary<string, string>? credentials = null,
+        CancellationToken cancellationToken = default)
+    {
+        // For local mode, just ensure the directory exists
+        var workspacePath = await GetWorkspacePathAsync(userId, cancellationToken);
+
+        lock (_lock)
+        {
+            _lastActivity[userId] = DateTime.UtcNow;
+        }
+
+        return new WorkspaceStatus
+        {
+            UserId = userId,
+            State = WorkspaceState.Running,
+            WorkspacePath = workspacePath,
+            StartedAt = DateTime.UtcNow,
+            LastActivityAt = DateTime.UtcNow,
+            Message = "Local workspace ready"
+        };
+    }
+
+    public async Task<CommandResult> ExecuteCommandAsync(
+        Guid userId,
+        string command,
+        string? arguments = null,
+        string? workingDirectory = null,
+        CancellationToken cancellationToken = default)
+    {
+        var workspacePath = await GetWorkspacePathAsync(userId, cancellationToken);
+
+        // Determine working directory
+        var workDir = workspacePath;
+        if (!string.IsNullOrEmpty(workingDirectory))
+        {
+            workDir = ResolvePath(userId, workingDirectory);
+        }
+
+        lock (_lock)
+        {
+            _lastActivity[userId] = DateTime.UtcNow;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = command,
+                Arguments = arguments ?? string.Empty,
+                WorkingDirectory = workDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        try
+        {
+            process.Start();
+
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+            await process.WaitForExitAsync(cancellationToken);
+
+            stopwatch.Stop();
+
+            return new CommandResult
+            {
+                ExitCode = process.ExitCode,
+                StandardOutput = await outputTask,
+                StandardError = await errorTask,
+                Duration = stopwatch.Elapsed
+            };
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            return new CommandResult
+            {
+                ExitCode = -1,
+                StandardOutput = string.Empty,
+                StandardError = ex.Message,
+                Duration = stopwatch.Elapsed
+            };
+        }
+    }
+
+    public Task<WorkspaceStatus> GetStatusAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var workspacePath = Path.Combine(GetAbsoluteBasePath(), userId.ToString("N"));
+        var exists = Directory.Exists(workspacePath);
+
+        DateTime? lastActivity = null;
+        lock (_lock)
+        {
+            if (_lastActivity.TryGetValue(userId, out var activity))
+            {
+                lastActivity = activity;
+            }
+        }
+
+        return Task.FromResult(new WorkspaceStatus
+        {
+            UserId = userId,
+            State = exists ? WorkspaceState.Running : WorkspaceState.NotExists,
+            WorkspacePath = exists ? workspacePath : null,
+            LastActivityAt = lastActivity,
+            Message = exists ? "Local workspace exists" : "No workspace"
+        });
+    }
+
+    public Task StopAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        // No-op for local mode - workspaces are just directories
+        _logger.LogDebug("StopAsync called for local workspace (no-op): {UserId}", userId);
         return Task.CompletedTask;
     }
 

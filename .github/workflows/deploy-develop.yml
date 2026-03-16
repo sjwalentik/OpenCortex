@@ -86,6 +86,10 @@ jobs:
           export DOMAIN="${{ env.DOMAIN }}"
           sed "s|\${DOMAIN}|${DOMAIN}|g" infra/k8s/overlays/develop/ingressroute.yaml | kubectl apply -f -
 
+      - name: Deploy agent-workspaces infrastructure
+        run: |
+          kubectl apply -k k8s/agent-workspaces/
+
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -k infra/k8s/overlays/develop

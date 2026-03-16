@@ -33,11 +33,16 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
+        var telemetryBuilder = new AgenticTelemetryBuilder();
         var conversation = new List<ChatMessage>(request.Messages);
         var toolExecutions = new List<ToolExecutionResult>();
         var iteration = 0;
         var providerId = "";
         var modelId = "";
+
+        _logger.LogInformation(
+            "Starting agentic execution. TraceId={TraceId}, MaxIterations={MaxIterations}",
+            telemetryBuilder.TraceId, request.MaxIterations);
 
         // Get available tools
         var tools = GetTools(request);
@@ -50,7 +55,12 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             while (iteration < request.MaxIterations)
             {
                 iteration++;
-                _logger.LogDebug("Agentic iteration {Iteration}", iteration);
+                var iterationStartedAt = DateTimeOffset.UtcNow;
+                var iterationStopwatch = Stopwatch.StartNew();
+
+                _logger.LogDebug(
+                    "Agentic iteration {Iteration}. TraceId={TraceId}",
+                    iteration, telemetryBuilder.TraceId);
 
                 // Build orchestration request
                 var orchRequest = new OrchestrationRequest
@@ -64,18 +74,25 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 };
 
                 // Execute LLM call
+                var llmStopwatch = Stopwatch.StartNew();
                 var result = await _orchestration.ExecuteAsync(
                     request.UserId, orchRequest, cancellationToken);
+                llmStopwatch.Stop();
 
                 providerId = result.ProviderId;
                 modelId = result.ModelId;
+                telemetryBuilder.SetProvider(providerId, modelId);
+
+                // Track tool execution time for this iteration
+                var toolDuration = TimeSpan.Zero;
+                var toolCallNames = new List<string>();
 
                 // Check for tool calls
                 if (result.Completion.ToolCalls is { Count: > 0 })
                 {
                     _logger.LogInformation(
-                        "Iteration {Iteration}: {ToolCount} tool calls",
-                        iteration, result.Completion.ToolCalls.Count);
+                        "Iteration {Iteration}: {ToolCount} tool calls. TraceId={TraceId}",
+                        iteration, result.Completion.ToolCalls.Count, telemetryBuilder.TraceId);
 
                     // Add assistant message with tool calls
                     conversation.Add(ChatMessage.AssistantToolCalls(result.Completion.ToolCalls));
@@ -83,10 +100,24 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                     // Execute each tool call
                     foreach (var toolCall in result.Completion.ToolCalls)
                     {
+                        var toolStartedAt = DateTimeOffset.UtcNow;
+                        var toolStopwatch = Stopwatch.StartNew();
+
                         var toolResult = await _toolExecutor.ExecuteAsync(
                             toolCall, toolContext, cancellationToken);
 
+                        toolStopwatch.Stop();
+                        toolDuration += toolStopwatch.Elapsed;
                         toolExecutions.Add(toolResult);
+                        toolCallNames.Add(toolCall.Function.Name);
+
+                        // Record tool telemetry
+                        telemetryBuilder.RecordToolExecution(
+                            toolResult,
+                            iteration,
+                            toolStartedAt,
+                            toolStopwatch.Elapsed,
+                            GetToolCategory(toolCall.Function.Name));
 
                         // Add tool result to conversation
                         var resultContent = toolResult.Success
@@ -99,6 +130,16 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                             resultContent));
                     }
 
+                    // Record iteration telemetry
+                    telemetryBuilder.RecordIteration(
+                        iteration,
+                        iterationStartedAt,
+                        llmStopwatch.Elapsed,
+                        toolDuration,
+                        result.Completion.Usage,
+                        toolCallNames,
+                        result.Completion.FinishReason.ToString());
+
                     // Continue to next iteration
                     continue;
                 }
@@ -109,7 +150,26 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                     conversation.Add(ChatMessage.Assistant(result.Completion.Content));
                 }
 
+                // Record final iteration telemetry
+                telemetryBuilder.RecordIteration(
+                    iteration,
+                    iterationStartedAt,
+                    llmStopwatch.Elapsed,
+                    TimeSpan.Zero,
+                    result.Completion.Usage,
+                    Array.Empty<string>(),
+                    result.Completion.FinishReason.ToString(),
+                    result.Completion.Content?.Length);
+
                 stopwatch.Stop();
+                var telemetry = telemetryBuilder.Build();
+
+                _logger.LogInformation(
+                    "Agentic execution completed. TraceId={TraceId}, Iterations={Iterations}, " +
+                    "TotalTokens={TotalTokens}, ToolCalls={ToolCalls}, Duration={Duration}ms",
+                    telemetry.TraceId, iteration, telemetry.TokenUsage.TotalTokens,
+                    telemetry.ToolCallCount, telemetry.TotalDuration.TotalMilliseconds);
+
                 return new AgenticOrchestrationResult
                 {
                     Completion = result.Completion,
@@ -119,13 +179,19 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                     Duration = stopwatch.Elapsed,
                     ProviderId = providerId,
                     ModelId = modelId,
-                    ReachedMaxIterations = false
+                    ReachedMaxIterations = false,
+                    Telemetry = telemetry
                 };
             }
 
             // Max iterations reached
-            _logger.LogWarning("Max iterations ({Max}) reached", request.MaxIterations);
+            telemetryBuilder.SetReachedMaxIterations();
+            _logger.LogWarning(
+                "Max iterations ({Max}) reached. TraceId={TraceId}",
+                request.MaxIterations, telemetryBuilder.TraceId);
+
             stopwatch.Stop();
+            var maxIterTelemetry = telemetryBuilder.Build();
 
             return new AgenticOrchestrationResult
             {
@@ -142,13 +208,19 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 Duration = stopwatch.Elapsed,
                 ProviderId = providerId,
                 ModelId = modelId,
-                ReachedMaxIterations = true
+                ReachedMaxIterations = true,
+                Telemetry = maxIterTelemetry
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Agentic execution failed at iteration {Iteration}", iteration);
+            telemetryBuilder.SetError(ex.Message);
+            _logger.LogError(ex,
+                "Agentic execution failed at iteration {Iteration}. TraceId={TraceId}",
+                iteration, telemetryBuilder.TraceId);
+
             stopwatch.Stop();
+            var errorTelemetry = telemetryBuilder.Build();
 
             return new AgenticOrchestrationResult
             {
@@ -166,7 +238,8 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 ProviderId = providerId,
                 ModelId = modelId,
                 ReachedMaxIterations = false,
-                Error = ex.Message
+                Error = ex.Message,
+                Telemetry = errorTelemetry
             };
         }
     }
@@ -176,22 +249,60 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
+        var telemetryBuilder = new AgenticTelemetryBuilder();
         var conversation = new List<ChatMessage>(request.Messages);
         var toolExecutions = new List<ToolExecutionResult>();
         var iteration = 0;
         var providerId = "";
         var modelId = "";
 
+        _logger.LogInformation(
+            "Starting agentic streaming. TraceId={TraceId}, MaxIterations={MaxIterations}",
+            telemetryBuilder.TraceId, request.MaxIterations);
+
         // Get available tools
         var tools = GetTools(request);
 
-        // Build execution context for tools
+        // Ensure workspace is ready (emit events for container provisioning)
+        var workspaceEvents = await EnsureWorkspaceWithEventsAsync(
+            request, telemetryBuilder.TraceId, cancellationToken);
+
+        foreach (var wsEvent in workspaceEvents)
+        {
+            yield return wsEvent;
+
+            // If workspace failed, stop execution
+            if (wsEvent is AgenticWorkspaceErrorEvent errorEvent)
+            {
+                yield return new AgenticErrorEvent
+                {
+                    Error = errorEvent.Error,
+                    Iteration = 0,
+                    TraceId = telemetryBuilder.TraceId
+                };
+                yield break;
+            }
+        }
+
+        // Build execution context for tools (workspace should be ready now)
         var toolContext = await BuildToolContextAsync(request, cancellationToken);
 
         while (iteration < request.MaxIterations)
         {
             iteration++;
-            _logger.LogDebug("Agentic streaming iteration {Iteration}", iteration);
+            var iterationStartedAt = DateTimeOffset.UtcNow;
+            var llmStopwatch = Stopwatch.StartNew();
+
+            _logger.LogDebug(
+                "Agentic streaming iteration {Iteration}. TraceId={TraceId}",
+                iteration, telemetryBuilder.TraceId);
+
+            // Emit iteration start event
+            yield return new AgenticIterationStartEvent
+            {
+                Iteration = iteration,
+                TraceId = telemetryBuilder.TraceId
+            };
 
             // Build orchestration request
             var orchRequest = new OrchestrationRequest
@@ -208,6 +319,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             var contentBuffer = new System.Text.StringBuilder();
             var toolCallAccumulator = new ToolCallAccumulator();
             var isFirstChunk = true;
+            TokenUsage iterationUsage = TokenUsage.Empty;
 
             await foreach (var chunk in _orchestration.StreamAsync(
                 request.UserId, orchRequest, cancellationToken))
@@ -215,6 +327,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 if (isFirstChunk)
                 {
                     providerId = chunk.ProviderId;
+                    telemetryBuilder.SetProvider(providerId, modelId);
                     isFirstChunk = false;
                 }
 
@@ -235,22 +348,33 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                     toolCallAccumulator.AddDelta(chunk.Chunk.ToolCallDelta);
                 }
 
-                // Get model ID from completion
-                if (chunk.Chunk.IsComplete && !string.IsNullOrEmpty(chunk.Chunk.Model))
+                // Get model ID and usage from completion
+                if (chunk.Chunk.IsComplete)
                 {
-                    modelId = chunk.Chunk.Model;
+                    if (!string.IsNullOrEmpty(chunk.Chunk.Model))
+                    {
+                        modelId = chunk.Chunk.Model;
+                        telemetryBuilder.SetProvider(providerId, modelId);
+                    }
+                    if (chunk.Chunk.FinalUsage is not null)
+                    {
+                        iterationUsage = chunk.Chunk.FinalUsage;
+                    }
                 }
             }
 
+            llmStopwatch.Stop();
+
             // Build completed tool calls
             var toolCalls = toolCallAccumulator.Build();
+            var toolCallNames = toolCalls.Select(tc => tc.Function.Name).ToList();
 
             // Check for tool calls
             if (toolCalls.Count > 0)
             {
                 _logger.LogInformation(
-                    "Streaming iteration {Iteration}: {ToolCount} tool calls",
-                    iteration, toolCalls.Count);
+                    "Streaming iteration {Iteration}: {ToolCount} tool calls. TraceId={TraceId}",
+                    iteration, toolCalls.Count, telemetryBuilder.TraceId);
 
                 yield return new AgenticToolCallStartEvent
                 {
@@ -261,13 +385,28 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 // Add assistant message with tool calls
                 conversation.Add(ChatMessage.AssistantToolCalls(toolCalls));
 
+                var toolDuration = TimeSpan.Zero;
+
                 // Execute each tool call
                 foreach (var toolCall in toolCalls)
                 {
+                    var toolStartedAt = DateTimeOffset.UtcNow;
+                    var toolStopwatch = Stopwatch.StartNew();
+
                     var toolResult = await _toolExecutor.ExecuteAsync(
                         toolCall, toolContext, cancellationToken);
 
+                    toolStopwatch.Stop();
+                    toolDuration += toolStopwatch.Elapsed;
                     toolExecutions.Add(toolResult);
+
+                    // Record tool telemetry
+                    telemetryBuilder.RecordToolExecution(
+                        toolResult,
+                        iteration,
+                        toolStartedAt,
+                        toolStopwatch.Elapsed,
+                        GetToolCategory(toolCall.Function.Name));
 
                     yield return new AgenticToolResultEvent
                     {
@@ -286,6 +425,24 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                         resultContent));
                 }
 
+                // Record iteration telemetry
+                telemetryBuilder.RecordIteration(
+                    iteration,
+                    iterationStartedAt,
+                    llmStopwatch.Elapsed,
+                    toolDuration,
+                    iterationUsage,
+                    toolCallNames);
+
+                // Emit iteration complete event
+                yield return new AgenticIterationCompleteEvent
+                {
+                    Iteration = iteration,
+                    Duration = llmStopwatch.Elapsed + toolDuration,
+                    TokenUsage = iterationUsage,
+                    HasToolCalls = true
+                };
+
                 // Continue to next iteration
                 continue;
             }
@@ -297,7 +454,34 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 conversation.Add(ChatMessage.Assistant(content));
             }
 
+            // Record final iteration telemetry
+            telemetryBuilder.RecordIteration(
+                iteration,
+                iterationStartedAt,
+                llmStopwatch.Elapsed,
+                TimeSpan.Zero,
+                iterationUsage,
+                Array.Empty<string>(),
+                null,
+                content?.Length);
+
             stopwatch.Stop();
+            var telemetry = telemetryBuilder.Build();
+
+            _logger.LogInformation(
+                "Agentic streaming completed. TraceId={TraceId}, Iterations={Iterations}, " +
+                "TotalTokens={TotalTokens}, ToolCalls={ToolCalls}, Duration={Duration}ms",
+                telemetry.TraceId, iteration, telemetry.TokenUsage.TotalTokens,
+                telemetry.ToolCallCount, telemetry.TotalDuration.TotalMilliseconds);
+
+            yield return new AgenticIterationCompleteEvent
+            {
+                Iteration = iteration,
+                Duration = llmStopwatch.Elapsed,
+                TokenUsage = iterationUsage,
+                HasToolCalls = false
+            };
+
             yield return new AgenticCompleteEvent
             {
                 Result = new AgenticOrchestrationResult
@@ -305,7 +489,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                     Completion = new ChatCompletion
                     {
                         Content = content,
-                        Usage = TokenUsage.Empty,
+                        Usage = iterationUsage,
                         FinishReason = FinishReason.Stop,
                         Model = modelId
                     },
@@ -315,15 +499,21 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                     Duration = stopwatch.Elapsed,
                     ProviderId = providerId,
                     ModelId = modelId,
-                    ReachedMaxIterations = false
+                    ReachedMaxIterations = false,
+                    Telemetry = telemetry
                 }
             };
             yield break;
         }
 
         // Max iterations reached
-        _logger.LogWarning("Max iterations ({Max}) reached during streaming", request.MaxIterations);
+        telemetryBuilder.SetReachedMaxIterations();
+        _logger.LogWarning(
+            "Max iterations ({Max}) reached during streaming. TraceId={TraceId}",
+            request.MaxIterations, telemetryBuilder.TraceId);
+
         stopwatch.Stop();
+        var maxIterTelemetry = telemetryBuilder.Build();
 
         yield return new AgenticCompleteEvent
         {
@@ -342,7 +532,8 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 Duration = stopwatch.Elapsed,
                 ProviderId = providerId,
                 ModelId = modelId,
-                ReachedMaxIterations = true
+                ReachedMaxIterations = true,
+                Telemetry = maxIterTelemetry
             }
         };
     }
@@ -363,8 +554,12 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         AgenticOrchestrationRequest request,
         CancellationToken cancellationToken)
     {
-        var workspacePath = await _workspaceManager.GetWorkspacePathAsync(
-            request.UserId, cancellationToken);
+        // Ensure workspace is running (for container-based managers)
+        var workspaceStatus = await _workspaceManager.EnsureRunningAsync(
+            request.UserId, request.Credentials, cancellationToken);
+
+        var workspacePath = workspaceStatus.WorkspacePath
+            ?? await _workspaceManager.GetWorkspacePathAsync(request.UserId, cancellationToken);
 
         return new ToolExecutionContext
         {
@@ -375,6 +570,132 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             Credentials = request.Credentials,
             CommandMode = request.CommandMode
         };
+    }
+
+    private async Task<List<AgenticStreamEvent>> EnsureWorkspaceWithEventsAsync(
+        AgenticOrchestrationRequest request,
+        string traceId,
+        CancellationToken cancellationToken)
+    {
+        var events = new List<AgenticStreamEvent>();
+
+        // Check if workspace manager supports container isolation
+        if (!_workspaceManager.SupportsContainerIsolation)
+        {
+            return events;
+        }
+
+        // Check current status
+        var status = await _workspaceManager.GetStatusAsync(request.UserId, cancellationToken);
+
+        if (status.State == WorkspaceState.Running)
+        {
+            // Already running, no events needed
+            return events;
+        }
+
+        // Emit provisioning event
+        events.Add(new AgenticWorkspaceProvisioningEvent
+        {
+            Status = "initializing",
+            Message = "Initializing your workspace...",
+            TraceId = traceId
+        });
+
+        var provisioningStopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            // Start provisioning
+            events.Add(new AgenticWorkspaceProvisioningEvent
+            {
+                Status = "creating",
+                Message = "Creating workspace container...",
+                TraceId = traceId
+            });
+
+            var workspaceStatus = await _workspaceManager.EnsureRunningAsync(
+                request.UserId, request.Credentials, cancellationToken);
+
+            provisioningStopwatch.Stop();
+
+            if (workspaceStatus.State == WorkspaceState.Running)
+            {
+                _logger.LogInformation(
+                    "Workspace ready for user {UserId}. Pod={PodName}, Container={ContainerId}, " +
+                    "StartupTime={StartupMs}ms, TraceId={TraceId}",
+                    request.UserId, workspaceStatus.PodName, workspaceStatus.ContainerId,
+                    provisioningStopwatch.ElapsedMilliseconds, traceId);
+
+                events.Add(new AgenticWorkspaceReadyEvent
+                {
+                    PodName = workspaceStatus.PodName,
+                    ContainerId = workspaceStatus.ContainerId,
+                    StartupDuration = provisioningStopwatch.Elapsed,
+                    TraceId = traceId
+                });
+            }
+            else if (workspaceStatus.State == WorkspaceState.Failed)
+            {
+                _logger.LogError(
+                    "Workspace provisioning failed for user {UserId}: {Message}. TraceId={TraceId}",
+                    request.UserId, workspaceStatus.Message, traceId);
+
+                events.Add(new AgenticWorkspaceErrorEvent
+                {
+                    Error = workspaceStatus.Message ?? "Workspace provisioning failed",
+                    Retryable = true,
+                    TraceId = traceId
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            provisioningStopwatch.Stop();
+
+            _logger.LogError(ex,
+                "Workspace provisioning exception for user {UserId}. TraceId={TraceId}",
+                request.UserId, traceId);
+
+            events.Add(new AgenticWorkspaceErrorEvent
+            {
+                Error = $"Failed to provision workspace: {ex.Message}",
+                Retryable = true,
+                TraceId = traceId
+            });
+        }
+
+        return events;
+    }
+
+    private static string? GetToolCategory(string toolName)
+    {
+        // Map tool names to categories for telemetry
+        if (toolName.StartsWith("github_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("repository", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("pull_request", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("branch", StringComparison.OrdinalIgnoreCase))
+        {
+            return "github";
+        }
+
+        if (toolName.StartsWith("read_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.StartsWith("write_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.StartsWith("list_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("file", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("directory", StringComparison.OrdinalIgnoreCase))
+        {
+            return "filesystem";
+        }
+
+        if (toolName.StartsWith("execute_", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("command", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("shell", StringComparison.OrdinalIgnoreCase))
+        {
+            return "shell";
+        }
+
+        return null;
     }
 
     /// <summary>

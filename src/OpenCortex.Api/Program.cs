@@ -528,6 +528,25 @@ if (hostedAuthConfigured)
 // Rate limiting policies
 // ---------------------------------------------------------------------------
 
+// Helper to get user ID from JWT claims for rate limiting
+static string GetRateLimitPartitionKey(HttpContext context)
+{
+    var user = context.User;
+
+    // Try standard JWT claims for user identity (same as HostedTenantClaims)
+    var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+        ?? user.FindFirst("user_id")?.Value
+        ?? user.FindFirst("sub")?.Value;
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        return userId;
+    }
+
+    // Fallback to IP address
+    return context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+}
+
 builder.Services.AddRateLimiter(rateLimiter =>
 {
     rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -535,7 +554,7 @@ builder.Services.AddRateLimiter(rateLimiter =>
     // Strict limit for token creation (5 per minute per user)
     rateLimiter.AddPolicy("token-creation", context =>
         RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            partitionKey: GetRateLimitPartitionKey(context),
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 5,
@@ -545,7 +564,7 @@ builder.Services.AddRateLimiter(rateLimiter =>
     // Moderate limit for tenant API (100 per minute per user)
     rateLimiter.AddPolicy("tenant-api", context =>
         RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            partitionKey: GetRateLimitPartitionKey(context),
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 100,
@@ -555,7 +574,7 @@ builder.Services.AddRateLimiter(rateLimiter =>
     // Chat gets its own bucket so portal page activity does not starve completions.
     rateLimiter.AddPolicy("chat-api", context =>
         RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            partitionKey: GetRateLimitPartitionKey(context),
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 60,

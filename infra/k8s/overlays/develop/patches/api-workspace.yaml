@@ -1,0 +1,34 @@
+# Patch to enable Kubernetes workspace isolation for agentic tools
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencortex-api
+spec:
+  template:
+    spec:
+      # Service account with permissions to manage pods in agent-workspaces namespace
+      serviceAccountName: opencortex-workspace-manager
+      containers:
+        - name: api
+          env:
+            # Workspace isolation configuration
+            - name: OpenCortex__Tools__WorkspaceMode
+              value: "kubernetes"
+            - name: OpenCortex__Tools__KubernetesNamespace
+              value: "agent-workspaces"
+            - name: OpenCortex__Tools__ContainerImage
+              value: "ghcr.io/sjwalentik/opencortex/agent-runtime:develop"
+            - name: OpenCortex__Tools__StorageClassName
+              value: "standard"
+            - name: OpenCortex__Tools__PvcSize
+              value: "10Gi"
+            - name: OpenCortex__Tools__SessionTimeoutMinutes
+              value: "15"
+            - name: OpenCortex__Tools__CpuLimit
+              value: "1"
+            - name: OpenCortex__Tools__MemoryLimit
+              value: "1Gi"
+            - name: OpenCortex__Tools__CpuRequest
+              value: "100m"
+            - name: OpenCortex__Tools__MemoryRequest
+              value: "256Mi"

@@ -1370,6 +1370,154 @@ h3 {
   }
 }
 
+/* Agentic mode styles */
+.chat-input-options {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+  font-size: 0.875rem;
+}
+
+.chat-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.chat-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.chat-toggle-label {
+  color: var(--text-color);
+  user-select: none;
+}
+
+.chat-trace-id {
+  color: var(--muted-text-color, #888);
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+/* Tool calls display */
+.chat-tool-calls {
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-tool-call {
+  background: var(--tool-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.chat-tool-call summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.chat-tool-call summary:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chat-tool-status {
+  font-size: 1rem;
+}
+
+.chat-tool-status-running {
+  animation: pulse 1s infinite;
+}
+
+.chat-tool-status-success {
+  color: #4caf50;
+}
+
+.chat-tool-status-error {
+  color: #f44336;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.chat-tool-name {
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.chat-tool-duration {
+  color: var(--muted-text-color, #888);
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+
+.chat-tool-args,
+.chat-tool-result {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color, #333);
+  font-size: 0.8rem;
+}
+
+.chat-tool-args pre,
+.chat-tool-result pre {
+  margin: 4px 0 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.75rem;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.chat-tool-error {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color, #333);
+  color: #f44336;
+  font-size: 0.8rem;
+}
+
+/* Telemetry summary */
+.chat-telemetry {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--tool-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.chat-telemetry summary {
+  cursor: pointer;
+  color: var(--muted-text-color, #888);
+}
+
+.chat-telemetry summary:hover {
+  color: var(--text-color);
+}
+
+.chat-telemetry-details {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 4px;
+  color: var(--muted-text-color, #888);
+}
+
 
 
 

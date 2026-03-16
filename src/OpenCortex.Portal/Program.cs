@@ -421,7 +421,9 @@ static bool IsTenantConversationItemPath(string normalizedPath)
 static bool IsChatCompletionPath(string normalizedPath)
 {
     return string.Equals(normalizedPath, "api/chat/completions", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(normalizedPath, "api/chat/completions/stream", StringComparison.OrdinalIgnoreCase);
+        || string.Equals(normalizedPath, "api/chat/completions/stream", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(normalizedPath, "api/chat/completions/agentic", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(normalizedPath, "api/chat/completions/agentic/stream", StringComparison.OrdinalIgnoreCase);
 }
 
 static bool IsProviderConfigPath(string normalizedPath)

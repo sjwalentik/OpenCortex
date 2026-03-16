@@ -9,6 +9,17 @@ export type ChatMessage = {
   latencyMs?: number;
   createdAt?: string;
   isStreaming?: boolean;
+  toolCalls?: ToolCallDisplay[];
+};
+
+export type ToolCallDisplay = {
+  id: string;
+  name: string;
+  arguments?: string;
+  status: 'pending' | 'running' | 'success' | 'error';
+  result?: string;
+  error?: string;
+  durationMs?: number;
 };
 
 export type Conversation = {
@@ -28,9 +39,15 @@ export type ChatViewProps = {
 };
 
 type StreamChunk = {
-  eventType?: 'content' | 'status' | 'heartbeat' | 'error';
+  eventType?: 'content' | 'status' | 'heartbeat' | 'error' | 'iteration_start' | 'iteration_complete' | 'tool_calls' | 'tool_result' | 'complete' | 'workspace_provisioning' | 'workspace_ready' | 'workspace_error';
   stage?: string;
   message?: string;
+  // Workspace events
+  status?: string;
+  podName?: string;
+  containerId?: string;
+  startupDurationMs?: number;
+  retryable?: boolean;
   timestamp?: string;
   contentDelta?: string;
   isComplete?: boolean;
@@ -39,6 +56,39 @@ type StreamChunk = {
   routing?: {
     category?: string;
     confidence?: number;
+  };
+  // Agentic events
+  iteration?: number;
+  traceId?: string;
+  durationMs?: number;
+  hasToolCalls?: boolean;
+  tokenUsage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
+  toolCalls?: Array<{
+    Id: string;
+    Name: string;
+    Arguments: string;
+  }>;
+  toolCallId?: string;
+  toolName?: string;
+  success?: boolean;
+  output?: string;
+  error?: string;
+  telemetry?: {
+    traceId: string;
+    totalDurationMs: number;
+    llmDurationMs: number;
+    toolDurationMs: number;
+    tokenUsage: {
+      totalPromptTokens: number;
+      totalCompletionTokens: number;
+      totalTokens: number;
+    };
+    llmCallCount: number;
+    toolCallCount: number;
   };
 };
 
@@ -91,6 +141,11 @@ export function ChatView({
   const [streamingProviderId, setStreamingProviderId] = useState<string | null>(null);
   const [streamActivities, setStreamActivities] = useState<StreamActivity[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [agenticMode, setAgenticMode] = useState(false);
+  const [currentIteration, setCurrentIteration] = useState(0);
+  const [currentTraceId, setCurrentTraceId] = useState<string | null>(null);
+  const [pendingToolCalls, setPendingToolCalls] = useState<ToolCallDisplay[]>([]);
+  const [telemetrySummary, setTelemetrySummary] = useState<StreamChunk['telemetry'] | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
@@ -233,18 +288,27 @@ export function ChatView({
       content: '',
       isStreaming: true,
       createdAt: new Date().toISOString(),
+      toolCalls: [],
     };
 
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setInputValue('');
     setIsStreaming(true);
-    setStreamActivities([{ stage: 'queued', message: 'Sending request...', timestamp: new Date().toISOString() }]);
+    setCurrentIteration(0);
+    setCurrentTraceId(null);
+    setPendingToolCalls([]);
+    setTelemetrySummary(null);
+    setStreamActivities([{ stage: 'queued', message: agenticMode ? 'Starting agentic execution...' : 'Sending request...', timestamp: new Date().toISOString() }]);
     setError(null);
+
+    const endpoint = agenticMode
+      ? '/portal-api/api/chat/completions/agentic/stream'
+      : '/portal-api/api/chat/completions/stream';
 
     try {
       abortControllerRef.current = new AbortController();
 
-      const response = await fetchWithAuth('/portal-api/api/chat/completions/stream', {
+      const response = await fetchWithAuth(endpoint, {
         method: 'POST',
         body: JSON.stringify({
           messages: [...messages, userMessage].map((m) => ({
@@ -253,6 +317,7 @@ export function ChatView({
           })),
           conversationId,
           brainId: activeBrainId || null,
+          enableTools: agenticMode,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -287,6 +352,111 @@ export function ChatView({
 
             if (chunk.providerId) {
               setStreamingProviderId(chunk.providerId);
+            }
+
+            // Handle workspace provisioning events
+            if (chunk.eventType === 'workspace_provisioning') {
+              setStreamActivities((prev) => applyStreamActivity(prev, {
+                eventType: 'status',
+                stage: `workspace-${chunk.status}`,
+                message: chunk.message || 'Initializing workspace...',
+                timestamp: chunk.timestamp,
+              }));
+            }
+
+            if (chunk.eventType === 'workspace_ready') {
+              const startupTime = chunk.startupDurationMs || 0;
+              const identifier = chunk.podName || chunk.containerId || 'ready';
+              setStreamActivities((prev) => applyStreamActivity(prev, {
+                eventType: 'status',
+                stage: 'workspace-ready',
+                message: `Workspace ready (${startupTime}ms)`,
+                timestamp: chunk.timestamp,
+              }));
+            }
+
+            if (chunk.eventType === 'workspace_error') {
+              setStreamActivities((prev) => applyStreamActivity(prev, {
+                eventType: 'status',
+                stage: 'workspace-error',
+                message: `Workspace error: ${chunk.error}${chunk.retryable ? ' (will retry)' : ''}`,
+                timestamp: chunk.timestamp,
+              }));
+            }
+
+            // Handle agentic-specific events
+            if (chunk.eventType === 'iteration_start') {
+              setCurrentIteration(chunk.iteration || 0);
+              setCurrentTraceId(chunk.traceId || null);
+              setStreamActivities((prev) => applyStreamActivity(prev, {
+                eventType: 'status',
+                stage: `iteration-${chunk.iteration}`,
+                message: `Iteration ${chunk.iteration}: Thinking...`,
+                timestamp: chunk.timestamp,
+              }));
+            }
+
+            if (chunk.eventType === 'iteration_complete') {
+              const tokens = chunk.tokenUsage?.totalTokens || 0;
+              setStreamActivities((prev) => applyStreamActivity(prev, {
+                eventType: 'status',
+                stage: `iteration-${chunk.iteration}-done`,
+                message: `Iteration ${chunk.iteration} complete (${tokens} tokens, ${chunk.durationMs}ms)`,
+                timestamp: chunk.timestamp,
+              }));
+            }
+
+            if (chunk.eventType === 'tool_calls' && chunk.toolCalls) {
+              const newToolCalls: ToolCallDisplay[] = chunk.toolCalls.map((tc) => ({
+                id: tc.Id,
+                name: tc.Name,
+                arguments: tc.Arguments,
+                status: 'running' as const,
+              }));
+              setPendingToolCalls(newToolCalls);
+              setMessages((prev) => {
+                const updated = [...prev];
+                const lastIndex = updated.length - 1;
+                if (lastIndex >= 0 && updated[lastIndex].isStreaming) {
+                  updated[lastIndex] = {
+                    ...updated[lastIndex],
+                    toolCalls: [...(updated[lastIndex].toolCalls || []), ...newToolCalls],
+                  };
+                }
+                return updated;
+              });
+              setStreamActivities((prev) => applyStreamActivity(prev, {
+                eventType: 'status',
+                stage: 'tool-execution',
+                message: `Executing ${chunk.toolCalls.length} tool(s): ${chunk.toolCalls.map((tc) => tc.Name).join(', ')}`,
+                timestamp: chunk.timestamp,
+              }));
+            }
+
+            if (chunk.eventType === 'tool_result') {
+              setMessages((prev) => {
+                const updated = [...prev];
+                const lastIndex = updated.length - 1;
+                if (lastIndex >= 0 && updated[lastIndex].isStreaming && updated[lastIndex].toolCalls) {
+                  const toolCalls = updated[lastIndex].toolCalls!.map((tc) =>
+                    tc.id === chunk.toolCallId
+                      ? {
+                          ...tc,
+                          status: chunk.success ? 'success' as const : 'error' as const,
+                          result: chunk.output,
+                          error: chunk.error,
+                          durationMs: chunk.durationMs,
+                        }
+                      : tc
+                  );
+                  updated[lastIndex] = { ...updated[lastIndex], toolCalls };
+                }
+                return updated;
+              });
+            }
+
+            if (chunk.eventType === 'complete' && chunk.telemetry) {
+              setTelemetrySummary(chunk.telemetry);
             }
 
             if (chunk.eventType === 'status' || chunk.eventType === 'heartbeat' || chunk.eventType === 'error') {
@@ -337,6 +507,8 @@ export function ChatView({
     } finally {
       setIsStreaming(false);
       setStreamingProviderId(null);
+      setCurrentIteration(0);
+      setPendingToolCalls([]);
       abortControllerRef.current = null;
     }
   }
@@ -380,7 +552,7 @@ export function ChatView({
   }
 
   const currentActivity = streamActivities[streamActivities.length - 1] ?? null;
-  const showStreamingActivity = isStreaming && currentActivity && activeConversationId === streamingConversationId;
+  const showStreamingActivity = isStreaming && currentActivity;
 
   return (
     <section className="chat-layout">
@@ -475,6 +647,40 @@ export function ChatView({
                   )}
                   <span className="chat-message-time">{formatTime(message.createdAt)}</span>
                 </div>
+                {message.toolCalls && message.toolCalls.length > 0 && (
+                  <div className="chat-tool-calls">
+                    {message.toolCalls.map((tc) => (
+                      <details key={tc.id} className={`chat-tool-call chat-tool-call-${tc.status}`}>
+                        <summary>
+                          <span className={`chat-tool-status chat-tool-status-${tc.status}`}>
+                            {tc.status === 'running' ? '⏳' : tc.status === 'success' ? '✓' : tc.status === 'error' ? '✗' : '○'}
+                          </span>
+                          <span className="chat-tool-name">{tc.name}</span>
+                          {tc.durationMs !== undefined && (
+                            <span className="chat-tool-duration">{tc.durationMs}ms</span>
+                          )}
+                        </summary>
+                        {tc.arguments && (
+                          <div className="chat-tool-args">
+                            <strong>Arguments:</strong>
+                            <pre>{tc.arguments}</pre>
+                          </div>
+                        )}
+                        {tc.result && (
+                          <div className="chat-tool-result">
+                            <strong>Result:</strong>
+                            <pre>{tc.result.length > 500 ? tc.result.slice(0, 500) + '...' : tc.result}</pre>
+                          </div>
+                        )}
+                        {tc.error && (
+                          <div className="chat-tool-error">
+                            <strong>Error:</strong> {tc.error}
+                          </div>
+                        )}
+                      </details>
+                    ))}
+                  </div>
+                )}
                 <div className="chat-message-content">
                   {message.content}
                   {message.isStreaming && <span className="chat-cursor" />}
@@ -520,12 +726,28 @@ export function ChatView({
         ) : null}
 
         <div className="chat-input-container">
+          <div className="chat-input-options">
+            <label className="chat-toggle">
+              <input
+                type="checkbox"
+                checked={agenticMode}
+                onChange={(e) => setAgenticMode(e.target.checked)}
+                disabled={isStreaming}
+              />
+              <span className="chat-toggle-label">Enable Tools (Agentic)</span>
+            </label>
+            {currentTraceId && (
+              <span className="chat-trace-id" title="Trace ID for debugging">
+                Trace: {currentTraceId.slice(0, 8)}...
+              </span>
+            )}
+          </div>
           <textarea
             className="chat-input"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={hasConfiguredProviders ? 'Type a message...' : 'Configure a provider in Account before chatting.'}
+            placeholder={hasConfiguredProviders ? (agenticMode ? 'Ask me to do something with tools (e.g., "List files in microsoft/vscode repo")...' : 'Type a message...') : 'Configure a provider in Account before chatting.'}
             disabled={isStreaming || !hasConfiguredProviders}
             rows={3}
           />
@@ -550,6 +772,20 @@ export function ChatView({
             )}
           </div>
         </div>
+        {telemetrySummary && (
+          <div className="chat-telemetry">
+            <details>
+              <summary>Telemetry: {telemetrySummary.tokenUsage.totalTokens} tokens, {telemetrySummary.llmCallCount} LLM calls, {telemetrySummary.toolCallCount} tool calls</summary>
+              <div className="chat-telemetry-details">
+                <div>Total: {telemetrySummary.totalDurationMs}ms</div>
+                <div>LLM: {telemetrySummary.llmDurationMs}ms</div>
+                <div>Tools: {telemetrySummary.toolDurationMs}ms</div>
+                <div>Prompt tokens: {telemetrySummary.tokenUsage.totalPromptTokens}</div>
+                <div>Completion tokens: {telemetrySummary.tokenUsage.totalCompletionTokens}</div>
+              </div>
+            </details>
+          </div>
+        )}
       </div>
     </section>
   );

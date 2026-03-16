@@ -28,6 +28,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IToolHandler, CreateBranchHandler>();
         services.AddSingleton<IToolHandler, CreatePullRequestHandler>();
         services.AddSingleton<IToolHandler, GetPullRequestHandler>();
+        services.AddSingleton<IToolHandler, GitCloneHandler>();
+        services.AddSingleton<IToolHandler, GitCheckoutHandler>();
 
         return services;
     }

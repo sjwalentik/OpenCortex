@@ -1,0 +1,62 @@
+# Default NetworkPolicy for agent workspaces
+# Allows all egress by default (users can restrict via settings)
+# Denies all ingress (agents don't need inbound connections)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-agent-policy
+  namespace: agent-workspaces
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: agent-workspaces
+spec:
+  podSelector:
+    matchLabels:
+      app: opencortex-agent
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []  # Deny all ingress
+  egress:
+    - {}  # Allow all egress by default
+---
+# Optional: Restricted NetworkPolicy template
+# Apply this per-user to restrict egress to GitHub only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: github-only-template
+  namespace: agent-workspaces
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: agent-workspaces
+    policy-type: template
+spec:
+  podSelector:
+    matchLabels:
+      app: opencortex-agent
+      # user-id label will be added per-user
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow HTTPS to external (GitHub, npm, etc.)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8       # Block internal cluster
+              - 172.16.0.0/12    # Block internal cluster
+              - 192.168.0.0/16   # Block internal cluster
+              - 169.254.169.254/32  # Block cloud metadata
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 22  # For git+ssh

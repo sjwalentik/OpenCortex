@@ -19,7 +19,9 @@ public sealed class GitHubToolDefinitions : IToolDefinitionProvider
             ListBranches,
             CreateBranch,
             CreatePullRequest,
-            GetPullRequest
+            GetPullRequest,
+            GitClone,
+            GitCheckout
         };
     }
 
@@ -256,6 +258,62 @@ public sealed class GitHubToolDefinitions : IToolDefinitionProvider
                 }
             },
             "required": ["owner", "repo", "number"]
+        }
+        """)
+    );
+
+    public static ToolDefinition GitClone => ToolDefinition.FromFunction(
+        name: "git_clone",
+        description: "Clone a GitHub repository to the workspace. The repository will be cloned " +
+                     "with authentication using your GitHub PAT. Use this before making local changes.",
+        parameters: JsonDocument.Parse("""
+        {
+            "type": "object",
+            "properties": {
+                "repo_url": {
+                    "type": "string",
+                    "description": "Full repository URL (e.g., https://github.com/owner/repo)"
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Target directory name (defaults to repository name)"
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Branch to checkout after cloning (defaults to default branch)"
+                }
+            },
+            "required": ["repo_url"]
+        }
+        """)
+    );
+
+    public static ToolDefinition GitCheckout => ToolDefinition.FromFunction(
+        name: "git_checkout",
+        description: "Checkout a branch in a cloned repository. Can switch to existing branches " +
+                     "or create new branches. Supports specifying a source branch when creating.",
+        parameters: JsonDocument.Parse("""
+        {
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "type": "string",
+                    "description": "Branch name to checkout"
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Repository directory (auto-detected if only one repo in workspace)"
+                },
+                "create": {
+                    "type": "boolean",
+                    "description": "Create the branch if it doesn't exist"
+                },
+                "from_branch": {
+                    "type": "string",
+                    "description": "Source branch to create from (e.g., 'main', 'develop')"
+                }
+            },
+            "required": ["branch"]
         }
         """)
     );
