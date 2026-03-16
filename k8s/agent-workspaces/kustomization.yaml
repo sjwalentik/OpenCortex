@@ -1,7 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: agent-workspaces
+# Note: We don't use a global namespace here because resources span multiple namespaces:
+# - ServiceAccount is in opencortex-develop (where API runs)
+# - Role/RoleBinding are in agent-workspaces (where agent pods run)
+# - ClusterRole/ClusterRoleBinding are cluster-scoped
 
 resources:
   - namespace.yaml
