@@ -83,7 +83,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: opencortex-workspace-manager
-    namespace: opencortex
+    namespace: opencortex-develop
 roleRef:
   kind: ClusterRole
   name: opencortex-namespace-manager
