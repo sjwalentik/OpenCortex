@@ -47,13 +47,14 @@ COPY src/OpenCortex.Tools/ src/OpenCortex.Tools/
 COPY src/OpenCortex.Tools.GitHub/ src/OpenCortex.Tools.GitHub/
 COPY src/OpenCortex.Api/ src/OpenCortex.Api/
 
-# Build and publish using the same NuGet caches populated during restore.
+# Build and publish. The restore will be fast if packages are already cached.
+# Note: We intentionally don't use --no-restore because the NuGet cache mounts
+# are ephemeral in CI (GHA layer cache doesn't persist mount contents).
 RUN --mount=type=cache,target=/root/.nuget/packages \
     --mount=type=cache,target=/root/.local/share/NuGet/v3-cache \
     dotnet publish src/OpenCortex.Api/OpenCortex.Api.csproj \
     -c Release \
     -o /app/publish \
-    --no-restore \
     -p:UseAppHost=false
 
 # Runtime image
