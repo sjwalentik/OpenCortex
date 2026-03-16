@@ -8,6 +8,8 @@ resources:
   - mcp-deployment.yaml
   - workers-deployment.yaml
 
-commonLabels:
-  app.kubernetes.io/part-of: opencortex
-  app.kubernetes.io/managed-by: kustomize
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: opencortex
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false

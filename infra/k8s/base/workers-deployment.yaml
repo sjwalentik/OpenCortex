@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: opencortex-workers
-  namespace: opencortex
   labels:
     app.kubernetes.io/name: opencortex-workers
     app.kubernetes.io/component: workers
