@@ -10,12 +10,12 @@ namespace OpenCortex.Api;
 public static class ConversationEndpoints
 {
     /// <summary>
-    /// Map conversation endpoints to the tenant route group.
+    /// Map conversation endpoints to a `/tenant/conversations` route group.
     /// </summary>
     public static void MapConversationEndpoints(this RouteGroupBuilder tenantRoutes)
     {
         // List conversations
-        tenantRoutes.MapGet("/conversations", async (
+        tenantRoutes.MapGet("", async (
             int? limit,
             int? offset,
             System.Security.Claims.ClaimsPrincipal user,
@@ -50,7 +50,7 @@ public static class ConversationEndpoints
         });
 
         // Create conversation
-        tenantRoutes.MapPost("/conversations", async (
+        tenantRoutes.MapPost("", async (
             CreateConversationRequest request,
             System.Security.Claims.ClaimsPrincipal user,
             ITenantCatalogStore catalogStore,
@@ -82,7 +82,7 @@ public static class ConversationEndpoints
         });
 
         // Get conversation with messages
-        tenantRoutes.MapGet("/conversations/{conversationId}", async (
+        tenantRoutes.MapGet("/{conversationId}", async (
             string conversationId,
             int? messageLimit,
             System.Security.Claims.ClaimsPrincipal user,
@@ -131,7 +131,7 @@ public static class ConversationEndpoints
         });
 
         // Update conversation title
-        tenantRoutes.MapPatch("/conversations/{conversationId}", async (
+        tenantRoutes.MapPatch("/{conversationId}", async (
             string conversationId,
             UpdateConversationRequest request,
             System.Security.Claims.ClaimsPrincipal user,
@@ -162,7 +162,7 @@ public static class ConversationEndpoints
         });
 
         // Archive conversation
-        tenantRoutes.MapDelete("/conversations/{conversationId}", async (
+        tenantRoutes.MapDelete("/{conversationId}", async (
             string conversationId,
             System.Security.Claims.ClaimsPrincipal user,
             ITenantCatalogStore catalogStore,

@@ -90,6 +90,12 @@ jobs:
         run: |
           kubectl apply -k k8s/agent-workspaces/
 
+      - name: Copy image pull secret to agent-workspaces
+        run: |
+          kubectl get secret ghcr-pull-secret -n opencortex-develop -o yaml | \
+            sed 's/namespace: opencortex-develop/namespace: agent-workspaces/' | \
+            kubectl apply -f -
+
       - name: Delete deployments for selector migration
         run: |
           # One-time migration: selectors changed from commonLabels to labels

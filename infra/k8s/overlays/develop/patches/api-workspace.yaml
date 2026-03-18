@@ -32,3 +32,5 @@ spec:
               value: "100m"
             - name: OpenCortex__Tools__MemoryRequest
               value: "256Mi"
+            - name: OpenCortex__Tools__ImagePullSecretName
+              value: "ghcr-pull-secret"

@@ -561,13 +561,36 @@ builder.Services.AddRateLimiter(rateLimiter =>
                 Window = TimeSpan.FromMinutes(1),
             }));
 
-    // Moderate limit for tenant API (100 per minute per user)
+    // Tenant workspace flows fan out multiple reads after each mutation, so keep this comfortably above
+    // normal portal bursts while still providing abuse protection.
     rateLimiter.AddPolicy("tenant-api", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: GetRateLimitPartitionKey(context),
             factory: _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 100,
+                PermitLimit = 300,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    // Managed-document authoring flows refresh list/detail/version state aggressively after each mutation.
+    // Keep document work isolated from the general tenant bucket so bulk edits/deletes do not trip unrelated UI traffic.
+    rateLimiter.AddPolicy("documents-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: GetRateLimitPartitionKey(context),
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 600,
+                Window = TimeSpan.FromMinutes(1),
+            }));
+
+    // Conversation archive/load flows are chat-adjacent workspace actions and should not contend with
+    // generic tenant reads like billing, brains, or tokens.
+    rateLimiter.AddPolicy("conversations-api", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: GetRateLimitPartitionKey(context),
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 300,
                 Window = TimeSpan.FromMinutes(1),
             }));
 
@@ -1068,6 +1091,12 @@ if (hostedAuthConfigured)
     var tenantRoutes = app.MapGroup("/tenant")
         .RequireAuthorization()
         .RequireRateLimiting("tenant-api");
+    var tenantDocumentRoutes = app.MapGroup("/tenant/brains/{brainId}/documents")
+        .RequireAuthorization()
+        .RequireRateLimiting("documents-api");
+    var tenantConversationRoutes = app.MapGroup("/tenant/conversations")
+        .RequireAuthorization()
+        .RequireRateLimiting("conversations-api");
 
     tenantRoutes.MapGet("/me", async (
         System.Security.Claims.ClaimsPrincipal user,
@@ -1489,7 +1518,7 @@ if (hostedAuthConfigured)
         return Results.Ok(run);
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents", async (
+    tenantDocumentRoutes.MapGet("", async (
         string brainId,
         int? limit,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1527,7 +1556,7 @@ if (hostedAuthConfigured)
         });
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents/by-path", async (
+    tenantDocumentRoutes.MapGet("/by-path", async (
         string brainId,
         HttpRequest request,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1555,7 +1584,7 @@ if (hostedAuthConfigured)
             cancellationToken);
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}", async (
+    tenantDocumentRoutes.MapGet("/{managedDocumentId}", async (
         string brainId,
         string managedDocumentId,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1585,7 +1614,7 @@ if (hostedAuthConfigured)
             : Results.Ok(document);
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}/versions", async (
+    tenantDocumentRoutes.MapGet("/{managedDocumentId}/versions", async (
         string brainId,
         string managedDocumentId,
         int? limit,
@@ -1625,7 +1654,7 @@ if (hostedAuthConfigured)
         });
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}/versions/{managedDocumentVersionId}", async (
+    tenantDocumentRoutes.MapGet("/{managedDocumentId}/versions/{managedDocumentVersionId}", async (
         string brainId,
         string managedDocumentId,
         string managedDocumentVersionId,
@@ -1662,7 +1691,7 @@ if (hostedAuthConfigured)
             : Results.Ok(version);
     });
 
-    tenantRoutes.MapPost("/brains/{brainId}/documents", async (
+    tenantDocumentRoutes.MapPost("", async (
         string brainId,
         CreateManagedDocumentRequest request,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1732,7 +1761,7 @@ if (hostedAuthConfigured)
         }
     });
 
-    tenantRoutes.MapPut("/brains/{brainId}/documents/{managedDocumentId}", async (
+    tenantDocumentRoutes.MapPut("/{managedDocumentId}", async (
         string brainId,
         string managedDocumentId,
         UpdateManagedDocumentRequest request,
@@ -1796,7 +1825,7 @@ if (hostedAuthConfigured)
         }
     });
 
-    tenantRoutes.MapDelete("/brains/{brainId}/documents/{managedDocumentId}", async (
+    tenantDocumentRoutes.MapDelete("/{managedDocumentId}", async (
         string brainId,
         string managedDocumentId,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1844,9 +1873,9 @@ if (hostedAuthConfigured)
     });
 
     // Conversation management endpoints
-    tenantRoutes.MapConversationEndpoints();
+    tenantConversationRoutes.MapConversationEndpoints();
 
-    tenantRoutes.MapPost("/brains/{brainId}/documents/{managedDocumentId}/versions/{managedDocumentVersionId}/restore", async (
+    tenantDocumentRoutes.MapPost("/{managedDocumentId}/versions/{managedDocumentVersionId}/restore", async (
         string brainId,
         string managedDocumentId,
         string managedDocumentVersionId,

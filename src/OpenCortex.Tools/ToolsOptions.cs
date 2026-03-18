@@ -61,6 +61,11 @@ public sealed class ToolsOptions
     /// </summary>
     public int PodStartupTimeoutSeconds { get; set; } = 60;
 
+    /// <summary>
+    /// Image pull secret name for pulling container images (optional).
+    /// </summary>
+    public string? ImagePullSecretName { get; set; }
+
     // ─────────────────────────────────────────────────────────────
     // Docker Settings
     // ─────────────────────────────────────────────────────────────

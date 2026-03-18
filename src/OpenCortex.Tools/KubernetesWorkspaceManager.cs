@@ -408,6 +408,12 @@ spec:
               name: {secretName}"
             : "";
 
+        var imagePullSecrets = !string.IsNullOrEmpty(_options.ImagePullSecretName)
+            ? $@"
+  imagePullSecrets:
+    - name: {_options.ImagePullSecretName}"
+            : "";
+
         return $@"
 apiVersion: v1
 kind: Pod
@@ -418,7 +424,7 @@ metadata:
     app: {AppLabel}
     user-id: ""{userId:N}""
 spec:
-  restartPolicy: Never
+  restartPolicy: Never{imagePullSecrets}
   securityContext:
     runAsNonRoot: true
     runAsUser: 1000
