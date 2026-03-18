@@ -48,7 +48,8 @@ if (!builder.Environment.IsEnvironment("Testing"))
     }
     catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException or InvalidOperationException)
     {
-        validationErrors.Add($"Postgres schema validation failed: {ex.Message}");
+        validationErrors.Add(
+            "Postgres schema validation failed. Verify database connectivity and schema readiness.");
     }
 }
 
@@ -775,7 +776,9 @@ app.MapGet("/", () => Results.Ok(new
 app.MapGet("/health", () => Results.Ok(new
 {
     service = "OpenCortex.Api",
-    validationErrors,
+    validationErrors = app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing")
+        ? validationErrors.ToArray()
+        : validationErrors.Select(_ => "Configuration validation failed.").ToArray(),
 }));
 
 app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken cancellationToken) =>
@@ -818,7 +821,11 @@ app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken ca
     }
     catch (Exception ex)
     {
-        return Results.BadRequest(new { message = $"Invalid Stripe webhook signature: {ex.Message}" });
+        return Results.BadRequest(new
+        {
+            message = "Invalid Stripe webhook signature.",
+            detail = ErrorMessages.ForExternalFailure("Stripe signature verification failed.", ex.Message)
+        });
     }
 
     await ProcessStripeEventAsync(stripeEvent, payload, cancellationToken);
@@ -1331,14 +1338,21 @@ if (hostedAuthConfigured)
                 {
                     type = "forbidden",
                     title = "Insufficient plan for requested token scope",
-                    detail = ex.Message,
+                    detail = ErrorMessages.ForExternalFailure(
+                        "The requested token scope is not available for the current plan.",
+                        ex.Message),
                     requiredScope = "mcp:write",
                 },
                 statusCode: StatusCodes.Status403Forbidden);
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new { message = ex.Message });
+            return Results.BadRequest(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The requested token scopes are invalid.",
+                    ex.Message)
+            });
         }
 
         var generatedToken = PersonalApiToken.Generate();
@@ -1423,7 +1437,12 @@ if (hostedAuthConfigured)
         }
         catch (Exception ex)
         {
-            return Results.BadRequest(new { message = ex.Message });
+            return Results.BadRequest(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The query could not be parsed.",
+                    ex.Message)
+            });
         }
 
         var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, query.BrainId, cancellationToken);
@@ -1757,7 +1776,12 @@ if (hostedAuthConfigured)
         }
         catch (InvalidOperationException ex)
         {
-            return Results.Conflict(new { message = ex.Message });
+            return Results.Conflict(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The document could not be created.",
+                    ex.Message)
+            });
         }
     });
 
@@ -1821,7 +1845,12 @@ if (hostedAuthConfigured)
         }
         catch (InvalidOperationException ex)
         {
-            return Results.Conflict(new { message = ex.Message });
+            return Results.Conflict(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The document could not be updated.",
+                    ex.Message)
+            });
         }
     });
 
@@ -1927,7 +1956,12 @@ if (hostedAuthConfigured)
         }
         catch (InvalidOperationException ex)
         {
-            return Results.Conflict(new { message = ex.Message });
+            return Results.Conflict(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The document version could not be restored.",
+                    ex.Message)
+            });
         }
     });
 }

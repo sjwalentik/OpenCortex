@@ -339,7 +339,10 @@ public static class ChatEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new { message = ex.Message });
+                return Results.BadRequest(new
+                {
+                    message = ErrorMessages.ForExternalFailure("Request could not be completed.", ex.Message)
+                });
             }
         });
 
@@ -399,7 +402,10 @@ public static class ChatEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new { message = ex.Message });
+                return Results.BadRequest(new
+                {
+                    message = ErrorMessages.ForExternalFailure("Request could not be completed.", ex.Message)
+                });
             }
         });
 
@@ -464,7 +470,10 @@ public static class ChatEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new { message = ex.Message });
+                return Results.BadRequest(new
+                {
+                    message = ErrorMessages.ForExternalFailure("Request could not be completed.", ex.Message)
+                });
             }
         });
 
@@ -527,7 +536,10 @@ public static class ChatEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new { message = ex.Message });
+                return Results.BadRequest(new
+                {
+                    message = ErrorMessages.ForExternalFailure("Request could not be completed.", ex.Message)
+                });
             }
         });
 
@@ -595,7 +607,10 @@ public static class ChatEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new { message = ex.Message });
+                return Results.BadRequest(new
+                {
+                    message = ErrorMessages.ForExternalFailure("Request could not be completed.", ex.Message)
+                });
             }
         });
     }
@@ -832,14 +847,15 @@ public static class ChatEndpoints
         }
         catch (Exception ex)
         {
+            var safeMessage = ErrorMessages.ForExternalFailure("Streaming failed.", ex.Message);
             heartbeatStage = "error";
-            heartbeatMessage = ex.Message;
+            heartbeatMessage = safeMessage;
 
             await WriteChatStreamEventAsync(response, new
             {
                 eventType = "error",
                 stage = heartbeatStage,
-                message = ex.Message,
+                message = safeMessage,
                 providerId = heartbeatProviderId,
                 timestamp = DateTimeOffset.UtcNow
             }, writeLock, cancellationToken);
@@ -1052,10 +1068,10 @@ public static class ChatEndpoints
             t.ToolName,
             t.Success,
             t.Output,
-            t.Error,
+            error = ErrorMessages.ForExternalFailure("Tool execution failed.", t.Error),
             durationMs = (int)t.Duration.TotalMilliseconds
         }),
-        error = result.Error,
+        error = ErrorMessages.ForExternalFailure("Request could not be completed.", result.Error),
         telemetry = result.Telemetry is not null ? new
         {
             traceId = result.Telemetry.TraceId,
@@ -1104,7 +1120,7 @@ public static class ChatEndpoints
                 startedAt = t.StartedAt,
                 durationMs = (int)t.Duration.TotalMilliseconds,
                 success = t.Success,
-                error = t.Error,
+                error = ErrorMessages.ForExternalFailure("Tool execution failed.", t.Error),
                 inputSize = t.InputSize,
                 outputSize = t.OutputSize,
                 category = t.Category
@@ -1171,10 +1187,13 @@ public static class ChatEndpoints
                         break;
 
                     case AgenticWorkspaceErrorEvent wsErrorEvent:
+                        var safeWorkspaceError = ErrorMessages.ForExternalFailure(
+                            "Workspace failed.",
+                            wsErrorEvent.Error);
                         await WriteChatStreamEventAsync(response, new
                         {
                             eventType = "workspace_error",
-                            error = wsErrorEvent.Error,
+                            error = safeWorkspaceError,
                             retryable = wsErrorEvent.Retryable,
                             traceId = wsErrorEvent.TraceId,
                             timestamp = wsErrorEvent.Timestamp
@@ -1235,6 +1254,9 @@ public static class ChatEndpoints
                         break;
 
                     case AgenticToolResultEvent toolResultEvent:
+                        var safeToolError = ErrorMessages.ForExternalFailure(
+                            "Tool execution failed.",
+                            toolResultEvent.Result.Error);
                         await WriteChatStreamEventAsync(response, new
                         {
                             eventType = "tool_result",
@@ -1242,7 +1264,7 @@ public static class ChatEndpoints
                             toolName = toolResultEvent.Result.ToolName,
                             success = toolResultEvent.Result.Success,
                             output = toolResultEvent.Result.Output,
-                            error = toolResultEvent.Result.Error,
+                            error = safeToolError,
                             durationMs = (int)toolResultEvent.Result.Duration.TotalMilliseconds,
                             iteration = toolResultEvent.Iteration,
                             timestamp = toolResultEvent.Timestamp
@@ -1287,10 +1309,13 @@ public static class ChatEndpoints
                         break;
 
                     case AgenticErrorEvent errorEvent:
+                        var safeAgenticError = ErrorMessages.ForExternalFailure(
+                            "Request could not be completed.",
+                            errorEvent.Error);
                         await WriteChatStreamEventAsync(response, new
                         {
                             eventType = "error",
-                            error = errorEvent.Error,
+                            error = safeAgenticError,
                             iteration = errorEvent.Iteration,
                             traceId = errorEvent.TraceId,
                             timestamp = errorEvent.Timestamp
@@ -1305,10 +1330,11 @@ public static class ChatEndpoints
         }
         catch (Exception ex)
         {
+            var safeError = ErrorMessages.ForExternalFailure("Streaming failed.", ex.Message);
             await WriteChatStreamEventAsync(response, new
             {
                 eventType = "error",
-                error = ex.Message,
+                error = safeError,
                 timestamp = DateTimeOffset.UtcNow
             }, writeLock, cancellationToken);
         }

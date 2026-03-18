@@ -112,7 +112,11 @@ public sealed class UserProviderFactory : IUserProviderFactory
 
         if (!result.Success)
         {
-            _logger.LogWarning("Failed to refresh OAuth token for {ProviderId}: {Error}", config.ProviderId, result.Error);
+            var safeError = Execution.ErrorRedaction.Sanitize(
+                "OAuth token refresh failed.",
+                result.Error,
+                null);
+            _logger.LogWarning("Failed to refresh OAuth token for {ProviderId}: {Error}", config.ProviderId, safeError);
             return null;
         }
 

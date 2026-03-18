@@ -45,12 +45,13 @@ public sealed class ListDirectoryHandler : IToolHandler
         CancellationToken cancellationToken)
     {
         var resolvedPath = _workspace.ResolvePath(userId, path);
+        var quotedPath = ShellEscaping.SingleQuote(resolvedPath);
 
-        // Use ls for simplicity - avoids shell quoting issues with find -printf
+        // Use ls for simplicity, but still quote the path so file names cannot escape the shell.
         var lsFlags = recursive ? "-laR" : "-la";
         var result = await _workspace.ExecuteCommandAsync(
             userId,
-            $"ls {lsFlags} {resolvedPath} 2>/dev/null",
+            $"ls {lsFlags} -- {quotedPath} 2>/dev/null",
             null,
             null,
             cancellationToken);
@@ -86,6 +87,11 @@ public sealed class ListDirectoryHandler : IToolHandler
 
             var isDirectory = permissions.StartsWith('d');
             var relativePath = path == "." ? name : $"{path}/{name}";
+
+            if (SensitivePathPolicy.IsSensitive(relativePath))
+            {
+                continue;
+            }
 
             if (isDirectory)
             {
@@ -141,6 +147,10 @@ public sealed class ListDirectoryHandler : IToolHandler
         foreach (var dir in Directory.EnumerateDirectories(resolvedPath, "*", searchOption))
         {
             var relativePath = Path.GetRelativePath(workspacePath, dir).Replace('\\', '/');
+            if (SensitivePathPolicy.IsSensitive(relativePath))
+            {
+                continue;
+            }
             entries.Add(new
             {
                 type = "directory",
@@ -153,6 +163,10 @@ public sealed class ListDirectoryHandler : IToolHandler
         {
             var fileInfo = new FileInfo(file);
             var relativePath = Path.GetRelativePath(workspacePath, file).Replace('\\', '/');
+            if (SensitivePathPolicy.IsSensitive(relativePath))
+            {
+                continue;
+            }
             entries.Add(new
             {
                 type = "file",

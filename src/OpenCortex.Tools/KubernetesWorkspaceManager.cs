@@ -163,12 +163,10 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
         var fullCommand = string.IsNullOrEmpty(arguments)
             ? command
             : $"{command} {arguments}";
-
-        // Build shell command - no escaping needed since we use ArgumentList
-        var shellCommand = $"cd {workDir} && {fullCommand}";
+        var shellScript = $"cd -- {ShellEscaping.SingleQuote(workDir)} && {fullCommand}";
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await RunKubectlExecAsync(ns, podName, shellCommand, cancellationToken);
+        var result = await RunKubectlExecAsync(ns, podName, shellScript, cancellationToken);
         stopwatch.Stop();
 
         return new CommandResult
@@ -234,32 +232,27 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
     {
         var podName = GetPodName(userId);
         var pvcName = GetPvcName(userId);
-        var secretName = GetSecretName(userId);
         var ns = _options.KubernetesNamespace;
 
         // Ensure PVC exists
         await EnsurePvcExistsAsync(userId, pvcName, ns, cancellationToken);
 
-        // Create secret if credentials provided
-        if (credentials != null && credentials.Count > 0)
-        {
-            await CreateSecretAsync(secretName, ns, credentials, cancellationToken);
-        }
-
         // Build pod manifest
-        var podYaml = BuildPodManifest(userId, podName, pvcName, secretName, credentials != null);
+        var podYaml = BuildPodManifest(userId, podName, pvcName);
 
         // Apply pod
         var result = await RunKubectlWithStdinAsync("apply -f -", podYaml, cancellationToken);
 
         if (!result.Success)
         {
-            _logger.LogError("Failed to create pod for user {UserId}: {Error}", userId, result.Error);
+            var safeError = SensitiveDataRedactor.Redact(result.Error, credentials)
+                ?? "Pod creation failed.";
+            _logger.LogError("Failed to create pod for user {UserId}: {Error}", userId, safeError);
             return new WorkspaceStatus
             {
                 UserId = userId,
                 State = WorkspaceState.Failed,
-                Message = $"Failed to create pod: {result.Error}"
+                Message = $"Failed to create pod: {safeError}"
             };
         }
 
@@ -370,42 +363,11 @@ spec:
         }
     }
 
-    private async Task CreateSecretAsync(
-        string secretName,
-        string ns,
-        IReadOnlyDictionary<string, string> credentials,
-        CancellationToken cancellationToken)
-    {
-        // Delete existing secret first
-        await RunKubectlAsync($"delete secret {secretName} -n {ns} --ignore-not-found", cancellationToken);
-
-        // Build literal args
-        var literals = new StringBuilder();
-        foreach (var (key, value) in credentials)
-        {
-            var sanitizedKey = key.ToUpperInvariant().Replace("-", "_");
-            literals.Append($"--from-literal={sanitizedKey}='{value}' ");
-        }
-
-        await RunKubectlAsync(
-            $"create secret generic {secretName} -n {ns} {literals}",
-            cancellationToken);
-    }
-
     private string BuildPodManifest(
         Guid userId,
         string podName,
-        string pvcName,
-        string secretName,
-        bool hasCredentials)
+        string pvcName)
     {
-        var envFrom = hasCredentials
-            ? $@"
-      envFrom:
-        - secretRef:
-            name: {secretName}"
-            : "";
-
         var imagePullSecrets = !string.IsNullOrEmpty(_options.ImagePullSecretName)
             ? $@"
   imagePullSecrets:
@@ -449,7 +411,7 @@ spec:
             - ALL
       volumeMounts:
         - name: workspace
-          mountPath: {WorkspacePathInPod}{envFrom}
+          mountPath: {WorkspacePathInPod}
   volumes:
     - name: workspace
       persistentVolumeClaim:
@@ -524,7 +486,6 @@ spec:
 
     private static string GetPodName(Guid userId) => $"{PodPrefix}{userId:N}";
     private static string GetPvcName(Guid userId) => $"{PvcPrefix}{userId:N}";
-    private static string GetSecretName(Guid userId) => $"creds-{userId:N}";
 
     private static async Task<(bool Success, int ExitCode, string? Output, string? Error)> RunKubectlAsync(
         string arguments,
