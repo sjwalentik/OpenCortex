@@ -24,7 +24,6 @@ internal static class SensitivePathPolicy
         ".git-credentials",
         ".terraform.lock.hcl",
         "credentials",
-        "config",
         "secrets.yaml",
         "secrets.yml",
         "secrets.json"
@@ -69,6 +68,9 @@ internal static class SensitivePathPolicy
     public static bool IsSensitive(string path)
     {
         var normalized = path.Replace('\\', '/').ToLowerInvariant();
+        var normalizedForFragments = normalized.StartsWith("/", StringComparison.Ordinal)
+            ? normalized
+            : $"/{normalized}";
         var fileName = Path.GetFileName(normalized);
 
         if (SensitiveFileNames.Contains(fileName, StringComparer.Ordinal))
@@ -92,6 +94,6 @@ internal static class SensitivePathPolicy
             return true;
         }
 
-        return SensitivePathFragments.Any(fragment => normalized.Contains(fragment, StringComparison.Ordinal));
+        return SensitivePathFragments.Any(fragment => normalizedForFragments.Contains(fragment, StringComparison.Ordinal));
     }
 }

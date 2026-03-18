@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace OpenCortex.Tools.FileSystem;
@@ -146,10 +147,9 @@ public sealed class ReadFileHandler : IToolHandler
         if (truncated)
         {
             using var stream = File.OpenRead(resolvedPath);
-            using var reader = new StreamReader(stream);
-            var buffer = new char[MaxReadBytes];
-            var read = await reader.ReadBlockAsync(buffer, 0, buffer.Length);
-            content = new string(buffer, 0, read);
+            var buffer = new byte[MaxReadBytes];
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            content = Encoding.UTF8.GetString(buffer, 0, read);
         }
         else
         {
