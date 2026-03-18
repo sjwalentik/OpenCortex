@@ -16,6 +16,8 @@ public sealed class GitCheckoutHandler : IToolHandler
         ToolExecutionContext context,
         CancellationToken cancellationToken = default)
     {
+        var token = context.GetCredential("github");
+
         var branch = arguments.GetProperty("branch").GetString()
             ?? throw new ArgumentException("branch is required");
 
@@ -72,21 +74,23 @@ public sealed class GitCheckoutHandler : IToolHandler
             throw new InvalidOperationException($"'{repoPath}' is not a git repository");
         }
 
+        await SanitizeOriginUrlAsync(repoPath, token, cancellationToken);
+
         // Fetch latest from remote first
-        await RunGitCommandAsync(repoPath, "fetch --all", cancellationToken);
+        await RunGitCommandAsync(repoPath, "fetch --all", token, cancellationToken);
 
         // Check if branch exists locally or remotely
         var branchExistsResult = await RunGitCommandAsync(
-            repoPath, $"rev-parse --verify {branch}", cancellationToken);
+            repoPath, $"rev-parse --verify {branch}", token, cancellationToken);
         var remoteBranchExistsResult = await RunGitCommandAsync(
-            repoPath, $"rev-parse --verify origin/{branch}", cancellationToken);
+            repoPath, $"rev-parse --verify origin/{branch}", token, cancellationToken);
 
         var branchExists = branchExistsResult.Success || remoteBranchExistsResult.Success;
 
         if (!branchExists && !createIfNotExists)
         {
             // List available branches for helpful error
-            var listResult = await RunGitCommandAsync(repoPath, "branch -a", cancellationToken);
+            var listResult = await RunGitCommandAsync(repoPath, "branch -a", token, cancellationToken);
             throw new InvalidOperationException(
                 $"Branch '{branch}' not found. Use 'create: true' to create it. " +
                 $"Available branches:\n{listResult.Output}");
@@ -101,8 +105,8 @@ public sealed class GitCheckoutHandler : IToolHandler
             if (!string.IsNullOrEmpty(fromBranch))
             {
                 // First checkout the source branch
-                await RunGitCommandAsync(repoPath, $"checkout {fromBranch}", cancellationToken);
-                await RunGitCommandAsync(repoPath, "pull", cancellationToken);
+                await RunGitCommandAsync(repoPath, $"checkout {fromBranch}", token, cancellationToken);
+                await RunGitCommandAsync(repoPath, "pull", token, cancellationToken);
             }
 
             checkoutCommand = $"checkout -b {branch}";
@@ -121,7 +125,7 @@ public sealed class GitCheckoutHandler : IToolHandler
             action = "switched";
         }
 
-        var result = await RunGitCommandAsync(repoPath, checkoutCommand, cancellationToken);
+        var result = await RunGitCommandAsync(repoPath, checkoutCommand, token, cancellationToken);
 
         if (!result.Success)
         {
@@ -130,7 +134,7 @@ public sealed class GitCheckoutHandler : IToolHandler
 
         // Get current branch to confirm
         var currentBranchResult = await RunGitCommandAsync(
-            repoPath, "branch --show-current", cancellationToken);
+            repoPath, "branch --show-current", token, cancellationToken);
 
         return JsonSerializer.Serialize(new
         {
@@ -152,6 +156,7 @@ public sealed class GitCheckoutHandler : IToolHandler
     private static async Task<(bool Success, string? Output, string? Error)> RunGitCommandAsync(
         string workingDirectory,
         string arguments,
+        string? token,
         CancellationToken cancellationToken)
     {
         using var process = new Process
@@ -168,6 +173,7 @@ public sealed class GitCheckoutHandler : IToolHandler
             }
         };
 
+        GitHubGitAuth.Apply(process.StartInfo, token);
         process.Start();
 
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -179,5 +185,41 @@ public sealed class GitCheckoutHandler : IToolHandler
         var error = await errorTask;
 
         return (process.ExitCode == 0, output, error);
+    }
+
+    private static async Task SanitizeOriginUrlAsync(
+        string repoPath,
+        string? token,
+        CancellationToken cancellationToken)
+    {
+        var originUrlResult = await RunGitCommandAsync(
+            repoPath,
+            "remote get-url origin",
+            token,
+            cancellationToken);
+
+        if (!originUrlResult.Success || string.IsNullOrWhiteSpace(originUrlResult.Output))
+        {
+            return;
+        }
+
+        var originUrl = originUrlResult.Output.Trim();
+        var sanitizedUrl = GitHubGitAuth.SanitizeRemoteUrl(originUrl);
+
+        if (string.Equals(originUrl, sanitizedUrl, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var setUrlResult = await RunGitCommandAsync(
+            repoPath,
+            $"remote set-url origin {sanitizedUrl}",
+            token,
+            cancellationToken);
+
+        if (!setUrlResult.Success)
+        {
+            throw new InvalidOperationException($"Failed to sanitize repository remote: {setUrlResult.Error}");
+        }
     }
 }

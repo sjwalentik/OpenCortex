@@ -39,14 +39,6 @@ public sealed class GitCloneHandler : IToolHandler
 
         Directory.CreateDirectory(context.WorkspacePath);
 
-        // Build the clone URL with authentication if token is provided
-        var cloneUrl = repoUrl;
-        if (!string.IsNullOrEmpty(token) && repoUrl.StartsWith("https://github.com/"))
-        {
-            // Inject token for authentication: https://TOKEN@github.com/owner/repo.git
-            cloneUrl = repoUrl.Replace("https://github.com/", $"https://{token}@github.com/");
-        }
-
         // Determine target directory
         var targetDir = directory;
         if (string.IsNullOrEmpty(targetDir))
@@ -67,9 +59,9 @@ public sealed class GitCloneHandler : IToolHandler
                 if (!string.IsNullOrEmpty(branch))
                 {
                     var fetchResult = await RunGitCommandAsync(
-                        fullTargetPath, $"fetch origin {branch}", cancellationToken);
+                        fullTargetPath, $"fetch origin {branch}", token, cancellationToken);
                     var checkoutResult = await RunGitCommandAsync(
-                        fullTargetPath, $"checkout {branch}", cancellationToken);
+                        fullTargetPath, $"checkout {branch}", token, cancellationToken);
 
                     return JsonSerializer.Serialize(new
                     {
@@ -95,20 +87,18 @@ public sealed class GitCloneHandler : IToolHandler
         }
 
         // Build clone command
-        var cloneArgs = $"clone {cloneUrl}";
+        var cloneArgs = $"clone {repoUrl}";
         if (!string.IsNullOrEmpty(branch))
         {
             cloneArgs += $" --branch {branch}";
         }
         cloneArgs += $" {targetDir}";
 
-        var result = await RunGitCommandAsync(context.WorkspacePath, cloneArgs, cancellationToken);
+        var result = await RunGitCommandAsync(context.WorkspacePath, cloneArgs, token, cancellationToken);
 
         if (!result.Success)
         {
-            // Don't expose the token in error messages
-            var safeError = result.Error?.Replace(token ?? "", "***");
-            throw new InvalidOperationException($"Git clone failed: {safeError}");
+            throw new InvalidOperationException($"Git clone failed: {result.Error}");
         }
 
         return JsonSerializer.Serialize(new
@@ -125,6 +115,7 @@ public sealed class GitCloneHandler : IToolHandler
     private static async Task<(bool Success, string? Output, string? Error)> RunGitCommandAsync(
         string workingDirectory,
         string arguments,
+        string? token,
         CancellationToken cancellationToken)
     {
         using var process = new Process
@@ -141,6 +132,7 @@ public sealed class GitCloneHandler : IToolHandler
             }
         };
 
+        GitHubGitAuth.Apply(process.StartInfo, token);
         process.Start();
 
         var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);

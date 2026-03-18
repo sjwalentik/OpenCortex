@@ -42,8 +42,7 @@ RUN groupadd -g 1000 agent && \
 # Configure git for the agent user
 RUN git config --system init.defaultBranch main && \
     git config --system user.email "agent@opencortex.local" && \
-    git config --system user.name "OpenCortex Agent" && \
-    git config --system credential.helper store
+    git config --system user.name "OpenCortex Agent"
 
 # Create workspace directory
 RUN mkdir -p /workspace && chown agent:agent /workspace
