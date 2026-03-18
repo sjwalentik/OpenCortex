@@ -45,22 +45,18 @@ public sealed class ListDirectoryHandler : IToolHandler
         CancellationToken cancellationToken)
     {
         var resolvedPath = _workspace.ResolvePath(userId, path);
-        var depthArg = recursive ? "" : "-maxdepth 1";
 
-        // Use find command to list directory contents with file info
-        // ExecuteCommandAsync wraps in sh -c, so pass the pipeline directly
-        var command = $"find {resolvedPath} {depthArg} -printf '%y|%p|%s|%T@\\n' 2>/dev/null | sort";
-
+        // Use ls for simplicity - avoids shell quoting issues with find -printf
+        var lsFlags = recursive ? "-laR" : "-la";
         var result = await _workspace.ExecuteCommandAsync(
             userId,
-            command,
+            $"ls {lsFlags} {resolvedPath} 2>/dev/null",
             null,
             null,
             cancellationToken);
 
         if (result.ExitCode != 0 && string.IsNullOrWhiteSpace(result.StandardOutput))
         {
-            // Directory might not exist
             return JsonSerializer.Serialize(new
             {
                 success = false,
@@ -69,45 +65,45 @@ public sealed class ListDirectoryHandler : IToolHandler
         }
 
         var entries = new List<object>();
-        var workspacePath = await _workspace.GetWorkspacePathAsync(userId, cancellationToken);
 
+        // Parse ls -la output: permissions links owner group size month day time name
         foreach (var line in result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
-            var parts = line.Split('|');
-            if (parts.Length < 4) continue;
+            // Skip "total" line and . / .. entries
+            if (line.StartsWith("total ") || line.EndsWith(" .") || line.EndsWith(" .."))
+                continue;
 
-            var type = parts[0];
-            var fullPath = parts[1];
-            var size = long.TryParse(parts[2], out var s) ? s : 0;
-            var modified = double.TryParse(parts[3], out var m)
-                ? DateTimeOffset.FromUnixTimeSeconds((long)m).UtcDateTime
-                : DateTime.UtcNow;
+            // Split by whitespace, but name might have spaces so limit to 9 parts
+            var parts = line.Split(' ', 9, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 9) continue;
 
-            // Skip the root directory itself
-            if (fullPath == resolvedPath) continue;
+            var permissions = parts[0];
+            var size = long.TryParse(parts[4], out var s) ? s : 0;
+            var name = parts[8];
 
-            var relativePath = fullPath.StartsWith(workspacePath)
-                ? fullPath[(workspacePath.Length + 1)..]
-                : fullPath;
+            // Skip hidden files starting with .
+            if (name.StartsWith('.')) continue;
 
-            if (type == "d")
+            var isDirectory = permissions.StartsWith('d');
+            var relativePath = path == "." ? name : $"{path}/{name}";
+
+            if (isDirectory)
             {
                 entries.Add(new
                 {
                     type = "directory",
                     path = relativePath,
-                    name = Path.GetFileName(fullPath)
+                    name
                 });
             }
-            else if (type == "f")
+            else
             {
                 entries.Add(new
                 {
                     type = "file",
                     path = relativePath,
-                    name = Path.GetFileName(fullPath),
-                    size,
-                    modified
+                    name,
+                    size
                 });
             }
         }

@@ -59,13 +59,13 @@ public sealed class WriteFileHandler : IToolHandler
         }
 
         // Base64 encode content to safely pass through shell
+        // Base64 output is alphanumeric + /+= so no quoting needed
         var base64Content = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
 
-        // ExecuteCommandAsync wraps in sh -c, so pass the pipeline directly
-        // Note: single quotes in base64Content are impossible (base64 is alphanumeric + /+=)
+        // Use echo -n (no newline) with unquoted base64 - safe since base64 has no special chars
         var writeResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"printf '%s' '{base64Content}' | base64 -d > {resolvedPath}",
+            $"echo -n {base64Content} | base64 -d > {resolvedPath}",
             null,
             null,
             cancellationToken);
