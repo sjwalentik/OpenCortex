@@ -19,7 +19,7 @@ spec:
             - name: OpenCortex__Tools__ContainerImage
               value: "ghcr.io/sjwalentik/opencortex/agent-runtime:develop"
             - name: OpenCortex__Tools__StorageClassName
-              value: "standard"
+              value: "openebs-hostpath"
             - name: OpenCortex__Tools__PvcSize
               value: "10Gi"
             - name: OpenCortex__Tools__SessionTimeoutMinutes
