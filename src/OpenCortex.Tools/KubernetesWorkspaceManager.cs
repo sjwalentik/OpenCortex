@@ -164,13 +164,11 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
             ? command
             : $"{command} {arguments}";
 
-        // Escape for shell
-        var escapedCommand = fullCommand.Replace("'", "'\\''");
-
-        var execArgs = $"exec -n {ns} {podName} -- /bin/sh -c 'cd {workDir} && {escapedCommand}'";
+        // Build shell command - no escaping needed since we use ArgumentList
+        var shellCommand = $"cd {workDir} && {fullCommand}";
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await RunKubectlAsync(execArgs, cancellationToken);
+        var result = await RunKubectlExecAsync(ns, podName, shellCommand, cancellationToken);
         stopwatch.Stop();
 
         return new CommandResult
@@ -545,6 +543,59 @@ spec:
                 CreateNoWindow = true
             }
         };
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        try
+        {
+            process.Start();
+
+            var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+            var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
+
+            await process.WaitForExitAsync(cts.Token);
+
+            return (process.ExitCode == 0, process.ExitCode, await outputTask, await errorTask);
+        }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(); } catch { }
+            return (false, -1, null, "Command timed out");
+        }
+    }
+
+    /// <summary>
+    /// Execute a shell command inside a pod using ArgumentList to preserve argument boundaries.
+    /// </summary>
+    private static async Task<(bool Success, int ExitCode, string? Output, string? Error)> RunKubectlExecAsync(
+        string ns,
+        string podName,
+        string shellCommand,
+        CancellationToken cancellationToken,
+        int timeoutSeconds = 60)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "kubectl",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        // Use ArgumentList to preserve each argument correctly
+        process.StartInfo.ArgumentList.Add("exec");
+        process.StartInfo.ArgumentList.Add("-n");
+        process.StartInfo.ArgumentList.Add(ns);
+        process.StartInfo.ArgumentList.Add(podName);
+        process.StartInfo.ArgumentList.Add("--");
+        process.StartInfo.ArgumentList.Add("/bin/sh");
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add(shellCommand); // Entire command as single argument
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
