@@ -403,9 +403,9 @@ spec:
     {
         var envFrom = hasCredentials
             ? $@"
-        envFrom:
-          - secretRef:
-              name: {secretName}"
+      envFrom:
+        - secretRef:
+            name: {secretName}"
             : "";
 
         var imagePullSecrets = !string.IsNullOrEmpty(_options.ImagePullSecretName)
