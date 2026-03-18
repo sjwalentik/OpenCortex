@@ -52,8 +52,8 @@ public sealed class WriteFileHandler : IToolHandler
         {
             await _workspace.ExecuteCommandAsync(
                 userId,
-                "/bin/sh",
-                $"-c \"mkdir -p '{directory}'\"",
+                "mkdir",
+                $"-p {directory}",
                 null,
                 cancellationToken);
         }
@@ -61,11 +61,12 @@ public sealed class WriteFileHandler : IToolHandler
         // Base64 encode content to safely pass through shell
         var base64Content = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
 
-        // Write file using base64 decode to handle special characters
+        // ExecuteCommandAsync wraps in sh -c, so pass the pipeline directly
+        // Note: single quotes in base64Content are impossible (base64 is alphanumeric + /+=)
         var writeResult = await _workspace.ExecuteCommandAsync(
             userId,
-            "/bin/sh",
-            $"-c \"echo '{base64Content}' | base64 -d > '{resolvedPath}'\"",
+            $"printf '%s' '{base64Content}' | base64 -d > {resolvedPath}",
+            null,
             null,
             cancellationToken);
 

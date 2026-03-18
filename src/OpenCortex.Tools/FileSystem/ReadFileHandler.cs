@@ -42,10 +42,11 @@ public sealed class ReadFileHandler : IToolHandler
         var resolvedPath = _workspace.ResolvePath(userId, path);
 
         // Check if file exists and get its size
+        // ExecuteCommandAsync wraps in sh -c, so pass command directly
         var statResult = await _workspace.ExecuteCommandAsync(
             userId,
-            "/bin/sh",
-            $"-c \"stat -c '%s' '{resolvedPath}' 2>/dev/null\"",
+            $"stat -c '%s' {resolvedPath} 2>/dev/null",
+            null,
             null,
             cancellationToken);
 
@@ -63,8 +64,8 @@ public sealed class ReadFileHandler : IToolHandler
         // Read file content
         var catResult = await _workspace.ExecuteCommandAsync(
             userId,
-            "/bin/sh",
-            $"-c \"cat '{resolvedPath}'\"",
+            $"cat {resolvedPath}",
+            null,
             null,
             cancellationToken);
 

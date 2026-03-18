@@ -48,12 +48,13 @@ public sealed class ListDirectoryHandler : IToolHandler
         var depthArg = recursive ? "" : "-maxdepth 1";
 
         // Use find command to list directory contents with file info
+        // ExecuteCommandAsync wraps in sh -c, so pass the pipeline directly
         var command = $"find {resolvedPath} {depthArg} -printf '%y|%p|%s|%T@\\n' 2>/dev/null | sort";
 
         var result = await _workspace.ExecuteCommandAsync(
             userId,
-            "/bin/sh",
-            $"-c \"{command}\"",
+            command,
+            null,
             null,
             cancellationToken);
 
