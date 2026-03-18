@@ -68,9 +68,17 @@ public sealed class ToolExecutorRegistry : IToolExecutor
             stopwatch.Stop();
 
             _logger.LogInformation(
-                "Tool {ToolName} completed in {Duration}ms",
+                "Tool {ToolName} completed in {Duration}ms. Output length: {OutputLength}",
                 toolCall.Function.Name,
-                stopwatch.ElapsedMilliseconds);
+                stopwatch.ElapsedMilliseconds,
+                output?.Length ?? 0);
+
+            // Log first 500 chars of output for debugging
+            if (!string.IsNullOrEmpty(output))
+            {
+                var preview = output.Length > 500 ? output[..500] + "..." : output;
+                _logger.LogInformation("Tool {ToolName} output: {Output}", toolCall.Function.Name, preview);
+            }
 
             return ToolExecutionResult.Ok(
                 toolCall.Id,
