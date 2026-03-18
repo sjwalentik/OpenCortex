@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Text.Json;
+using OpenCortex.Tools;
 
 namespace OpenCortex.Tools.GitHub.Handlers;
 
@@ -8,6 +8,13 @@ namespace OpenCortex.Tools.GitHub.Handlers;
 /// </summary>
 public sealed class GitCheckoutHandler : IToolHandler
 {
+    private readonly IWorkspaceManager _workspace;
+
+    public GitCheckoutHandler(IWorkspaceManager workspace)
+    {
+        _workspace = workspace;
+    }
+
     public string ToolName => "git_checkout";
     public string Category => "github";
 
@@ -16,8 +23,6 @@ public sealed class GitCheckoutHandler : IToolHandler
         ToolExecutionContext context,
         CancellationToken cancellationToken = default)
     {
-        var token = context.GetCredential("github");
-
         var branch = arguments.GetProperty("branch").GetString()
             ?? throw new ArgumentException("branch is required");
 
@@ -25,75 +30,78 @@ public sealed class GitCheckoutHandler : IToolHandler
             ? dirElement.GetString()
             : null;
 
-        // Option to create branch if it doesn't exist
         var createIfNotExists = arguments.TryGetProperty("create", out var createElement)
             && createElement.GetBoolean();
 
-        // Option to specify source branch when creating
         var fromBranch = arguments.TryGetProperty("from_branch", out var fromElement)
             ? fromElement.GetString()
             : null;
 
-        if (string.IsNullOrEmpty(context.WorkspacePath))
-        {
-            throw new InvalidOperationException("Workspace path not configured");
-        }
+        var workspacePath = await _workspace.GetWorkspacePathAsync(context.UserId, cancellationToken);
 
         // Determine the repo directory
         string repoPath;
         if (!string.IsNullOrEmpty(directory))
         {
-            repoPath = Path.IsPathRooted(directory)
-                ? directory
-                : Path.Combine(context.WorkspacePath, directory);
+            repoPath = directory.StartsWith('/') ? directory : $"{workspacePath}/{directory}";
         }
         else
         {
-            // Try to find a git repo in the workspace
-            var gitDirs = Directory.GetDirectories(context.WorkspacePath)
-                .Where(d => Directory.Exists(Path.Combine(d, ".git")))
+            // Find git repos in workspace
+            var findResult = await _workspace.ExecuteCommandAsync(
+                context.UserId,
+                $"find {workspacePath} -maxdepth 2 -type d -name .git 2>/dev/null | head -5",
+                null, null, cancellationToken);
+
+            var gitDirs = findResult.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => Path.GetDirectoryName(p)!)
                 .ToList();
 
             if (gitDirs.Count == 0)
             {
-                throw new InvalidOperationException(
-                    "No git repository found in workspace. Clone a repository first.");
+                return JsonSerializer.Serialize(new
+                {
+                    success = false,
+                    error = "No git repository found in workspace. Clone a repository first."
+                });
             }
 
             if (gitDirs.Count > 1)
             {
-                throw new InvalidOperationException(
-                    $"Multiple repositories found. Specify 'directory': {string.Join(", ", gitDirs.Select(Path.GetFileName))}");
+                return JsonSerializer.Serialize(new
+                {
+                    success = false,
+                    error = $"Multiple repositories found. Specify 'directory': {string.Join(", ", gitDirs.Select(Path.GetFileName))}"
+                });
             }
 
             repoPath = gitDirs[0];
         }
 
-        if (!Directory.Exists(Path.Combine(repoPath, ".git")))
-        {
-            throw new InvalidOperationException($"'{repoPath}' is not a git repository");
-        }
+        // Fetch latest
+        await _workspace.ExecuteCommandAsync(
+            context.UserId, $"cd {repoPath} && git fetch --all", null, null, cancellationToken);
 
-        await SanitizeOriginUrlAsync(repoPath, token, cancellationToken);
+        // Check if branch exists
+        var branchCheckResult = await _workspace.ExecuteCommandAsync(
+            context.UserId,
+            $"cd {repoPath} && git rev-parse --verify {branch} 2>/dev/null && echo local || " +
+            $"git rev-parse --verify origin/{branch} 2>/dev/null && echo remote || echo none",
+            null, null, cancellationToken);
 
-        // Fetch latest from remote first
-        await RunGitCommandAsync(repoPath, "fetch --all", token, cancellationToken);
-
-        // Check if branch exists locally or remotely
-        var branchExistsResult = await RunGitCommandAsync(
-            repoPath, $"rev-parse --verify {branch}", token, cancellationToken);
-        var remoteBranchExistsResult = await RunGitCommandAsync(
-            repoPath, $"rev-parse --verify origin/{branch}", token, cancellationToken);
-
-        var branchExists = branchExistsResult.Success || remoteBranchExistsResult.Success;
+        var branchStatus = branchCheckResult.StandardOutput.Trim().Split('\n').Last();
+        var branchExists = branchStatus != "none";
 
         if (!branchExists && !createIfNotExists)
         {
-            // List available branches for helpful error
-            var listResult = await RunGitCommandAsync(repoPath, "branch -a", token, cancellationToken);
-            throw new InvalidOperationException(
-                $"Branch '{branch}' not found. Use 'create: true' to create it. " +
-                $"Available branches:\n{listResult.Output}");
+            var listResult = await _workspace.ExecuteCommandAsync(
+                context.UserId, $"cd {repoPath} && git branch -a", null, null, cancellationToken);
+
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Branch '{branch}' not found. Use 'create: true' to create it. Available branches:\n{listResult.StandardOutput}"
+            });
         }
 
         string checkoutCommand;
@@ -101,40 +109,40 @@ public sealed class GitCheckoutHandler : IToolHandler
 
         if (!branchExists && createIfNotExists)
         {
-            // Create and checkout new branch
             if (!string.IsNullOrEmpty(fromBranch))
             {
-                // First checkout the source branch
-                await RunGitCommandAsync(repoPath, $"checkout {fromBranch}", token, cancellationToken);
-                await RunGitCommandAsync(repoPath, "pull", token, cancellationToken);
+                await _workspace.ExecuteCommandAsync(
+                    context.UserId, $"cd {repoPath} && git checkout {fromBranch} && git pull",
+                    null, null, cancellationToken);
             }
-
             checkoutCommand = $"checkout -b {branch}";
             action = "created";
         }
-        else if (remoteBranchExistsResult.Success && !branchExistsResult.Success)
+        else if (branchStatus == "remote")
         {
-            // Track remote branch
             checkoutCommand = $"checkout -t origin/{branch}";
             action = "tracked";
         }
         else
         {
-            // Checkout existing branch
             checkoutCommand = $"checkout {branch}";
             action = "switched";
         }
 
-        var result = await RunGitCommandAsync(repoPath, checkoutCommand, token, cancellationToken);
+        var result = await _workspace.ExecuteCommandAsync(
+            context.UserId, $"cd {repoPath} && git {checkoutCommand}", null, null, cancellationToken);
 
-        if (!result.Success)
+        if (result.ExitCode != 0)
         {
-            throw new InvalidOperationException($"Git checkout failed: {result.Error}");
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Git checkout failed: {result.StandardError}"
+            });
         }
 
-        // Get current branch to confirm
-        var currentBranchResult = await RunGitCommandAsync(
-            repoPath, "branch --show-current", token, cancellationToken);
+        var currentBranchResult = await _workspace.ExecuteCommandAsync(
+            context.UserId, $"cd {repoPath} && git branch --show-current", null, null, cancellationToken);
 
         return JsonSerializer.Serialize(new
         {
@@ -142,7 +150,7 @@ public sealed class GitCheckoutHandler : IToolHandler
             action,
             branch,
             directory = repoPath,
-            currentBranch = currentBranchResult.Output?.Trim(),
+            currentBranch = currentBranchResult.StandardOutput.Trim(),
             message = action switch
             {
                 "created" => $"Created and checked out new branch '{branch}'" +
@@ -151,75 +159,5 @@ public sealed class GitCheckoutHandler : IToolHandler
                 _ => $"Switched to branch '{branch}'"
             }
         });
-    }
-
-    private static async Task<(bool Success, string? Output, string? Error)> RunGitCommandAsync(
-        string workingDirectory,
-        string arguments,
-        string? token,
-        CancellationToken cancellationToken)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments = arguments,
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        GitHubGitAuth.Apply(process.StartInfo, token);
-        process.Start();
-
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-        await process.WaitForExitAsync(cancellationToken);
-
-        var output = await outputTask;
-        var error = await errorTask;
-
-        return (process.ExitCode == 0, output, error);
-    }
-
-    private static async Task SanitizeOriginUrlAsync(
-        string repoPath,
-        string? token,
-        CancellationToken cancellationToken)
-    {
-        var originUrlResult = await RunGitCommandAsync(
-            repoPath,
-            "remote get-url origin",
-            token,
-            cancellationToken);
-
-        if (!originUrlResult.Success || string.IsNullOrWhiteSpace(originUrlResult.Output))
-        {
-            return;
-        }
-
-        var originUrl = originUrlResult.Output.Trim();
-        var sanitizedUrl = GitHubGitAuth.SanitizeRemoteUrl(originUrl);
-
-        if (string.Equals(originUrl, sanitizedUrl, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        var setUrlResult = await RunGitCommandAsync(
-            repoPath,
-            $"remote set-url origin {sanitizedUrl}",
-            token,
-            cancellationToken);
-
-        if (!setUrlResult.Success)
-        {
-            throw new InvalidOperationException($"Failed to sanitize repository remote: {setUrlResult.Error}");
-        }
     }
 }

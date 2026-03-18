@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Text.Json;
+using OpenCortex.Tools;
 
 namespace OpenCortex.Tools.GitHub.Handlers;
 
@@ -8,6 +8,13 @@ namespace OpenCortex.Tools.GitHub.Handlers;
 /// </summary>
 public sealed class GitCloneHandler : IToolHandler
 {
+    private readonly IWorkspaceManager _workspace;
+
+    public GitCloneHandler(IWorkspaceManager workspace)
+    {
+        _workspace = workspace;
+    }
+
     public string ToolName => "git_clone";
     public string Category => "github";
 
@@ -31,13 +38,7 @@ public sealed class GitCloneHandler : IToolHandler
             ? branchElement.GetString()
             : null;
 
-        // Ensure workspace exists
-        if (string.IsNullOrEmpty(context.WorkspacePath))
-        {
-            throw new InvalidOperationException("Workspace path not configured");
-        }
-
-        Directory.CreateDirectory(context.WorkspacePath);
+        var workspacePath = await _workspace.GetWorkspacePathAsync(context.UserId, cancellationToken);
 
         // Determine target directory
         var targetDir = directory;
@@ -48,20 +49,30 @@ public sealed class GitCloneHandler : IToolHandler
             targetDir = parts[^1].Replace(".git", "");
         }
 
-        var fullTargetPath = Path.Combine(context.WorkspacePath, targetDir);
+        var fullTargetPath = $"{workspacePath}/{targetDir}";
 
-        // Check if already cloned
-        if (Directory.Exists(fullTargetPath))
+        // Check if directory already exists
+        var checkResult = await _workspace.ExecuteCommandAsync(
+            context.UserId,
+            $"test -d {fullTargetPath} && echo exists || echo notexists",
+            null, null, cancellationToken);
+
+        if (checkResult.StandardOutput.Trim() == "exists")
         {
-            // If it's a git repo, just fetch and checkout
-            if (Directory.Exists(Path.Combine(fullTargetPath, ".git")))
+            // Check if it's a git repo
+            var gitCheckResult = await _workspace.ExecuteCommandAsync(
+                context.UserId,
+                $"test -d {fullTargetPath}/.git && echo git || echo notgit",
+                null, null, cancellationToken);
+
+            if (gitCheckResult.StandardOutput.Trim() == "git")
             {
                 if (!string.IsNullOrEmpty(branch))
                 {
-                    var fetchResult = await RunGitCommandAsync(
-                        fullTargetPath, $"fetch origin {branch}", token, cancellationToken);
-                    var checkoutResult = await RunGitCommandAsync(
-                        fullTargetPath, $"checkout {branch}", token, cancellationToken);
+                    await _workspace.ExecuteCommandAsync(
+                        context.UserId,
+                        $"cd {fullTargetPath} && git fetch origin {branch} && git checkout {branch}",
+                        null, null, cancellationToken);
 
                     return JsonSerializer.Serialize(new
                     {
@@ -82,23 +93,38 @@ public sealed class GitCloneHandler : IToolHandler
                 });
             }
 
-            throw new InvalidOperationException(
-                $"Directory '{targetDir}' already exists and is not a git repository");
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Directory '{targetDir}' already exists and is not a git repository"
+            });
+        }
+
+        // Build authenticated clone URL if token provided
+        var cloneUrl = repoUrl;
+        if (!string.IsNullOrEmpty(token) && repoUrl.StartsWith("https://github.com/"))
+        {
+            cloneUrl = repoUrl.Replace("https://github.com/", $"https://{token}@github.com/");
         }
 
         // Build clone command
-        var cloneArgs = $"clone {repoUrl}";
+        var cloneCmd = $"git clone {cloneUrl}";
         if (!string.IsNullOrEmpty(branch))
         {
-            cloneArgs += $" --branch {branch}";
+            cloneCmd += $" --branch {branch}";
         }
-        cloneArgs += $" {targetDir}";
+        cloneCmd += $" {fullTargetPath}";
 
-        var result = await RunGitCommandAsync(context.WorkspacePath, cloneArgs, token, cancellationToken);
+        var result = await _workspace.ExecuteCommandAsync(
+            context.UserId, cloneCmd, null, null, cancellationToken);
 
-        if (!result.Success)
+        if (result.ExitCode != 0)
         {
-            throw new InvalidOperationException($"Git clone failed: {result.Error}");
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Git clone failed: {result.StandardError}"
+            });
         }
 
         return JsonSerializer.Serialize(new
@@ -110,39 +136,5 @@ public sealed class GitCloneHandler : IToolHandler
             message = $"Repository cloned to '{targetDir}'" +
                       (branch != null ? $" on branch '{branch}'" : "")
         });
-    }
-
-    private static async Task<(bool Success, string? Output, string? Error)> RunGitCommandAsync(
-        string workingDirectory,
-        string arguments,
-        string? token,
-        CancellationToken cancellationToken)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments = arguments,
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        GitHubGitAuth.Apply(process.StartInfo, token);
-        process.Start();
-
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-        await process.WaitForExitAsync(cancellationToken);
-
-        var output = await outputTask;
-        var error = await errorTask;
-
-        return (process.ExitCode == 0, output, error);
     }
 }
