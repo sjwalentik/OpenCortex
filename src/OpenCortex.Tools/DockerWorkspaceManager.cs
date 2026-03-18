@@ -175,11 +175,9 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             ? command
             : $"{command} {arguments}";
         var shellScript = $"cd -- {ShellEscaping.SingleQuote(workDir)} && {fullCommand}";
-        var execArgs =
-            $"exec {containerName} /bin/sh -c {ShellEscaping.SingleQuote(shellScript)}";
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await RunDockerCommandAsync(execArgs, cancellationToken);
+        var result = await RunDockerExecAsync(containerName, shellScript, cancellationToken);
         stopwatch.Stop();
 
         return new CommandResult
@@ -386,6 +384,59 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
                 CreateNoWindow = true
             }
         };
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        try
+        {
+            process.Start();
+
+            var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+            var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
+
+            await process.WaitForExitAsync(cts.Token);
+
+            var output = await outputTask;
+            var error = await errorTask;
+
+            return (process.ExitCode == 0, process.ExitCode, output, error);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                process.Kill();
+            }
+            catch { }
+
+            return (false, -1, null, "Command timed out");
+        }
+    }
+
+    private static async Task<(bool Success, int ExitCode, string? Output, string? Error)> RunDockerExecAsync(
+        string containerName,
+        string shellCommand,
+        CancellationToken cancellationToken,
+        int timeoutSeconds = 60)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        process.StartInfo.ArgumentList.Add("exec");
+        process.StartInfo.ArgumentList.Add(containerName);
+        process.StartInfo.ArgumentList.Add("/bin/sh");
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add(shellCommand);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));

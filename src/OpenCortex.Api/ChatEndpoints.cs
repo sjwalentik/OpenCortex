@@ -1068,10 +1068,14 @@ public static class ChatEndpoints
             t.ToolName,
             t.Success,
             t.Output,
-            error = ErrorMessages.ForExternalFailure("Tool execution failed.", t.Error),
+            error = string.IsNullOrWhiteSpace(t.Error)
+                ? null
+                : ErrorMessages.ForExternalFailure("Tool execution failed.", t.Error),
             durationMs = (int)t.Duration.TotalMilliseconds
         }),
-        error = ErrorMessages.ForExternalFailure("Request could not be completed.", result.Error),
+        error = string.IsNullOrWhiteSpace(result.Error)
+            ? null
+            : ErrorMessages.ForExternalFailure("Request could not be completed.", result.Error),
         telemetry = result.Telemetry is not null ? new
         {
             traceId = result.Telemetry.TraceId,
@@ -1120,7 +1124,9 @@ public static class ChatEndpoints
                 startedAt = t.StartedAt,
                 durationMs = (int)t.Duration.TotalMilliseconds,
                 success = t.Success,
-                error = ErrorMessages.ForExternalFailure("Tool execution failed.", t.Error),
+                error = string.IsNullOrWhiteSpace(t.Error)
+                    ? null
+                    : ErrorMessages.ForExternalFailure("Tool execution failed.", t.Error),
                 inputSize = t.InputSize,
                 outputSize = t.OutputSize,
                 category = t.Category
@@ -1254,9 +1260,11 @@ public static class ChatEndpoints
                         break;
 
                     case AgenticToolResultEvent toolResultEvent:
-                        var safeToolError = ErrorMessages.ForExternalFailure(
-                            "Tool execution failed.",
-                            toolResultEvent.Result.Error);
+                        var safeToolError = string.IsNullOrWhiteSpace(toolResultEvent.Result.Error)
+                            ? null
+                            : ErrorMessages.ForExternalFailure(
+                                "Tool execution failed.",
+                                toolResultEvent.Result.Error);
                         await WriteChatStreamEventAsync(response, new
                         {
                             eventType = "tool_result",

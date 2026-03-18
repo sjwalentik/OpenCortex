@@ -2,6 +2,16 @@ namespace OpenCortex.Tools.FileSystem;
 
 internal static class SensitivePathPolicy
 {
+    private static readonly string[] AllowedEnvTemplateFileNames =
+    {
+        ".env.example",
+        ".env.sample",
+        ".env.template",
+        ".env.local.example",
+        ".env.development.example",
+        ".env.production.example"
+    };
+
     private static readonly string[] SensitiveFileNames =
     {
         ".env",
@@ -64,6 +74,11 @@ internal static class SensitivePathPolicy
         if (SensitiveFileNames.Contains(fileName, StringComparer.Ordinal))
         {
             return true;
+        }
+
+        if (AllowedEnvTemplateFileNames.Contains(fileName, StringComparer.Ordinal))
+        {
+            return false;
         }
 
         if (fileName.StartsWith(".env.", StringComparison.Ordinal) ||
