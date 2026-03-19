@@ -32,15 +32,8 @@ var connectionFactory = new PostgresConnectionFactory(new PostgresConnectionSett
 
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    try
-    {
-        validationErrors.AddRange(await new PostgresEmbeddingSchemaValidator(connectionFactory)
-            .ValidateAsync(options.Embeddings.Dimensions));
-    }
-    catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException or InvalidOperationException)
-    {
-        validationErrors.Add($"Postgres schema validation failed: {ex.Message}");
-    }
+    validationErrors.AddRange(await PostgresStartupSchemaValidator
+        .ValidateAsync(connectionFactory, options.Embeddings.Dimensions));
 }
 
 if (validationErrors.Count > 0)
