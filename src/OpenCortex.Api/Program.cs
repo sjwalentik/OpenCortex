@@ -1,4 +1,5 @@
 using System.Threading.RateLimiting;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
@@ -41,15 +42,8 @@ var connectionFactory = new PostgresConnectionFactory(new PostgresConnectionSett
 });
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    try
-    {
-        validationErrors.AddRange(await new PostgresEmbeddingSchemaValidator(connectionFactory)
-            .ValidateAsync(options.Embeddings.Dimensions));
-    }
-    catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException or InvalidOperationException)
-    {
-        validationErrors.Add($"Postgres schema validation failed: {ex.Message}");
-    }
+    validationErrors.AddRange(await PostgresStartupSchemaValidator
+        .ValidateAsync(connectionFactory, options.Embeddings.Dimensions));
 }
 
 if (validationErrors.Count > 0)
@@ -547,72 +541,156 @@ static string GetRateLimitPartitionKey(HttpContext context)
     return context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
 }
 
+static string? GetAppliedRateLimitPolicyName(HttpContext context)
+    => context.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName;
+
+static string GetRateLimitRoute(HttpContext context)
+    => context.GetEndpoint() is RouteEndpoint routeEndpoint
+        ? routeEndpoint.RoutePattern.RawText ?? context.Request.Path.Value ?? "(unknown)"
+        : context.Request.Path.Value ?? "(unknown)";
+
 builder.Services.AddRateLimiter(rateLimiter =>
 {
+    var fixedWindowPolicies = new Dictionary<string, FixedWindowRateLimitDescriptor>(StringComparer.OrdinalIgnoreCase);
+
+    void AddFixedWindowPolicy(
+        string policyName,
+        int permitLimit,
+        TimeSpan window,
+        Func<HttpContext, string> resolvePartitionKey)
+    {
+        fixedWindowPolicies[policyName] = new FixedWindowRateLimitDescriptor(
+            policyName,
+            permitLimit,
+            window,
+            resolvePartitionKey);
+
+        rateLimiter.AddPolicy(policyName, context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: resolvePartitionKey(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = permitLimit,
+                    Window = window,
+                }));
+    }
+
     rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    rateLimiter.OnRejected = async (context, cancellationToken) =>
+    {
+        var httpContext = context.HttpContext;
+        var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger("OpenCortex.Api.RateLimiting");
+        var policyName = GetAppliedRateLimitPolicyName(httpContext) ?? "unknown";
+        fixedWindowPolicies.TryGetValue(policyName, out var descriptor);
+
+        var retryAfterSeconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+            ? Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))
+            : (int?)null;
+        var route = GetRateLimitRoute(httpContext);
+        var partitionKey = descriptor?.ResolvePartitionKey(httpContext) ?? "unknown";
+
+        if (descriptor is not null)
+        {
+            httpContext.Response.Headers["X-RateLimit-Policy"] = descriptor.PolicyName;
+            httpContext.Response.Headers["X-RateLimit-Limit"] = descriptor.PermitLimit.ToString();
+            httpContext.Response.Headers["X-RateLimit-Remaining"] = "0";
+            httpContext.Response.Headers["X-RateLimit-Window-Seconds"] = ((int)descriptor.Window.TotalSeconds).ToString();
+        }
+
+        if (retryAfterSeconds.HasValue)
+        {
+            httpContext.Response.Headers.RetryAfter = retryAfterSeconds.Value.ToString();
+            httpContext.Response.Headers["X-RateLimit-Retry-After-Seconds"] = retryAfterSeconds.Value.ToString();
+        }
+
+        logger.LogWarning(
+            "Rate limit rejected request. Policy={PolicyName} Route={Route} PartitionKey={PartitionKey} Method={Method} Path={Path} Limit={PermitLimit} WindowSeconds={WindowSeconds} RetryAfterSeconds={RetryAfterSeconds}",
+            policyName,
+            route,
+            partitionKey,
+            httpContext.Request.Method,
+            httpContext.Request.Path.Value ?? "(unknown)",
+            descriptor?.PermitLimit,
+            descriptor is null ? null : (int)descriptor.Window.TotalSeconds,
+            retryAfterSeconds);
+
+        httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        httpContext.Response.ContentType = "application/problem+json";
+
+        await httpContext.Response.WriteAsync(
+            JsonSerializer.Serialize(new
+            {
+                type = "https://tools.ietf.org/html/rfc9110#section-15.5.9",
+                title = "Request rate limit exceeded.",
+                status = StatusCodes.Status429TooManyRequests,
+                detail = descriptor is null
+                    ? "The request exceeded the configured rate limit."
+                    : $"The request exceeded rate-limit policy '{descriptor.PolicyName}' ({descriptor.PermitLimit} requests per {(int)descriptor.Window.TotalSeconds} seconds).",
+                policy = descriptor?.PolicyName ?? policyName,
+                route,
+                limit = descriptor?.PermitLimit,
+                remaining = 0,
+                windowSeconds = descriptor is null ? (int?)null : (int)descriptor.Window.TotalSeconds,
+                retryAfterSeconds,
+                traceId = httpContext.TraceIdentifier,
+            }),
+            cancellationToken);
+    };
 
     // Strict limit for token creation (5 per minute per user)
-    rateLimiter.AddPolicy("token-creation", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: GetRateLimitPartitionKey(context),
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 5,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    AddFixedWindowPolicy(
+        "token-creation",
+        5,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
 
     // Tenant workspace flows fan out multiple reads after each mutation, so keep this comfortably above
     // normal portal bursts while still providing abuse protection.
-    rateLimiter.AddPolicy("tenant-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: GetRateLimitPartitionKey(context),
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 300,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    AddFixedWindowPolicy(
+        "tenant-api",
+        300,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
 
     // Managed-document authoring flows refresh list/detail/version state aggressively after each mutation.
     // Keep document work isolated from the general tenant bucket so bulk edits/deletes do not trip unrelated UI traffic.
-    rateLimiter.AddPolicy("documents-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: GetRateLimitPartitionKey(context),
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 600,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    AddFixedWindowPolicy(
+        "documents-api",
+        600,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
 
     // Conversation archive/load flows are chat-adjacent workspace actions and should not contend with
     // generic tenant reads like billing, brains, or tokens.
-    rateLimiter.AddPolicy("conversations-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: GetRateLimitPartitionKey(context),
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 300,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    AddFixedWindowPolicy(
+        "conversations-api",
+        300,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
 
     // Chat gets its own bucket so portal page activity does not starve completions.
-    rateLimiter.AddPolicy("chat-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: GetRateLimitPartitionKey(context),
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 60,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    AddFixedWindowPolicy(
+        "chat-api",
+        60,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
 
     // Webhook limit (50 per minute - defensive against replay)
-    rateLimiter.AddPolicy("webhooks", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 50,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    AddFixedWindowPolicy(
+        "webhooks",
+        50,
+        TimeSpan.FromMinutes(1),
+        context => context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
+    if (builder.Environment.IsEnvironment("Testing"))
+    {
+        AddFixedWindowPolicy(
+            "testing-low-limit",
+            1,
+            TimeSpan.FromMinutes(1),
+            _ => "integration-test");
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -777,6 +855,12 @@ app.MapGet("/health", () => Results.Ok(new
     service = "OpenCortex.Api",
     validationErrors,
 }));
+
+if (app.Environment.IsEnvironment("Testing"))
+{
+    app.MapGet("/_testing/rate-limit", () => Results.Ok(new { ok = true }))
+        .RequireRateLimiting("testing-low-limit");
+}
 
 app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken cancellationToken) =>
 {

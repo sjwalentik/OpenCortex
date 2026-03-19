@@ -30,15 +30,8 @@ public class Worker : BackgroundService
         if (!string.Equals(_configuration["ASPNETCORE_ENVIRONMENT"], "Testing", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(_configuration["DOTNET_ENVIRONMENT"], "Testing", StringComparison.OrdinalIgnoreCase))
         {
-            try
-            {
-                validationErrors.AddRange(await new PostgresEmbeddingSchemaValidator(connectionFactory)
-                    .ValidateAsync(options.Embeddings.Dimensions, stoppingToken));
-            }
-            catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException or InvalidOperationException)
-            {
-                validationErrors.Add($"Postgres schema validation failed: {ex.Message}");
-            }
+            validationErrors.AddRange(await PostgresStartupSchemaValidator
+                .ValidateAsync(connectionFactory, options.Embeddings.Dimensions, stoppingToken));
         }
 
         if (validationErrors.Count > 0)

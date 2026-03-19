@@ -172,6 +172,38 @@ public sealed class TenantApiTests : IClassFixture<TenantApiTests.TenantApiWebAp
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Fact]
+    public async Task RateLimitedEndpoint_ReturnsPolicyHeadersAndProblemDetails()
+    {
+        var firstResponse = await _client.GetAsync("/_testing/rate-limit");
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+
+        var secondResponse = await _client.GetAsync("/_testing/rate-limit");
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, secondResponse.StatusCode);
+        Assert.Equal("testing-low-limit", secondResponse.Headers.GetValues("X-RateLimit-Policy").Single());
+        Assert.Equal("1", secondResponse.Headers.GetValues("X-RateLimit-Limit").Single());
+        Assert.Equal("0", secondResponse.Headers.GetValues("X-RateLimit-Remaining").Single());
+        Assert.Equal("60", secondResponse.Headers.GetValues("X-RateLimit-Window-Seconds").Single());
+
+        Assert.True(secondResponse.Headers.TryGetValues("X-RateLimit-Retry-After-Seconds", out var retryAfterValues));
+        Assert.True(int.TryParse(retryAfterValues.Single(), out var retryAfterSeconds));
+        Assert.True(retryAfterSeconds > 0);
+
+        var content = await secondResponse.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(content);
+
+        Assert.Equal("Request rate limit exceeded.", json.RootElement.GetProperty("title").GetString());
+        Assert.Equal(429, json.RootElement.GetProperty("status").GetInt32());
+        Assert.Equal("testing-low-limit", json.RootElement.GetProperty("policy").GetString());
+        Assert.Equal("/_testing/rate-limit", json.RootElement.GetProperty("route").GetString());
+        Assert.Equal(1, json.RootElement.GetProperty("limit").GetInt32());
+        Assert.Equal(0, json.RootElement.GetProperty("remaining").GetInt32());
+        Assert.Equal(60, json.RootElement.GetProperty("windowSeconds").GetInt32());
+        Assert.True(json.RootElement.GetProperty("retryAfterSeconds").GetInt32() > 0);
+        Assert.False(string.IsNullOrWhiteSpace(json.RootElement.GetProperty("traceId").GetString()));
+    }
+
     // NOTE: Query_BrainNotInWorkspace requires a database connection
     // because the API captures brainCatalogStore directly at startup rather than via DI.
 
