@@ -35,4 +35,27 @@ internal static class GitHubGitAuth
             Password = string.Empty
         }.Uri.ToString();
     }
+
+    public static string BuildShellCommand(string? token, params string[] gitArgs)
+    {
+        var commandParts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            var basicAuth = Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{token}"));
+            commandParts.Add("GIT_CONFIG_COUNT=1");
+            commandParts.Add($"GIT_CONFIG_KEY_0={SingleQuote($"http.https://{GitHubHost}/.extraheader")}");
+            commandParts.Add($"GIT_CONFIG_VALUE_0={SingleQuote($"AUTHORIZATION: basic {basicAuth}")}");
+        }
+
+        commandParts.Add("git");
+        commandParts.AddRange(gitArgs.Select(SingleQuote));
+
+        return string.Join(" ", commandParts);
+    }
+
+    public static string SingleQuote(string value)
+    {
+        return $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
+    }
 }
