@@ -82,8 +82,7 @@ internal static class SensitivePathPolicy
             return false;
         }
 
-        if (fileName.StartsWith(".env.", StringComparison.Ordinal) ||
-            fileName.StartsWith("secrets.", StringComparison.Ordinal))
+        if (fileName.StartsWith(".env.", StringComparison.Ordinal))
         {
             return true;
         }

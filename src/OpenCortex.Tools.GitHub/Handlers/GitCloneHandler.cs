@@ -63,6 +63,12 @@ public sealed class GitCloneHandler : IToolHandler
             throw new InvalidOperationException("Workspace path not configured");
         }
 
+        if (!string.IsNullOrEmpty(directory) && Path.IsPathRooted(directory))
+        {
+            throw new InvalidOperationException(
+                "directory must be relative to the workspace in local mode");
+        }
+
         Directory.CreateDirectory(context.WorkspacePath);
 
         var fullTargetPath = Path.Combine(context.WorkspacePath, targetDir);

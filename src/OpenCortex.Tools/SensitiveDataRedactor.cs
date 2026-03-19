@@ -17,7 +17,10 @@ internal static partial class SensitiveDataRedactor
 
         if (credentials is not null)
         {
-            foreach (var secret in credentials.Values.Where(v => !string.IsNullOrWhiteSpace(v)).Distinct())
+            foreach (var secret in credentials.Values
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Distinct()
+                .OrderByDescending(v => v.Length))
             {
                 redacted = redacted.Replace(secret, "***", StringComparison.Ordinal);
             }
