@@ -22,7 +22,6 @@ internal static class SensitivePathPolicy
         ".npmrc",
         ".pypirc",
         ".git-credentials",
-        ".terraform.lock.hcl",
         "credentials",
         "secrets.yaml",
         "secrets.yml",
