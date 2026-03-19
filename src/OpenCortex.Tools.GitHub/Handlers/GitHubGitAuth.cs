@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using OpenCortex.Tools;
 
 namespace OpenCortex.Tools.GitHub.Handlers;
 
@@ -34,5 +35,23 @@ internal static class GitHubGitAuth
             UserName = string.Empty,
             Password = string.Empty
         }.Uri.ToString();
+    }
+
+    public static string BuildShellCommand(string? token, params string[] gitArgs)
+    {
+        var commandParts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            var basicAuth = Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{token}"));
+            commandParts.Add("GIT_CONFIG_COUNT=1");
+            commandParts.Add($"GIT_CONFIG_KEY_0={ShellEscaping.SingleQuote($"http.https://{GitHubHost}/.extraheader")}");
+            commandParts.Add($"GIT_CONFIG_VALUE_0={ShellEscaping.SingleQuote($"AUTHORIZATION: basic {basicAuth}")}");
+        }
+
+        commandParts.Add("git");
+        commandParts.AddRange(gitArgs.Select(ShellEscaping.SingleQuote));
+
+        return string.Join(" ", commandParts);
     }
 }

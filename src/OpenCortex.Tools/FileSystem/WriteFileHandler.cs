@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 
+using OpenCortex.Tools;
+
 namespace OpenCortex.Tools.FileSystem;
 
 /// <summary>
@@ -29,10 +31,19 @@ public sealed class WriteFileHandler : IToolHandler
         var content = arguments.GetProperty("content").GetString()
             ?? throw new ArgumentException("content is required");
 
+        if (SensitivePathPolicy.IsSensitive(path))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Access denied for sensitive path: {path}"
+            });
+        }
+
         // Use remote execution for container-based workspaces
         if (_workspace.SupportsContainerIsolation)
         {
-            return await ExecuteRemoteAsync(context.UserId, path, content, cancellationToken);
+            return await ExecuteRemoteAsync(context.UserId, path, content, context.Credentials, cancellationToken);
         }
 
         return await ExecuteLocalAsync(context.UserId, path, content, cancellationToken);
@@ -42,18 +53,31 @@ public sealed class WriteFileHandler : IToolHandler
         Guid userId,
         string path,
         string content,
+        IReadOnlyDictionary<string, string>? credentials,
         CancellationToken cancellationToken)
     {
         var resolvedPath = _workspace.ResolvePath(userId, path);
+
+        if (SensitivePathPolicy.IsSensitive(resolvedPath))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Access denied for sensitive path: {path}"
+            });
+        }
+
         var directory = Path.GetDirectoryName(resolvedPath)?.Replace('\\', '/');
+        var quotedPath = ShellEscaping.SingleQuote(resolvedPath);
 
         // Ensure parent directory exists
         if (!string.IsNullOrEmpty(directory))
         {
+            var quotedDirectory = ShellEscaping.SingleQuote(directory);
             await _workspace.ExecuteCommandAsync(
                 userId,
-                "mkdir",
-                $"-p {directory}",
+                $"mkdir -p -- {quotedDirectory}",
+                null,
                 null,
                 cancellationToken);
         }
@@ -61,20 +85,22 @@ public sealed class WriteFileHandler : IToolHandler
         // Base64 encode content to safely pass through shell
         var base64Content = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
 
-        // Use echo with base64 decode to write file
+        // Use printf and tee to avoid shell interpretation of the file path.
         var writeResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"echo -n {base64Content} | base64 -d > {resolvedPath}",
+            $"printf '%s' '{base64Content}' | base64 -d | tee -- {quotedPath} > /dev/null",
             null,
             null,
             cancellationToken);
 
         if (writeResult.ExitCode != 0)
         {
+            var safeError = SensitiveDataRedactor.Redact(writeResult.StandardError, credentials)
+                ?? "Command failed.";
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = $"Failed to write file: {writeResult.StandardError}"
+                error = $"Failed to write file: {safeError}"
             });
         }
 
@@ -93,6 +119,15 @@ public sealed class WriteFileHandler : IToolHandler
         CancellationToken cancellationToken)
     {
         var resolvedPath = _workspace.ResolvePath(userId, path);
+
+        if (SensitivePathPolicy.IsSensitive(resolvedPath))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Access denied for sensitive path: {path}"
+            });
+        }
 
         // Ensure parent directory exists
         var directory = Path.GetDirectoryName(resolvedPath);

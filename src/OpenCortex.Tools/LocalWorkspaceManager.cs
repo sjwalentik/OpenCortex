@@ -223,12 +223,13 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
         }
         catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Local workspace command execution failed for user {UserId}", userId);
             stopwatch.Stop();
             return new CommandResult
             {
                 ExitCode = -1,
                 StandardOutput = string.Empty,
-                StandardError = ex.Message,
+                StandardError = "Command execution failed.",
                 Duration = stopwatch.Elapsed
             };
         }

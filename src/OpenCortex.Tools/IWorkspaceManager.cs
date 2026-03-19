@@ -53,7 +53,10 @@ public interface IWorkspaceManager
     /// For container managers, creates and starts the container if needed.
     /// </summary>
     /// <param name="userId">User ID.</param>
-    /// <param name="credentials">Optional credentials to inject (e.g., GitHub PAT).</param>
+    /// <param name="credentials">
+    /// Optional request-scoped credentials associated with the workspace session.
+    /// Implementations may use these during startup, but should avoid persisting them.
+    /// </param>
     /// <returns>Workspace status information.</returns>
     Task<WorkspaceStatus> EnsureRunningAsync(
         Guid userId,

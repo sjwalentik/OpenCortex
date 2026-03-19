@@ -1,5 +1,5 @@
+using System.Diagnostics;
 using System.Text.Json;
-using OpenCortex.Tools;
 
 namespace OpenCortex.Tools.GitHub.Handlers;
 
@@ -38,8 +38,6 @@ public sealed class GitCloneHandler : IToolHandler
             ? branchElement.GetString()
             : null;
 
-        var workspacePath = await _workspace.GetWorkspacePathAsync(context.UserId, cancellationToken);
-
         // Determine target directory
         var targetDir = directory;
         if (string.IsNullOrEmpty(targetDir))
@@ -49,30 +47,54 @@ public sealed class GitCloneHandler : IToolHandler
             targetDir = parts[^1].Replace(".git", "");
         }
 
-        var fullTargetPath = $"{workspacePath}/{targetDir}";
-
-        // Check if directory already exists
-        var checkResult = await _workspace.ExecuteCommandAsync(
-            context.UserId,
-            $"test -d {fullTargetPath} && echo exists || echo notexists",
-            null, null, cancellationToken);
-
-        if (checkResult.StandardOutput.Trim() == "exists")
+        if (_workspace.SupportsContainerIsolation)
         {
-            // Check if it's a git repo
-            var gitCheckResult = await _workspace.ExecuteCommandAsync(
+            return await ExecuteRemoteAsync(
                 context.UserId,
-                $"test -d {fullTargetPath}/.git && echo git || echo notgit",
-                null, null, cancellationToken);
+                targetDir,
+                repoUrl,
+                branch,
+                token,
+                cancellationToken);
+        }
 
-            if (gitCheckResult.StandardOutput.Trim() == "git")
+        if (string.IsNullOrEmpty(context.WorkspacePath))
+        {
+            throw new InvalidOperationException("Workspace path not configured");
+        }
+
+        if (!string.IsNullOrEmpty(directory) && Path.IsPathRooted(directory))
+        {
+            throw new InvalidOperationException(
+                "directory must be relative to the workspace in local mode");
+        }
+
+        Directory.CreateDirectory(context.WorkspacePath);
+
+        var fullTargetPath = _workspace.ResolvePath(context.UserId, targetDir);
+
+        // Check if already cloned
+        if (Directory.Exists(fullTargetPath))
+        {
+            // If it's a git repo, just fetch and checkout
+            if (Directory.Exists(Path.Combine(fullTargetPath, ".git")))
             {
                 if (!string.IsNullOrEmpty(branch))
                 {
-                    await _workspace.ExecuteCommandAsync(
-                        context.UserId,
-                        $"cd {fullTargetPath} && git fetch origin {branch} && git checkout {branch}",
-                        null, null, cancellationToken);
+                    var fetchResult = await RunGitCommandAsync(
+                        fullTargetPath, token, cancellationToken, "fetch", "origin", branch);
+                    var checkoutResult = await RunGitCommandAsync(
+                        fullTargetPath, token, cancellationToken, "checkout", branch);
+
+                    if (!fetchResult.Success)
+                    {
+                        throw new InvalidOperationException($"Git fetch failed: {fetchResult.Error}");
+                    }
+
+                    if (!checkoutResult.Success)
+                    {
+                        throw new InvalidOperationException($"Git checkout failed: {checkoutResult.Error}");
+                    }
 
                     return JsonSerializer.Serialize(new
                     {
@@ -93,38 +115,28 @@ public sealed class GitCloneHandler : IToolHandler
                 });
             }
 
-            return JsonSerializer.Serialize(new
-            {
-                success = false,
-                error = $"Directory '{targetDir}' already exists and is not a git repository"
-            });
+            throw new InvalidOperationException(
+                $"Directory '{targetDir}' already exists and is not a git repository");
         }
 
-        // Build authenticated clone URL if token provided
-        var cloneUrl = repoUrl;
-        if (!string.IsNullOrEmpty(token) && repoUrl.StartsWith("https://github.com/"))
-        {
-            cloneUrl = repoUrl.Replace("https://github.com/", $"https://{token}@github.com/");
-        }
-
-        // Build clone command
-        var cloneCmd = $"git clone {cloneUrl}";
+        var cloneArguments = new List<string> { "clone", repoUrl };
         if (!string.IsNullOrEmpty(branch))
         {
-            cloneCmd += $" --branch {branch}";
+            cloneArguments.Add("--branch");
+            cloneArguments.Add(branch);
         }
-        cloneCmd += $" {fullTargetPath}";
 
-        var result = await _workspace.ExecuteCommandAsync(
-            context.UserId, cloneCmd, null, null, cancellationToken);
+        cloneArguments.Add(fullTargetPath);
 
-        if (result.ExitCode != 0)
+        var result = await RunGitCommandAsync(
+            context.WorkspacePath,
+            token,
+            cancellationToken,
+            cloneArguments.ToArray());
+
+        if (!result.Success)
         {
-            return JsonSerializer.Serialize(new
-            {
-                success = false,
-                error = $"Git clone failed: {result.StandardError}"
-            });
+            throw new InvalidOperationException($"Git clone failed: {result.Error}");
         }
 
         return JsonSerializer.Serialize(new
@@ -136,5 +148,180 @@ public sealed class GitCloneHandler : IToolHandler
             message = $"Repository cloned to '{targetDir}'" +
                       (branch != null ? $" on branch '{branch}'" : "")
         });
+    }
+
+    private async Task<string> ExecuteRemoteAsync(
+        Guid userId,
+        string targetDir,
+        string repoUrl,
+        string? branch,
+        string? token,
+        CancellationToken cancellationToken)
+    {
+        var workspacePath = await _workspace.GetWorkspacePathAsync(userId, cancellationToken);
+        var fullTargetPath = _workspace.ResolvePath(userId, targetDir);
+
+        var pathExistsResult = await _workspace.ExecuteCommandAsync(
+            userId,
+            $"test -e {ShellEscaping.SingleQuote(fullTargetPath)}",
+            null,
+            null,
+            cancellationToken);
+
+        if (pathExistsResult.ExitCode == 0)
+        {
+            var isRepoResult = await RunRemoteGitCommandAsync(
+                userId,
+                token,
+                null,
+                cancellationToken,
+                "-C",
+                fullTargetPath,
+                "rev-parse",
+                "--is-inside-work-tree");
+
+            if (isRepoResult.Success)
+            {
+                if (!string.IsNullOrEmpty(branch))
+                {
+                    var fetchResult = await RunRemoteGitCommandAsync(
+                        userId,
+                        token,
+                        null,
+                        cancellationToken,
+                        "-C",
+                        fullTargetPath,
+                        "fetch",
+                        "origin",
+                        branch);
+
+                    if (!fetchResult.Success)
+                    {
+                        throw new InvalidOperationException($"Git fetch failed: {fetchResult.Error}");
+                    }
+
+                    var checkoutResult = await RunRemoteGitCommandAsync(
+                        userId,
+                        token,
+                        null,
+                        cancellationToken,
+                        "-C",
+                        fullTargetPath,
+                        "checkout",
+                        branch);
+
+                    if (!checkoutResult.Success)
+                    {
+                        throw new InvalidOperationException($"Git checkout failed: {checkoutResult.Error}");
+                    }
+
+                    return JsonSerializer.Serialize(new
+                    {
+                        success = true,
+                        action = "checkout",
+                        directory = fullTargetPath,
+                        branch,
+                        message = $"Repository already exists. Checked out branch '{branch}'."
+                    });
+                }
+
+                return JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    action = "exists",
+                    directory = fullTargetPath,
+                    message = "Repository already cloned."
+                });
+            }
+
+            throw new InvalidOperationException(
+                $"Directory '{targetDir}' already exists and is not a git repository");
+        }
+
+        var gitArgs = new List<string> { "clone", repoUrl };
+        if (!string.IsNullOrEmpty(branch))
+        {
+            gitArgs.Add("--branch");
+            gitArgs.Add(branch);
+        }
+
+        gitArgs.Add(targetDir);
+
+        var cloneResult = await RunRemoteGitCommandAsync(
+            userId,
+            token,
+            workspacePath,
+            cancellationToken,
+            gitArgs.ToArray());
+
+        if (!cloneResult.Success)
+        {
+            throw new InvalidOperationException($"Git clone failed: {cloneResult.Error}");
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            success = true,
+            action = "cloned",
+            directory = fullTargetPath,
+            branch = branch ?? "default",
+            message = $"Repository cloned to '{targetDir}'" +
+                      (branch != null ? $" on branch '{branch}'" : "")
+        });
+    }
+
+    private static async Task<(bool Success, string? Output, string? Error)> RunGitCommandAsync(
+        string workingDirectory,
+        string? token,
+        CancellationToken cancellationToken,
+        params string[] arguments)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "git",
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        GitHubGitAuth.Apply(process.StartInfo, token);
+        foreach (var argument in arguments)
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
+        process.Start();
+
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        await process.WaitForExitAsync(cancellationToken);
+
+        var output = await outputTask;
+        var error = await errorTask;
+
+        return (process.ExitCode == 0, output, error);
+    }
+
+    private async Task<(bool Success, string? Output, string? Error)> RunRemoteGitCommandAsync(
+        Guid userId,
+        string? token,
+        string? workingDirectory,
+        CancellationToken cancellationToken,
+        params string[] arguments)
+    {
+        var shellCommand = GitHubGitAuth.BuildShellCommand(token, arguments);
+        var result = await _workspace.ExecuteCommandAsync(
+            userId,
+            shellCommand,
+            null,
+            workingDirectory,
+            cancellationToken);
+
+        return (result.ExitCode == 0, result.StandardOutput, result.StandardError);
     }
 }

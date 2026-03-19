@@ -214,7 +214,11 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         }
         catch (Exception ex)
         {
-            telemetryBuilder.SetError(ex.Message);
+            var safeError = ErrorRedaction.Sanitize(
+                "Agentic execution failed.",
+                ex.Message,
+                request.Credentials);
+            telemetryBuilder.SetError(safeError);
             _logger.LogError(ex,
                 "Agentic execution failed at iteration {Iteration}. TraceId={TraceId}",
                 iteration, telemetryBuilder.TraceId);
@@ -238,7 +242,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 ProviderId = providerId,
                 ModelId = modelId,
                 ReachedMaxIterations = false,
-                Error = ex.Message,
+                Error = safeError,
                 Telemetry = errorTelemetry
             };
         }
@@ -640,10 +644,14 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 _logger.LogError(
                     "Workspace provisioning failed for user {UserId}: {Message}. TraceId={TraceId}",
                     request.UserId, workspaceStatus.Message, traceId);
+                var safeWorkspaceError = ErrorRedaction.Sanitize(
+                    "Workspace provisioning failed.",
+                    workspaceStatus.Message,
+                    request.Credentials);
 
                 events.Add(new AgenticWorkspaceErrorEvent
                 {
-                    Error = workspaceStatus.Message ?? "Workspace provisioning failed",
+                    Error = safeWorkspaceError,
                     Retryable = true,
                     TraceId = traceId
                 });
@@ -656,10 +664,14 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             _logger.LogError(ex,
                 "Workspace provisioning exception for user {UserId}. TraceId={TraceId}",
                 request.UserId, traceId);
+            var safeProvisioningError = ErrorRedaction.Sanitize(
+                "Failed to provision workspace.",
+                ex.Message,
+                request.Credentials);
 
             events.Add(new AgenticWorkspaceErrorEvent
             {
-                Error = $"Failed to provision workspace: {ex.Message}",
+                Error = safeProvisioningError,
                 Retryable = true,
                 TraceId = traceId
             });

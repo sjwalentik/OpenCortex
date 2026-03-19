@@ -174,14 +174,10 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         var fullCommand = string.IsNullOrEmpty(arguments)
             ? command
             : $"{command} {arguments}";
-
-        // Escape for shell
-        var escapedCommand = fullCommand.Replace("\"", "\\\"");
-
-        var execArgs = $"exec -w {workDir} {containerName} /bin/sh -c \"{escapedCommand}\"";
+        var shellScript = $"cd -- {ShellEscaping.SingleQuote(workDir)} && {fullCommand}";
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await RunDockerCommandAsync(execArgs, cancellationToken);
+        var result = await RunDockerExecAsync(containerName, shellScript, cancellationToken);
         stopwatch.Stop();
 
         return new CommandResult
@@ -243,24 +239,13 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         IReadOnlyDictionary<string, string>? credentials,
         CancellationToken cancellationToken)
     {
+        _ = credentials;
+
         var containerName = GetContainerName(userId);
         var volumeName = GetVolumeName(userId);
 
         // Ensure volume exists
         await RunDockerCommandAsync($"volume create {volumeName}", cancellationToken);
-
-        // Build environment variables
-        var envArgs = new StringBuilder();
-        if (credentials != null)
-        {
-            foreach (var (key, value) in credentials)
-            {
-                // Sanitize key and escape value
-                var sanitizedKey = key.ToUpperInvariant().Replace("-", "_");
-                var escapedValue = value.Replace("\"", "\\\"");
-                envArgs.Append($"-e {sanitizedKey}=\"{escapedValue}\" ");
-            }
-        }
 
         // Build run command
         var runCommand = new StringBuilder();
@@ -272,19 +257,20 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         runCommand.Append("--security-opt=no-new-privileges:true ");
         runCommand.Append("--cap-drop=ALL ");
         runCommand.Append("--user=1000:1000 ");
-        runCommand.Append(envArgs);
         runCommand.Append(_options.ContainerImage);
 
         var result = await RunDockerCommandAsync(runCommand.ToString(), cancellationToken);
 
         if (!result.Success)
         {
-            _logger.LogError("Failed to create container for user {UserId}: {Error}", userId, result.Error);
+            var safeError = SensitiveDataRedactor.Redact(result.Error, credentials)
+                ?? "Container creation failed.";
+            _logger.LogError("Failed to create container for user {UserId}: {Error}", userId, safeError);
             return new WorkspaceStatus
             {
                 UserId = userId,
                 State = WorkspaceState.Failed,
-                Message = $"Failed to create container: {result.Error}"
+                Message = $"Failed to create container: {safeError}"
             };
         }
 
@@ -398,6 +384,59 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
                 CreateNoWindow = true
             }
         };
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        try
+        {
+            process.Start();
+
+            var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+            var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
+
+            await process.WaitForExitAsync(cts.Token);
+
+            var output = await outputTask;
+            var error = await errorTask;
+
+            return (process.ExitCode == 0, process.ExitCode, output, error);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                process.Kill();
+            }
+            catch { }
+
+            return (false, -1, null, "Command timed out");
+        }
+    }
+
+    private static async Task<(bool Success, int ExitCode, string? Output, string? Error)> RunDockerExecAsync(
+        string containerName,
+        string shellCommand,
+        CancellationToken cancellationToken,
+        int timeoutSeconds = 60)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "docker",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        process.StartInfo.ArgumentList.Add("exec");
+        process.StartInfo.ArgumentList.Add(containerName);
+        process.StartInfo.ArgumentList.Add("/bin/sh");
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add(shellCommand);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));

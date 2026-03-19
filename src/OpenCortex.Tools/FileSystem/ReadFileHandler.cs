@@ -1,4 +1,7 @@
+using System.Text;
 using System.Text.Json;
+
+using OpenCortex.Tools;
 
 namespace OpenCortex.Tools.FileSystem;
 
@@ -7,6 +10,7 @@ namespace OpenCortex.Tools.FileSystem;
 /// </summary>
 public sealed class ReadFileHandler : IToolHandler
 {
+    private const int MaxReadBytes = 256 * 1024;
     private readonly IWorkspaceManager _workspace;
 
     public ReadFileHandler(IWorkspaceManager workspace)
@@ -25,10 +29,19 @@ public sealed class ReadFileHandler : IToolHandler
         var path = arguments.GetProperty("path").GetString()
             ?? throw new ArgumentException("path is required");
 
+        if (SensitivePathPolicy.IsSensitive(path))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Access denied for sensitive path: {path}"
+            });
+        }
+
         // Use remote execution for container-based workspaces
         if (_workspace.SupportsContainerIsolation)
         {
-            return await ExecuteRemoteAsync(context.UserId, path, cancellationToken);
+            return await ExecuteRemoteAsync(context.UserId, path, context.Credentials, cancellationToken);
         }
 
         return await ExecuteLocalAsync(context.UserId, path, cancellationToken);
@@ -37,15 +50,26 @@ public sealed class ReadFileHandler : IToolHandler
     private async Task<string> ExecuteRemoteAsync(
         Guid userId,
         string path,
+        IReadOnlyDictionary<string, string>? credentials,
         CancellationToken cancellationToken)
     {
         var resolvedPath = _workspace.ResolvePath(userId, path);
 
+        if (SensitivePathPolicy.IsSensitive(resolvedPath))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Access denied for sensitive path: {path}"
+            });
+        }
+
+        var quotedPath = ShellEscaping.SingleQuote(resolvedPath);
+
         // Check if file exists and get its size
-        // Use wc -c for size to avoid quoting issues with stat -c '%s'
         var statResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"wc -c < {resolvedPath} 2>/dev/null",
+            $"wc -c < {quotedPath} 2>/dev/null",
             null,
             null,
             cancellationToken);
@@ -60,21 +84,24 @@ public sealed class ReadFileHandler : IToolHandler
         }
 
         var size = long.TryParse(statResult.StandardOutput.Trim(), out var s) ? s : 0;
+        var truncated = size > MaxReadBytes;
 
-        // Read file content
+        // Read at most MaxReadBytes so tools do not dump arbitrarily large files into chat.
         var catResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"cat {resolvedPath}",
+            $"head -c {MaxReadBytes} -- {quotedPath}",
             null,
             null,
             cancellationToken);
 
         if (catResult.ExitCode != 0)
         {
+            var safeError = SensitiveDataRedactor.Redact(catResult.StandardError, credentials)
+                ?? "Command failed.";
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = $"Failed to read file: {catResult.StandardError}"
+                error = $"Failed to read file: {safeError}"
             });
         }
 
@@ -83,7 +110,9 @@ public sealed class ReadFileHandler : IToolHandler
             success = true,
             path,
             content = catResult.StandardOutput,
-            size
+            size,
+            truncated,
+            maxBytes = MaxReadBytes
         });
     }
 
@@ -94,6 +123,15 @@ public sealed class ReadFileHandler : IToolHandler
     {
         var resolvedPath = _workspace.ResolvePath(userId, path);
 
+        if (SensitivePathPolicy.IsSensitive(resolvedPath))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Access denied for sensitive path: {path}"
+            });
+        }
+
         if (!File.Exists(resolvedPath))
         {
             return JsonSerializer.Serialize(new
@@ -103,14 +141,31 @@ public sealed class ReadFileHandler : IToolHandler
             });
         }
 
-        var content = await File.ReadAllTextAsync(resolvedPath, cancellationToken);
+        var fileInfo = new FileInfo(resolvedPath);
+        var size = fileInfo.Length;
+        var truncated = size > MaxReadBytes;
+
+        string content;
+        if (truncated)
+        {
+            using var stream = File.OpenRead(resolvedPath);
+            var buffer = new byte[MaxReadBytes];
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            content = Encoding.UTF8.GetString(buffer, 0, read);
+        }
+        else
+        {
+            content = await File.ReadAllTextAsync(resolvedPath, cancellationToken);
+        }
 
         return JsonSerializer.Serialize(new
         {
             success = true,
             path,
             content,
-            size = new FileInfo(resolvedPath).Length
+            size,
+            truncated,
+            maxBytes = MaxReadBytes
         });
     }
 }

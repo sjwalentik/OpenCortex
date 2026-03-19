@@ -271,8 +271,10 @@ public static class ProviderConfigEndpoints
                 return Results.BadRequest(new
                 {
                     message = "OAuth token exchange failed.",
-                    error = result.Error,
-                    errorDescription = result.ErrorDescription
+                    error = ErrorMessages.ForExternalFailure("OAuth token exchange failed.", result.Error),
+                    errorDescription = ErrorMessages.ForExternalFailure(
+                        "OAuth token exchange failed.",
+                        result.ErrorDescription)
                 });
             }
 
@@ -306,7 +308,11 @@ public static class ProviderConfigEndpoints
             {
                 if (!string.IsNullOrWhiteSpace(returnUrl))
                 {
-                    return Results.Redirect(BuildOAuthReturnUrl(returnUrl, providerId, isSuccess: false, error: ex.Message));
+                    return Results.Redirect(BuildOAuthReturnUrl(
+                        returnUrl,
+                        providerId,
+                        isSuccess: false,
+                        error: ErrorMessages.ForExternalFailure("Failed to save provider credentials.", ex.Message)));
                 }
 
                 return BuildProviderConfigStorageUnavailableResult(ex);
@@ -390,7 +396,7 @@ public static class ProviderConfigEndpoints
                 return Results.BadRequest(new
                 {
                     message = "Token refresh failed.",
-                    error = result.Error
+                    error = ErrorMessages.ForExternalFailure("Token refresh failed.", result.Error)
                 });
             }
 
@@ -591,7 +597,9 @@ public static class ProviderConfigEndpoints
     private static IResult BuildProviderConfigStorageUnavailableResult(InvalidOperationException exception) =>
         Results.Problem(
             title: "Provider configuration storage is not ready.",
-            detail: exception.Message,
+            detail: ErrorMessages.ForExternalFailure(
+                "Provider configuration storage is not ready.",
+                exception.Message),
             statusCode: StatusCodes.Status503ServiceUnavailable);
 }
 

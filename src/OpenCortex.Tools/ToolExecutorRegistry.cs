@@ -100,10 +100,13 @@ public sealed class ToolExecutorRegistry : IToolExecutor
                 toolCall.Function.Name,
                 stopwatch.ElapsedMilliseconds);
 
+            var safeError = SensitiveDataRedactor.Redact(ex.Message, context.Credentials)
+                ?? "Tool execution failed.";
+
             return ToolExecutionResult.Fail(
                 toolCall.Id,
                 toolCall.Function.Name,
-                ex.Message,
+                safeError,
                 stopwatch.Elapsed);
         }
     }
