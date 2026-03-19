@@ -163,7 +163,7 @@ public sealed class GitCloneHandler : IToolHandler
 
         var pathExistsResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"test -e {GitHubGitAuth.SingleQuote(fullTargetPath)}",
+            $"test -e {ShellEscaping.SingleQuote(fullTargetPath)}",
             null,
             null,
             cancellationToken);

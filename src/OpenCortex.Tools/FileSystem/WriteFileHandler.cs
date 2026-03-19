@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 
+using OpenCortex.Tools;
+
 namespace OpenCortex.Tools.FileSystem;
 
 /// <summary>

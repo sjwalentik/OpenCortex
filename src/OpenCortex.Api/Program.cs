@@ -778,7 +778,9 @@ app.MapGet("/health", () => Results.Ok(new
     service = "OpenCortex.Api",
     validationErrors = app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing")
         ? validationErrors.ToArray()
-        : validationErrors.Select(_ => "Configuration validation failed.").ToArray(),
+        : validationErrors.Count == 0
+            ? Array.Empty<string>()
+            : ["Configuration validation failed."],
 }));
 
 app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken cancellationToken) =>

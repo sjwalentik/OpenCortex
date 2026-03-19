@@ -1,6 +1,6 @@
 namespace OpenCortex.Tools;
 
-internal static class ShellEscaping
+public static class ShellEscaping
 {
     public static string SingleQuote(string value)
     {

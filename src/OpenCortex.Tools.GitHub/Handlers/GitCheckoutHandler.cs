@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using OpenCortex.Tools;
 
 namespace OpenCortex.Tools.GitHub.Handlers;
 
@@ -196,7 +197,7 @@ public sealed class GitCheckoutHandler : IToolHandler
         {
             var gitDirsResult = await _workspace.ExecuteCommandAsync(
                 userId,
-                $"find {GitHubGitAuth.SingleQuote(workspacePath)} -mindepth 2 -maxdepth 2 -type d -name .git -exec dirname {{}} \\;",
+                $"find {ShellEscaping.SingleQuote(workspacePath)} -mindepth 2 -maxdepth 2 -type d -name .git -exec dirname {{}} \\;",
                 null,
                 null,
                 cancellationToken);
