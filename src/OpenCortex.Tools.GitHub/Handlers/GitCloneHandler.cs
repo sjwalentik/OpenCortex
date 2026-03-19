@@ -71,7 +71,7 @@ public sealed class GitCloneHandler : IToolHandler
 
         Directory.CreateDirectory(context.WorkspacePath);
 
-        var fullTargetPath = Path.Combine(context.WorkspacePath, targetDir);
+        var fullTargetPath = _workspace.ResolvePath(context.UserId, targetDir);
 
         // Check if already cloned
         if (Directory.Exists(fullTargetPath))
@@ -126,7 +126,7 @@ public sealed class GitCloneHandler : IToolHandler
             cloneArguments.Add(branch);
         }
 
-        cloneArguments.Add(targetDir);
+        cloneArguments.Add(fullTargetPath);
 
         var result = await RunGitCommandAsync(
             context.WorkspacePath,

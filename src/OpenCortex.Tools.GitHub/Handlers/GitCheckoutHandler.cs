@@ -63,9 +63,13 @@ public sealed class GitCheckoutHandler : IToolHandler
         string repoPath;
         if (!string.IsNullOrEmpty(directory))
         {
-            repoPath = Path.IsPathRooted(directory)
-                ? directory
-                : Path.Combine(context.WorkspacePath, directory);
+            if (Path.IsPathRooted(directory))
+            {
+                throw new InvalidOperationException(
+                    "directory must be relative to the workspace in local mode");
+            }
+
+            repoPath = _workspace.ResolvePath(context.UserId, directory);
         }
         else
         {
