@@ -751,8 +751,8 @@ function App() {
     handleSelectVersion: handleSelectMemoryVersion,
     showDocumentStatus: showMemoryStatus,
   } = useManagedDocumentWorkspace({
-    activeBrainId,
-    enabled: activeView === 'memories',
+    activeBrainId: memoryBrainPreference?.effectiveMemoryBrainId || '',
+    enabled: activeView === 'memories' && Boolean(authSession && memoryBrainPreference?.effectiveMemoryBrainId),
     hasSession: Boolean(authSession),
     singularLabel: 'memory',
     deleteActionLabel: 'Forget',
@@ -3279,6 +3279,7 @@ function handleClearSession() {
 }
 
 export default App;
+
 
 
 

@@ -23,6 +23,11 @@ type MemoryDocument = {
   frontmatter: Record<string, unknown>;
 };
 
+type PortalFetchMockOptions = {
+  activeBrainId?: string;
+  effectiveMemoryBrainId?: string;
+};
+
 const storageKey = 'opencortex.portal.auth_session';
 
 if (!HTMLElement.prototype.scrollIntoView) {
@@ -48,7 +53,9 @@ function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
-function createPortalFetchMock(initialMemories: MemoryDocument[]) {
+function createPortalFetchMock(initialMemories: MemoryDocument[], options: PortalFetchMockOptions = {}) {
+  const activeBrainId = options.activeBrainId || 'brain-1';
+  const effectiveMemoryBrainId = options.effectiveMemoryBrainId || 'brain-1';
   let memories = [...initialMemories];
   const requests: Array<{ url: string; method: string }> = [];
 
@@ -73,7 +80,7 @@ function createPortalFetchMock(initialMemories: MemoryDocument[]) {
         customerId: 'cust-1',
         customerSlug: 'demo',
         customerName: 'Demo Customer',
-        brainId: 'brain-1',
+        brainId: activeBrainId,
         brainName: 'Daily Brain',
         planId: 'pro',
       });
@@ -95,7 +102,7 @@ function createPortalFetchMock(initialMemories: MemoryDocument[]) {
       return jsonResponse({
         brains: [
           {
-            brainId: 'brain-1',
+            brainId: activeBrainId,
             name: 'Daily Brain',
             mode: 'managed-content',
             status: 'active',
@@ -106,8 +113,8 @@ function createPortalFetchMock(initialMemories: MemoryDocument[]) {
 
     if (url === '/portal-api/tenant/me/memory-brain') {
       return jsonResponse({
-        configuredMemoryBrainId: 'brain-1',
-        effectiveMemoryBrainId: 'brain-1',
+        configuredMemoryBrainId: effectiveMemoryBrainId,
+        effectiveMemoryBrainId,
         needsConfiguration: false,
       });
     }
@@ -124,7 +131,7 @@ function createPortalFetchMock(initialMemories: MemoryDocument[]) {
       return jsonResponse({ count: 0, providers: [] });
     }
 
-    if (url === '/portal-api/tenant/brains/brain-1/documents?limit=200&pathPrefix=memories%2F') {
+    if (url === '/portal-api/tenant/brains/' + encodeURIComponent(effectiveMemoryBrainId) + '/documents?limit=200&pathPrefix=memories%2F') {
       return jsonResponse({
         documents: memories.map((memory) => ({
           managedDocumentId: memory.managedDocumentId,
@@ -138,9 +145,15 @@ function createPortalFetchMock(initialMemories: MemoryDocument[]) {
       });
     }
 
-    const detailMatch = url.match(/^\/portal-api\/tenant\/brains\/brain-1\/documents\/(mem-[^/?]+)$/);
+    const detailMatch = url.match(/^\/portal-api\/tenant\/brains\/([^/]+)\/documents\/(mem-[^/?]+)$/);
     if (detailMatch && method === 'GET') {
-      const memory = memories.find((candidate) => candidate.managedDocumentId === detailMatch[1]);
+      const memoryBrainId = detailMatch[1];
+      const memoryDocumentId = detailMatch[2];
+      if (memoryBrainId !== effectiveMemoryBrainId) {
+        throw new Error('Memory detail requested against wrong brain: ' + memoryBrainId);
+      }
+
+      const memory = memories.find((candidate) => candidate.managedDocumentId === memoryDocumentId);
       if (!memory) {
         return jsonResponse({ title: 'Not found', detail: 'Memory not found.' }, 404);
       }
@@ -149,7 +162,13 @@ function createPortalFetchMock(initialMemories: MemoryDocument[]) {
     }
 
     if (detailMatch && method === 'DELETE') {
-      memories = memories.filter((candidate) => candidate.managedDocumentId !== detailMatch[1]);
+      const memoryBrainId = detailMatch[1];
+      const memoryDocumentId = detailMatch[2];
+      if (memoryBrainId !== effectiveMemoryBrainId) {
+        throw new Error('Memory delete requested against wrong brain: ' + memoryBrainId);
+      }
+
+      memories = memories.filter((candidate) => candidate.managedDocumentId !== memoryDocumentId);
       return jsonResponse({ deleted: true });
     }
 
@@ -212,6 +231,37 @@ describe('App memories integration', () => {
     expect(requests.some((request) => request.url === '/portal-api/tenant/brains/brain-1/documents/mem-1')).toBe(true);
   });
 
+  it('uses the effective memory brain instead of the active workspace brain', async () => {
+    const { fetchMock, requests } = createPortalFetchMock([
+      {
+        managedDocumentId: 'mem-1',
+        title: '[fact] Stephen likes camping',
+        slug: 'memories/fact/stephen-camping',
+        canonicalPath: 'memories/fact/stephen-camping.md',
+        status: 'published',
+        updatedAt: '2026-03-20T12:00:00Z',
+        wordCount: 5,
+        content: 'Stephen likes camping.',
+        frontmatter: { category: 'fact', confidence: 'high' },
+      },
+    ], {
+      activeBrainId: 'brain-1',
+      effectiveMemoryBrainId: 'brain-2',
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Stephen likes camping.')).toBeTruthy();
+    });
+
+    expect(requests.some((request) => request.url === '/portal-api/tenant/brains/brain-2/documents?limit=200&pathPrefix=memories%2F')).toBe(true);
+    expect(requests.some((request) => request.url === '/portal-api/tenant/brains/brain-2/documents/mem-1')).toBe(true);
+    expect(requests.some((request) => request.url === '/portal-api/tenant/brains/brain-1/documents?limit=200&pathPrefix=memories%2F')).toBe(false);
+  });
+
   it('forgets the selected memory and refreshes the list through App fetch wiring', async () => {
     const { fetchMock, requests } = createPortalFetchMock([
       {
@@ -256,6 +306,8 @@ describe('App memories integration', () => {
     expect(requests.some((request) => request.method === 'DELETE' && request.url === '/portal-api/tenant/brains/brain-1/documents/mem-1')).toBe(true);
   });
 });
+
+
 
 
 
