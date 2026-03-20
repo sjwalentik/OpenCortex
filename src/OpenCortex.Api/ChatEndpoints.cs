@@ -1023,7 +1023,7 @@ public static class ChatEndpoints
                 Role = ParseRole(m.Role),
                 Content = m.Content
             }).ToList(),
-            SystemMessage = request.SystemMessage,
+            SystemMessage = BuildAgenticSystemMessage(request),
             EnabledTools = request.EnabledTools,
             EnabledCategories = request.EnabledCategories,
             MaxIterations = request.MaxToolIterations ?? 25,
@@ -1046,6 +1046,50 @@ public static class ChatEndpoints
             Credentials = credentials
         };
     }
+
+    private static string? BuildAgenticSystemMessage(ChatCompletionRequest request)
+    {
+        var parts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(request.SystemMessage))
+        {
+            parts.Add(request.SystemMessage.Trim());
+        }
+
+        if (ShouldIncludeMemoryToolGuidance(request))
+        {
+            parts.Add("""
+                Agent memory tools are available in this session.
+                Use recall_memories when prior user preferences, decisions, facts, or learnings may matter.
+                Use save_memory only for durable information worth keeping beyond this conversation.
+                Use forget_memory when a saved memory is stale, incorrect, or superseded.
+                Do not save transient chatter or one-off details unless they are likely to matter later.
+                """);
+        }
+
+        return parts.Count == 0 ? null : string.Join("\n\n", parts);
+    }
+
+    private static bool ShouldIncludeMemoryToolGuidance(ChatCompletionRequest request)
+    {
+        if (request.EnabledTools is { Count: > 0 })
+        {
+            return request.EnabledTools.Any(IsMemoryToolName);
+        }
+
+        if (request.EnabledCategories is { Count: > 0 })
+        {
+            return request.EnabledCategories.Any(category =>
+                string.Equals(category, "memory", StringComparison.OrdinalIgnoreCase));
+        }
+
+        return request.EnableTools || (request.EnabledTools is null && request.EnabledCategories is null);
+    }
+
+    private static bool IsMemoryToolName(string? toolName) =>
+        string.Equals(toolName, "save_memory", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(toolName, "recall_memories", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(toolName, "forget_memory", StringComparison.OrdinalIgnoreCase);
 
     private static object BuildAgenticCompletionPayload(AgenticOrchestrationResult result) => new
     {
