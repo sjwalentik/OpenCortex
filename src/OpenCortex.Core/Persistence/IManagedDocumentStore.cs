@@ -77,7 +77,17 @@ public sealed record ManagedDocumentCreateRequest(
     string Content,
     IReadOnlyDictionary<string, string> Frontmatter,
     string Status,
-    string UserId);
+    string UserId,
+    int? MaxActiveDocuments = null,
+    string? QuotaExceededMessage = null);
+
+public sealed class ManagedDocumentQuotaExceededException : InvalidOperationException
+{
+    public ManagedDocumentQuotaExceededException(string message)
+        : base(message)
+    {
+    }
+}
 
 public sealed record ManagedDocumentUpdateRequest(
     string ManagedDocumentId,

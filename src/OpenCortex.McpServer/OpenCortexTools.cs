@@ -294,15 +294,6 @@ public sealed class OpenCortexTools(
         }
 
         var (billingState, plan) = await GetBillingContextAsync(tokenContext.CustomerId, cancellationToken);
-        if (plan.MaxDocuments >= 0)
-        {
-            var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(tokenContext.CustomerId, cancellationToken);
-            if (activeDocuments >= plan.MaxDocuments)
-            {
-                return ManagedDocumentResult.Failure(
-                    $"Document limit reached for plan '{billingState.PlanId}'. Upgrade to continue adding more content.");
-            }
-        }
 
         try
         {
@@ -315,7 +306,9 @@ public sealed class OpenCortexTools(
                     Content: content ?? string.Empty,
                     Frontmatter: frontmatter ?? new Dictionary<string, string>(),
                     Status: string.IsNullOrWhiteSpace(status) ? "draft" : status,
-                    UserId: tokenContext.UserId),
+                    UserId: tokenContext.UserId,
+                    MaxActiveDocuments: plan.MaxDocuments >= 0 ? plan.MaxDocuments : null,
+                    QuotaExceededMessage: $"Document limit reached for plan '{billingState.PlanId}'. Upgrade to continue adding more content."),
                 cancellationToken);
 
             var indexRun = await managedContentBrainIndexingService.ReindexAsync(
@@ -390,15 +383,6 @@ public sealed class OpenCortexTools(
             if (existing is null)
             {
                 var (billingState, plan) = await GetBillingContextAsync(tokenContext.CustomerId, cancellationToken);
-                if (plan.MaxDocuments >= 0)
-                {
-                    var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(tokenContext.CustomerId, cancellationToken);
-                    if (activeDocuments >= plan.MaxDocuments)
-                    {
-                        return SaveManagedDocumentResult.Failure(
-                            $"Document limit reached for plan '{billingState.PlanId}'. Upgrade to continue adding more content.");
-                    }
-                }
 
                 var created = await managedDocumentStore.CreateManagedDocumentAsync(
                     new ManagedDocumentCreateRequest(
@@ -409,7 +393,9 @@ public sealed class OpenCortexTools(
                         Content: content ?? string.Empty,
                         Frontmatter: normalizedFrontmatter,
                         Status: normalizedStatus,
-                        UserId: tokenContext.UserId),
+                        UserId: tokenContext.UserId,
+                        MaxActiveDocuments: plan.MaxDocuments >= 0 ? plan.MaxDocuments : null,
+                        QuotaExceededMessage: $"Document limit reached for plan '{billingState.PlanId}'. Upgrade to continue adding more content."),
                     cancellationToken);
 
                 var createIndexRun = await managedContentBrainIndexingService.ReindexAsync(

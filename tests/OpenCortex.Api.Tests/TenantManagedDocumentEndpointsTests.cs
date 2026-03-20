@@ -240,6 +240,16 @@ public sealed class TenantManagedDocumentEndpointsTests
 
         public Task<ManagedDocumentDetail> CreateManagedDocumentAsync(ManagedDocumentCreateRequest request, CancellationToken cancellationToken = default)
         {
+            var activeDocuments = _documents.Values.Count(document =>
+                string.Equals(document.CustomerId, request.CustomerId, StringComparison.OrdinalIgnoreCase)
+                && !document.IsDeleted);
+            if (request.MaxActiveDocuments is int maxActiveDocuments && activeDocuments >= maxActiveDocuments)
+            {
+                throw new ManagedDocumentQuotaExceededException(
+                    request.QuotaExceededMessage
+                    ?? $"Document limit reached for customer '{request.CustomerId}'.");
+            }
+
             var now = DateTimeOffset.UtcNow;
             var managedDocumentId = $"md-{_nextId++:D4}";
             var slug = request.Slug ?? request.Title;

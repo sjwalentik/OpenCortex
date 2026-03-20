@@ -79,23 +79,6 @@ public sealed class SaveMemoryHandler : IToolHandler
 
         var billingState = await GetBillingStateAsync(customerId, cancellationToken);
         var plan = ResolvePlanEntitlements(billingState.PlanId);
-        if (plan.MaxDocuments >= 0)
-        {
-            // This is a best-effort guard, not a transactional quota reservation. Concurrent writes can still race
-            // past the limit until document creation is backed by an atomic quota-enforced write path.
-            var activeDocuments = await _documentStore.CountActiveManagedDocumentsAsync(customerId, cancellationToken);
-            if (activeDocuments >= plan.MaxDocuments)
-            {
-                return JsonSerializer.Serialize(new
-                {
-                    success = false,
-                    error = $"Document limit reached for plan '{billingState.PlanId}'. Review existing memories, forget one if needed, or upgrade before retrying save_memory.",
-                    error_code = "memory_quota_reached",
-                    quota_exceeded = true,
-                    suggestion = "Use recall_memories to review what is already saved, remove an older or low-value memory with forget_memory or from the Memories page, or upgrade your plan, then retry save_memory."
-                });
-            }
-        }
 
         var slug = MemoryToolSupport.CreateMemorySlug(normalizedCategory);
         var frontmatter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -110,17 +93,34 @@ public sealed class SaveMemoryHandler : IToolHandler
             frontmatter["source_conversation"] = context.ConversationId;
         }
 
-        var document = await _documentStore.CreateManagedDocumentAsync(
-            new ManagedDocumentCreateRequest(
-                BrainId: brainResult.BrainId!,
-                CustomerId: customerId,
-                Title: MemoryToolSupport.BuildTitle(normalizedCategory, content),
-                Slug: slug,
-                Content: content,
-                Frontmatter: frontmatter,
-                Status: "published",
-                UserId: userId),
-            cancellationToken);
+        ManagedDocumentDetail document;
+        try
+        {
+            document = await _documentStore.CreateManagedDocumentAsync(
+                new ManagedDocumentCreateRequest(
+                    BrainId: brainResult.BrainId!,
+                    CustomerId: customerId,
+                    Title: MemoryToolSupport.BuildTitle(normalizedCategory, content),
+                    Slug: slug,
+                    Content: content,
+                    Frontmatter: frontmatter,
+                    Status: "published",
+                    UserId: userId,
+                    MaxActiveDocuments: plan.MaxDocuments >= 0 ? plan.MaxDocuments : null,
+                    QuotaExceededMessage: $"Document limit reached for plan '{billingState.PlanId}'. Review existing memories, forget one if needed, or upgrade before retrying save_memory."),
+                cancellationToken);
+        }
+        catch (ManagedDocumentQuotaExceededException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = $"Document limit reached for plan '{billingState.PlanId}'. Review existing memories, forget one if needed, or upgrade before retrying save_memory.",
+                error_code = "memory_quota_reached",
+                quota_exceeded = true,
+                suggestion = "Use recall_memories to review what is already saved, remove an older or low-value memory with forget_memory or from the Memories page, or upgrade your plan, then retry save_memory."
+            });
+        }
 
         await _indexingService.ReindexAsync(
             customerId,

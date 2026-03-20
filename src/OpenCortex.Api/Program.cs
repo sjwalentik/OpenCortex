@@ -1853,14 +1853,6 @@ if (hostedAuthConfigured)
 
         var billingState = await GetEffectiveBillingStateAsync(context.CustomerId, cancellationToken);
         var plan = ResolvePlanEntitlements(billingState.PlanId);
-        if (plan.MaxDocuments >= 0)
-        {
-            var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(context.CustomerId, cancellationToken);
-            if (activeDocuments >= plan.MaxDocuments)
-            {
-                return BuildQuotaExceededResult(billingState.PlanId, activeDocuments, plan);
-            }
-        }
 
         try
         {
@@ -1873,7 +1865,9 @@ if (hostedAuthConfigured)
                     Content: request.Content ?? string.Empty,
                     Frontmatter: request.Frontmatter ?? new Dictionary<string, string>(),
                     Status: request.Status ?? "draft",
-                    UserId: context.UserId),
+                    UserId: context.UserId,
+                    MaxActiveDocuments: plan.MaxDocuments >= 0 ? plan.MaxDocuments : null,
+                    QuotaExceededMessage: $"Your {billingState.PlanId} plan allows {plan.MaxDocuments} documents. Upgrade to continue adding more."),
                 cancellationToken);
 
             await BuildManagedContentIndexingService().ReindexAsync(
@@ -1885,6 +1879,10 @@ if (hostedAuthConfigured)
             await SyncActiveDocumentCounterAsync(context.CustomerId, cancellationToken);
 
             return Results.Created($"/tenant/brains/{brainId}/documents/{document.ManagedDocumentId}", document);
+        }
+        catch (ManagedDocumentQuotaExceededException)
+        {
+            return BuildQuotaExceededResult(billingState.PlanId, plan.MaxDocuments, plan);
         }
         catch (InvalidOperationException ex)
         {

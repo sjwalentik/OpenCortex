@@ -256,6 +256,20 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await AcquireCreateQuotaLockAsync(connection, transaction, request.CustomerId, cancellationToken);
+
+        if (request.MaxActiveDocuments is int maxActiveDocuments && maxActiveDocuments >= 0)
+        {
+            var activeDocuments = await CountActiveManagedDocumentsAsync(connection, transaction, request.CustomerId, cancellationToken);
+            if (activeDocuments >= maxActiveDocuments)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw new ManagedDocumentQuotaExceededException(
+                    request.QuotaExceededMessage
+                    ?? $"Document limit reached for customer '{request.CustomerId}'.");
+            }
+        }
+
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
 
@@ -837,6 +851,39 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
         command.Parameters.AddWithValue("snapshot_kind", snapshotKind);
         command.Parameters.AddWithValue("snapshot_by", snapshotBy);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task AcquireCreateQuotaLockAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string customerId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT pg_advisory_xact_lock(hashtext(@customer_id));";
+        command.Parameters.AddWithValue("customer_id", customerId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<int> CountActiveManagedDocumentsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string customerId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            SELECT COUNT(*)::int
+            FROM {_connectionFactory.Schema}.managed_documents
+            WHERE customer_id = @customer_id
+              AND is_deleted = false;
+            """;
+        command.Parameters.AddWithValue("customer_id", customerId);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is int count ? count : Convert.ToInt32(result);
     }
 
     private static ManagedDocumentDetail ReadDetail(NpgsqlDataReader reader)
