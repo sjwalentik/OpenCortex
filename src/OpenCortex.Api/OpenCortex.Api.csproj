@@ -13,6 +13,7 @@
     <ProjectReference Include="..\OpenCortex.Conversations\OpenCortex.Conversations.csproj" />
     <ProjectReference Include="..\OpenCortex.Tools\OpenCortex.Tools.csproj" />
     <ProjectReference Include="..\OpenCortex.Tools.GitHub\OpenCortex.Tools.GitHub.csproj" />
+    <ProjectReference Include="..\OpenCortex.Tools.Memory\OpenCortex.Tools.Memory.csproj" />
   </ItemGroup>
 
   <ItemGroup>

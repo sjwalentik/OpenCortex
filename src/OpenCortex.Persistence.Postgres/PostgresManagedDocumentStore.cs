@@ -18,12 +18,14 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
     public async Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
         string customerId,
         string brainId,
+        string? pathPrefix = null,
+        string? excludePathPrefix = null,
         int limit = 200,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = $"""
+        var sql = $"""
             SELECT
                 managed_document_id,
                 brain_id,
@@ -38,9 +40,23 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
             WHERE customer_id = @customer_id
               AND brain_id = @brain_id
               AND is_deleted = false
-            ORDER BY updated_at DESC
-            LIMIT CAST(@limit AS integer);
             """;
+
+        if (!string.IsNullOrWhiteSpace(pathPrefix))
+        {
+            sql += "\n  AND slug LIKE @path_prefix_like";
+            command.Parameters.AddWithValue("path_prefix_like", BuildSlugPrefixPattern(pathPrefix));
+        }
+
+        if (!string.IsNullOrWhiteSpace(excludePathPrefix))
+        {
+            sql += "\n  AND slug NOT LIKE @exclude_path_prefix_like";
+            command.Parameters.AddWithValue("exclude_path_prefix_like", BuildSlugPrefixPattern(excludePathPrefix));
+        }
+
+        sql += "\nORDER BY updated_at DESC\nLIMIT CAST(@limit AS integer);";
+
+        command.CommandText = sql;
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("brain_id", brainId);
         command.Parameters.AddWithValue("limit", NpgsqlDbType.Integer, limit);
@@ -920,5 +936,13 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
 
             return result;
         }
+    }
+
+    private static string BuildSlugPrefixPattern(string pathPrefix)
+    {
+        var normalized = pathPrefix.Trim().Replace('\\', '/').Trim('/');
+        return string.IsNullOrWhiteSpace(normalized)
+            ? "%"
+            : normalized + "/%";
     }
 }

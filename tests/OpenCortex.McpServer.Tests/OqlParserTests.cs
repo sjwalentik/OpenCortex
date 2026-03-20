@@ -48,4 +48,22 @@ public sealed class OqlParserTests
                 Assert.Equal("docs/plan.md", filter.Value);
             });
     }
+
+    [Fact]
+    public void Parse_AllowsPathPrefixFilter()
+    {
+        const string oql = """
+            FROM brain("sample-team")
+            SEARCH "memory"
+            WHERE path_prefix = "memories/"
+            LIMIT 5
+            """;
+
+        var query = new OqlParser().Parse(oql);
+
+        var filter = Assert.Single(query.Filters);
+        Assert.Equal("path_prefix", filter.Field);
+        Assert.Equal("=", filter.Operator);
+        Assert.Equal("memories/", filter.Value);
+    }
 }

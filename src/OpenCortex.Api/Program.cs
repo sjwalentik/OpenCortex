@@ -24,6 +24,7 @@ using OpenCortex.Providers.Abstractions;
 using OpenCortex.Retrieval.Execution;
 using OpenCortex.Tools;
 using OpenCortex.Tools.GitHub;
+using OpenCortex.Tools.Memory;
 using Stripe;
 using BillingPortalSessionService = Stripe.BillingPortal.SessionService;
 using BillingPortalSessionCreateOptions = Stripe.BillingPortal.SessionCreateOptions;
@@ -58,6 +59,7 @@ var subscriptionStore = new PostgresSubscriptionStore(connectionFactory);
 var apiTokenStore = new PostgresApiTokenStore(connectionFactory);
 var usageCounterStore = new PostgresUsageCounterStore(connectionFactory);
 var embeddingProvider = EmbeddingProviderFactory.Create(options.Embeddings);
+var documentQueryStore = new PostgresDocumentQueryStore(connectionFactory, embeddingProvider);
 var indexRunStore = new PostgresIndexRunStore(connectionFactory);
 var hostedAuthConfigured = options.HostedAuth.Enabled
     && !string.IsNullOrWhiteSpace(options.HostedAuth.FirebaseProjectId);
@@ -771,6 +773,12 @@ else
 // Register user provider configuration repository
 builder.Services.AddScoped<IUserProviderConfigRepository>(sp =>
     new PostgresUserProviderConfigRepository(connectionFactory));
+builder.Services.AddSingleton<IBrainCatalogStore>(_ => brainCatalogStore);
+builder.Services.AddSingleton<IManagedDocumentStore>(_ => managedDocumentStore);
+builder.Services.AddSingleton<IDocumentQueryStore>(_ => documentQueryStore);
+builder.Services.AddSingleton<OqlQueryExecutor>();
+builder.Services.AddSingleton<IUserMemoryPreferenceStore>(sp =>
+    new PostgresUserMemoryPreferenceStore(connectionFactory));
 
 // Register OAuth service for provider authentication
 builder.Services.Configure<ProviderOAuthConfig>(builder.Configuration.GetSection(ProviderOAuthConfig.SectionName));
@@ -786,6 +794,7 @@ builder.Services.AddScoped<OpenCortex.Core.Credentials.IUserCredentialService,
 // Register tools infrastructure
 builder.Services.AddTools();
 builder.Services.AddGitHubTools();
+builder.Services.AddMemoryTools();
 
 // Register conversation services
 builder.Services.AddConversations();
@@ -1203,6 +1212,9 @@ if (hostedAuthConfigured)
 
         return Results.Ok(context);
     });
+
+    tenantRoutes.MapGet("/me/memory-brain", MemoryBrainEndpoints.GetMemoryBrainAsync);
+    tenantRoutes.MapPut("/me/memory-brain", MemoryBrainEndpoints.UpdateMemoryBrainAsync);
 
     tenantRoutes.MapGet("/brains", async (
         System.Security.Claims.ClaimsPrincipal user,
@@ -1624,6 +1636,8 @@ if (hostedAuthConfigured)
 
     tenantDocumentRoutes.MapGet("", async (
         string brainId,
+        string? pathPrefix,
+        string? excludePathPrefix,
         int? limit,
         System.Security.Claims.ClaimsPrincipal user,
         ITenantCatalogStore catalogStore,
@@ -1649,6 +1663,8 @@ if (hostedAuthConfigured)
         var documents = await managedDocumentStore.ListManagedDocumentsAsync(
             context.CustomerId,
             brainId,
+            pathPrefix,
+            excludePathPrefix,
             Math.Clamp(limit ?? 200, 1, 500),
             cancellationToken);
 

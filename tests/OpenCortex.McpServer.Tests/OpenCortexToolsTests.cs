@@ -788,10 +788,18 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
     private readonly List<ManagedDocumentVersionDetail> _versions = [];
     private int _nextId = 1;
 
-    public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(string customerId, string brainId, int limit = 200, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
+        string customerId,
+        string brainId,
+        string? pathPrefix = null,
+        string? excludePathPrefix = null,
+        int limit = 200,
+        CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<ManagedDocumentSummary>>(_documents.Values
             .Where(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                && MatchesPathPrefix(document.CanonicalPath, pathPrefix)
+                && !HasExcludedPathPrefix(document.CanonicalPath, excludePathPrefix)
                 && !document.IsDeleted)
             .Take(limit)
             .Select(document => new ManagedDocumentSummary(
@@ -1038,11 +1046,36 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
             .ToArray();
         return string.Join('-', new string(chars).Split(new[] { '-' }, StringSplitOptions.RemoveEmptyEntries));
     }
+
+    private static bool MatchesPathPrefix(string canonicalPath, string? pathPrefix)
+    {
+        if (string.IsNullOrWhiteSpace(pathPrefix))
+        {
+            return true;
+        }
+
+        var normalizedPrefix = pathPrefix.Trim().Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalizedPrefix))
+        {
+            return true;
+        }
+
+        return canonicalPath.StartsWith(normalizedPrefix + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasExcludedPathPrefix(string canonicalPath, string? pathPrefix)
+        => !string.IsNullOrWhiteSpace(pathPrefix) && MatchesPathPrefix(canonicalPath, pathPrefix);
 }
 
 internal sealed class ThrowingManagedDocumentStore : IManagedDocumentStore
 {
-    public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(string customerId, string brainId, int limit = 200, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
+        string customerId,
+        string brainId,
+        string? pathPrefix = null,
+        string? excludePathPrefix = null,
+        int limit = 200,
+        CancellationToken cancellationToken = default)
         => throw new NotImplementedException();
 
     public Task<int> CountActiveManagedDocumentsAsync(string customerId, CancellationToken cancellationToken = default)

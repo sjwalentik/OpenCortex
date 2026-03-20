@@ -570,6 +570,9 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             UserId = request.UserId,
             CustomerId = request.CustomerId,
             ConversationId = request.ConversationId,
+            TenantUserId = request.RoutingContext?.UserId,
+            TenantCustomerId = request.RoutingContext?.CustomerId,
+            BrainId = request.RoutingContext?.BrainId,
             WorkspacePath = workspacePath,
             Credentials = request.Credentials,
             CommandMode = request.CommandMode

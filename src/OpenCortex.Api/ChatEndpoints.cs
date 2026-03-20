@@ -1029,6 +1029,7 @@ public static class ChatEndpoints
             MaxIterations = request.MaxToolIterations ?? 25,
             RoutingContext = new RoutingContext
             {
+                CustomerId = resolved.TenantContext.CustomerId,
                 UserId = resolved.TenantContext.UserId,
                 BrainId = request.BrainId ?? resolved.TenantContext.BrainId,
                 ConversationId = request.ConversationId,

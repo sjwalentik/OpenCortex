@@ -1,0 +1,104 @@
+using System.Text.Json;
+
+namespace OpenCortex.Tools.Memory;
+
+internal static class MemoryToolSupport
+{
+    private static readonly HashSet<string> ValidCategories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "fact",
+        "decision",
+        "preference",
+        "learning"
+    };
+
+    private static readonly HashSet<string> ValidConfidenceLevels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "high",
+        "medium",
+        "low"
+    };
+
+    public static bool TryResolveTenantScope(
+        ToolExecutionContext context,
+        out string customerId,
+        out string userId,
+        out string error)
+    {
+        customerId = context.TenantCustomerId ?? string.Empty;
+        userId = context.TenantUserId ?? string.Empty;
+        error = string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(customerId) && !string.IsNullOrWhiteSpace(userId))
+        {
+            return true;
+        }
+
+        error = "Memory tools require hosted tenant context. Tenant user or customer identity was not available.";
+        return false;
+    }
+
+    public static bool IsValidCategory(string? category)
+        => !string.IsNullOrWhiteSpace(category) && ValidCategories.Contains(category);
+
+    public static bool IsValidConfidence(string? confidence)
+        => !string.IsNullOrWhiteSpace(confidence) && ValidConfidenceLevels.Contains(confidence);
+
+    public static string NormalizeCategory(string category) => category.Trim().ToLowerInvariant();
+
+    public static string NormalizeConfidence(string? confidence)
+        => IsValidConfidence(confidence) ? confidence!.Trim().ToLowerInvariant() : "medium";
+
+    public static IReadOnlyList<string> ReadTags(JsonElement arguments)
+    {
+        if (!arguments.TryGetProperty("tags", out var tagsElement) || tagsElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return tagsElement.EnumerateArray()
+            .Select(element => element.GetString()?.Trim())
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(tag => tag!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public static string CreateMemorySlug(string category)
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..12];
+        return $"memories/{NormalizeCategory(category)}/{suffix}";
+    }
+
+    public static string BuildTitle(string category, string content)
+    {
+        var singleLine = content.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        var preview = singleLine.Length > 60 ? singleLine[..60].TrimEnd() + "..." : singleLine;
+        return $"[{NormalizeCategory(category)}] {preview}";
+    }
+
+    public static string EscapeOqlLiteral(string value)
+        => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+    public static string BuildPathPrefix(string? category)
+        => string.IsNullOrWhiteSpace(category)
+            ? "memories/"
+            : $"memories/{NormalizeCategory(category!)}/";
+
+    public static string InferCategoryFromPath(string canonicalPath)
+    {
+        var segments = canonicalPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return segments.Length >= 2 ? segments[1] : "memory";
+    }
+
+    public static string CreateSnippet(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return string.Empty;
+        }
+
+        var normalized = content.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return normalized.Length > 200 ? normalized[..200].TrimEnd() + "..." : normalized;
+    }
+}

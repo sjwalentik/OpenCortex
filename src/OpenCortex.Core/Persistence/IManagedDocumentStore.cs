@@ -5,6 +5,8 @@ public interface IManagedDocumentStore
     Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
         string customerId,
         string brainId,
+        string? pathPrefix = null,
+        string? excludePathPrefix = null,
         int limit = 200,
         CancellationToken cancellationToken = default);
 

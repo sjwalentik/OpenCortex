@@ -55,11 +55,32 @@ public sealed class PostgresMigrationSchemaValidator
 
     public static IReadOnlyList<PostgresMigration> GetMissingMigrations(IEnumerable<string>? appliedMigrationIds)
     {
-        var applied = new HashSet<string>(appliedMigrationIds ?? [], StringComparer.OrdinalIgnoreCase);
+        var applied = new HashSet<string>(
+            (appliedMigrationIds ?? [])
+                .SelectMany(GetComparableMigrationIds),
+            StringComparer.OrdinalIgnoreCase);
+
         return PostgresMigrationCatalog.All
-            .Where(migration => !applied.Contains(migration.Id))
+            .Where(migration => !GetComparableMigrationIds(migration.Id).Any(applied.Contains))
             .ToArray();
     }
 
     private static string QuoteIdentifier(string identifier) => $"\"{identifier.Replace("\"", "\"\"")}\"";
+
+    private static IEnumerable<string> GetComparableMigrationIds(string? migrationId)
+    {
+        if (string.IsNullOrWhiteSpace(migrationId))
+        {
+            yield break;
+        }
+
+        var normalized = migrationId.Trim();
+        yield return normalized;
+
+        var separatorIndex = normalized.IndexOf('_');
+        if (separatorIndex > 0)
+        {
+            yield return normalized[..separatorIndex];
+        }
+    }
 }

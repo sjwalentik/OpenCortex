@@ -34,10 +34,58 @@ export type DocumentGroup = {
   documents: DocumentSummary[];
 };
 
+export type DocumentsViewCopy = {
+  eyebrow: string;
+  heroTitle: string;
+  heroSummary: string;
+  filterPlaceholder: string;
+  createButtonLabel: string;
+  importButtonLabel: string;
+  refreshButtonLabel: string;
+  listTitle: string;
+  railAriaLabel: string;
+  noItemsMessage: string;
+  noMatchesMessage: string;
+  detailFallbackTitle: string;
+  saveButtonLabel: string;
+  exportButtonLabel: string;
+  deleteButtonLabel: string;
+  loadingRailMessage: string;
+  loadingDetailMessage: string;
+  createMetaClean: string;
+  createMetaDirty: string;
+  emptySelectionMessage: string;
+};
+
+const defaultCopy: DocumentsViewCopy = {
+  eyebrow: 'Documents',
+  heroTitle: 'Managed-content authoring is now part of the main portal experience.',
+  heroSummary: 'The document rail, editor draft, export flow, save path, delete path, and version history all use the tenant APIs directly.',
+  filterPlaceholder: 'Filter by title, slug, or path',
+  createButtonLabel: 'New Document',
+  importButtonLabel: 'Import Markdown',
+  refreshButtonLabel: 'Refresh Documents',
+  listTitle: 'Document List',
+  railAriaLabel: 'Managed document list',
+  noItemsMessage: 'No documents exist in this brain yet.',
+  noMatchesMessage: 'No documents match the current filter.',
+  detailFallbackTitle: 'Document Editor',
+  saveButtonLabel: 'Save Document',
+  exportButtonLabel: 'Export Markdown',
+  deleteButtonLabel: 'Delete',
+  loadingRailMessage: 'Refreshing document rail...',
+  loadingDetailMessage: 'Loading selected document...',
+  createMetaClean: 'Ready to create a new managed-content document.',
+  createMetaDirty: 'Unsaved draft for the active managed-content brain.',
+  emptySelectionMessage: 'Select a document to inspect or edit its content.',
+};
+
 export type DocumentsViewProps = {
   activeBrain: BrainSummary | null;
   activeBrainId: string;
   brains: BrainSummary[];
+  availableDocumentLinks?: DocumentSummary[];
+  copy?: Partial<DocumentsViewCopy>;
   documentDraft: DocumentDraft;
   documentError: string | null;
   documentFilter: string;
@@ -82,6 +130,8 @@ export function DocumentsView({
   activeBrain,
   activeBrainId,
   brains,
+  availableDocumentLinks,
+  copy,
   documentDraft,
   documentError,
   documentFilter,
@@ -122,6 +172,8 @@ export function DocumentsView({
   versionsLoading,
 }: DocumentsViewProps) {
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const viewCopy = { ...defaultCopy, ...copy };
+  const linkSuggestions = availableDocumentLinks ?? documents;
   const renderedVersionMarkup = useMemo(
     () => ({ __html: renderMarkdown(selectedVersion?.content || '') }),
     [selectedVersion]
@@ -137,13 +189,13 @@ export function DocumentsView({
           : ''
   ].filter(Boolean).join(' ');
   const detailTitle = isCreatingDocument
-    ? 'New Document'
-    : (selectedDocument?.title || 'Document Editor');
+    ? viewCopy.createButtonLabel
+    : (selectedDocument?.title || viewCopy.detailFallbackTitle);
   const detailMeta = isCreatingDocument
-    ? (documentIsDirty ? 'Unsaved draft for the active managed-content brain.' : 'Ready to create a new managed-content document.')
+    ? (documentIsDirty ? viewCopy.createMetaDirty : viewCopy.createMetaClean)
     : selectedDocument
       ? `${selectedDocument.status || 'draft'} | ${selectedDocument.slug || '(no slug)'} | ${selectedDocument.canonicalPath || '(no canonical path)'} | updated ${formatDateTime(selectedDocument.updatedAt)}`
-      : 'Select a document to inspect or edit its content.';
+      : viewCopy.emptySelectionMessage;
 
   function handleRenderedMarkdownClick(event: ReactMouseEvent<HTMLElement>) {
     const target = event.target;
@@ -168,11 +220,9 @@ export function DocumentsView({
   return (
     <section className="portal-layout">
       <article className="panel portal-hero">
-        <p className="eyebrow">Documents</p>
-        <h2>Managed-content authoring is now part of the main portal experience.</h2>
-        <p className="summary-detail">
-          The document rail, editor draft, export flow, save path, delete path, and version history all use the tenant APIs directly.
-        </p>
+        <p className="eyebrow">{viewCopy.eyebrow}</p>
+        <h2>{viewCopy.heroTitle}</h2>
+        <p className="summary-detail">{viewCopy.heroSummary}</p>
       </article>
 
       <section className="panel workspace-toolbar">
@@ -191,20 +241,20 @@ export function DocumentsView({
           <span>Filter</span>
           <input
             type="search"
-            placeholder="Filter by title, slug, or path"
+            placeholder={viewCopy.filterPlaceholder}
             value={documentFilter}
             onChange={(event) => onChangeDocumentFilter(event.target.value)}
           />
         </label>
         <div className="action-row toolbar-actions">
           <button type="button" className="button button-primary" onClick={onCreateDocument} disabled={!activeBrainId || documentsLoading}>
-            New Document
+            {viewCopy.createButtonLabel}
           </button>
           <button type="button" className="button" onClick={() => importInputRef.current?.click()} disabled={!activeBrainId || documentsLoading}>
-            Import Markdown
+            {viewCopy.importButtonLabel}
           </button>
           <button type="button" className="button" onClick={onRefreshDocuments} disabled={!activeBrainId || documentsLoading}>
-            Refresh Documents
+            {viewCopy.refreshButtonLabel}
           </button>
           <input
             ref={importInputRef}
@@ -224,13 +274,13 @@ export function DocumentsView({
       {documentError ? <section className="banner error-banner" role="alert">{documentError}</section> : null}
       {versionsError ? <section className="banner error-banner" role="alert">{versionsError}</section> : null}
       {versionError ? <section className="banner error-banner" role="alert">{versionError}</section> : null}
-      {documentsLoading ? <section className="banner info-banner">Refreshing document rail...</section> : null}
+      {documentsLoading ? <section className="banner info-banner">{viewCopy.loadingRailMessage}</section> : null}
 
       <section className="documents-layout">
         <aside className="panel rail-panel">
           <div className="panel-header compact-header">
             <div>
-              <h3>Document List</h3>
+              <h3>{viewCopy.listTitle}</h3>
               <p className="summary-detail">
                 {activeBrain
                   ? `${documents.length} document(s) loaded for ${activeBrain.name}.`
@@ -243,10 +293,10 @@ export function DocumentsView({
             <div className="empty-state">No managed-content brain is available for this workspace yet.</div>
           ) : filteredDocuments.length === 0 ? (
             <div className="empty-state">
-              {documents.length === 0 ? 'No documents exist in this brain yet.' : 'No documents match the current filter.'}
+              {documents.length === 0 ? viewCopy.noItemsMessage : viewCopy.noMatchesMessage}
             </div>
           ) : (
-            <div className="document-list" aria-label="Managed document list">
+            <div className="document-list" aria-label={viewCopy.railAriaLabel}>
               {documentGroups.map((group) => (
                 <section key={group.directoryPath || '__root'} className="document-folder-group">
                   <div
@@ -294,22 +344,22 @@ export function DocumentsView({
             </div>
             <div className="action-row">
               <button type="button" className="button button-primary" onClick={onSaveDocument} disabled={!activeBrainId || documentSaveState === 'saving'}>
-                Save Document
+                {viewCopy.saveButtonLabel}
               </button>
               <button type="button" className="button" onClick={onExportDocument}>
-                Export Markdown
+                {viewCopy.exportButtonLabel}
               </button>
               <button type="button" className="button" onClick={onRevertDocument}>
                 Revert
               </button>
               <button type="button" className="button button-danger" onClick={onDeleteDocument} disabled={isCreatingDocument || !selectedDocument}>
-                Delete
+                {viewCopy.deleteButtonLabel}
               </button>
             </div>
           </div>
 
           <p className={saveStatusClassName}>{documentSaveMessage}</p>
-          {documentLoading ? <p className="document-save-status">Loading selected document...</p> : null}
+          {documentLoading ? <p className="document-save-status">{viewCopy.loadingDetailMessage}</p> : null}
 
           <div className="document-editor-grid">
             <label className="field">
@@ -362,7 +412,7 @@ export function DocumentsView({
             <div className="field">
               <span>Markdown Content</span>
               <MarkdownTiptapEditor
-                availableDocumentLinks={documents}
+                availableDocumentLinks={linkSuggestions}
                 currentDocumentPath={documentDraft.slug || selectedDocument?.canonicalPath || ''}
                 value={documentDraft.content}
                 placeholder="Write Markdown content here."

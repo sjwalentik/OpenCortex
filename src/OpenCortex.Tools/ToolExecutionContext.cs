@@ -21,6 +21,21 @@ public sealed record ToolExecutionContext
     public required string ConversationId { get; init; }
 
     /// <summary>
+    /// Tenant user ID when available in hosted flows.
+    /// </summary>
+    public string? TenantUserId { get; init; }
+
+    /// <summary>
+    /// Tenant customer ID when available in hosted flows.
+    /// </summary>
+    public string? TenantCustomerId { get; init; }
+
+    /// <summary>
+    /// Active brain ID from the routing context when available.
+    /// </summary>
+    public string? BrainId { get; init; }
+
+    /// <summary>
     /// Path to the user's sandboxed workspace directory.
     /// </summary>
     public string? WorkspacePath { get; init; }

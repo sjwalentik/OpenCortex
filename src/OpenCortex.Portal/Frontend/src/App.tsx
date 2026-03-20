@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatView } from './ChatView';
 import { DocumentsView } from './DocumentsView';
+import { MemoriesView } from './MemoriesView';
 import { normalizeDocumentLinkPath } from './documentLinks';
-import { buildDocumentExportFileName, buildDocumentPayload, buildDraftFromDocument, buildEmptyDocumentDraft, buildMarkdownExport, hasUnsavedDocumentChanges, normalizeDocumentDraft, parseImportedMarkdown } from './documentDraft';
+import { normalizeDocumentDraft, normalizeDocumentPath } from './documentDraft';
+import { useManagedDocumentWorkspace } from './useManagedDocumentWorkspace';
 
-type PortalView = 'signin' | 'documents' | 'chat' | 'account' | 'usage' | 'tools';
+type PortalView = 'signin' | 'documents' | 'memories' | 'chat' | 'account' | 'usage' | 'tools';
 
 type PortalConfig = {
   apiBaseUrlConfigured: boolean;
@@ -99,9 +101,17 @@ type PortalBilling = {
 
 type BrainSummary = {
   brainId: string;
+  slug?: string;
   name: string;
   mode: string;
   status: string;
+};
+
+type MemoryBrainPreference = {
+  configuredMemoryBrainId?: string | null;
+  effectiveMemoryBrainId?: string | null;
+  needsConfiguration?: boolean;
+  error?: string | null;
 };
 
 type TokenSummary = {
@@ -287,6 +297,16 @@ const viewDefinitions: Record<PortalView, ViewDefinition> = {
       'Tiptap comes after current behavior survives intact.'
     ]
   },
+  memories: {
+    id: 'memories',
+    title: 'Memories',
+    lead: 'Author and manage agent memory records as first-class Markdown documents under the reserved memories path.',
+    bullets: [
+      'Memory records use the same editor, save path, import/export flow, and version history as documents.',
+      'The view is scoped to memories/ inside the active managed-content brain.',
+      'Forget remains explicit so stale memories can be removed safely.'
+    ]
+  },
   chat: {
     id: 'chat',
     title: 'Chat',
@@ -329,7 +349,7 @@ const viewDefinitions: Record<PortalView, ViewDefinition> = {
   }
 };
 
-const orderedViews: PortalView[] = ['signin', 'documents', 'chat', 'account', 'usage', 'tools'];
+const orderedViews: PortalView[] = ['signin', 'documents', 'memories', 'chat', 'account', 'usage', 'tools'];
 
 function App() {
   const [config, setConfig] = useState<PortalConfig | null>(null);
@@ -345,6 +365,7 @@ function App() {
   const [context, setContext] = useState<PortalContext | null>(null);
   const [billing, setBilling] = useState<PortalBilling | null>(null);
   const [brains, setBrains] = useState<BrainSummary[]>([]);
+  const [memoryBrainPreference, setMemoryBrainPreference] = useState<MemoryBrainPreference | null>(null);
   const [tokens, setTokens] = useState<TokenSummary[]>([]);
   const [availableProviders, setAvailableProviders] = useState<AvailableProvider[]>([]);
   const [configuredProviders, setConfiguredProviders] = useState<ConfiguredProviderSummary[]>([]);
@@ -354,28 +375,8 @@ function App() {
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [activeBrainId, setActiveBrainId] = useState('');
   const [documentFilter, setDocumentFilter] = useState('');
-  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
-  const [documentsLoading, setDocumentsLoading] = useState(false);
-  const [documentsError, setDocumentsError] = useState<string | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [selectedDocument, setSelectedDocument] = useState<DocumentDetail | null>(null);
-  const [documentLoading, setDocumentLoading] = useState(false);
-  const [documentError, setDocumentError] = useState<string | null>(null);
-  const [documentRefreshNonce, setDocumentRefreshNonce] = useState(0);
-  const [documentDetailNonce, setDocumentDetailNonce] = useState(0);
-  const [isCreatingDocument, setIsCreatingDocument] = useState(false);
-  const [documentDraft, setDocumentDraft] = useState<DocumentDraft>(buildEmptyDocumentDraft());
-  const [documentSaveState, setDocumentSaveState] = useState<DocumentSaveState>('idle');
-  const [documentSaveMessage, setDocumentSaveMessage] = useState('Make a change to enable save.');
-  const [documentVersions, setDocumentVersions] = useState<DocumentVersionSummary[]>([]);
-  const [versionsLoading, setVersionsLoading] = useState(false);
-  const [versionsError, setVersionsError] = useState<string | null>(null);
-  const [versionRefreshNonce, setVersionRefreshNonce] = useState(0);
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
-  const [selectedVersion, setSelectedVersion] = useState<DocumentVersionDetail | null>(null);
-  const [versionLoading, setVersionLoading] = useState(false);
-  const [versionError, setVersionError] = useState<string | null>(null);
-    const [tokenNameInput, setTokenNameInput] = useState('');
+  const [memoryFilter, setMemoryFilter] = useState('');
+  const [tokenNameInput, setTokenNameInput] = useState('');
   const [tokenExpiresAtInput, setTokenExpiresAtInput] = useState('');
   const [requestWriteScope, setRequestWriteScope] = useState(false);
   const [createdToken, setCreatedToken] = useState<CreatedTokenState | null>(null);
@@ -549,11 +550,14 @@ function App() {
       setContext(null);
       setBilling(null);
       setBrains([]);
+      setMemoryBrainPreference(null);
       setTokens([]);
       setAvailableProviders([]);
       setConfiguredProviders([]);
       setWorkspaceError(null);
       setActiveBrainId('');
+      setDocumentFilter('');
+      setMemoryFilter('');
       setCreatedToken(null);
       setAccountActionMessage(null);
       setToolQueryBrainId('');
@@ -582,10 +586,11 @@ function App() {
           setAuthSession(session);
         }
 
-        const [workspaceContext, workspaceBilling, workspaceBrains, workspaceTokens, providerCatalog, providerConfigs] = await Promise.all([
+        const [workspaceContext, workspaceBilling, workspaceBrains, workspaceMemoryBrain, workspaceTokens, providerCatalog, providerConfigs] = await Promise.all([
           portalFetch('/portal-api/tenant/me', session.idToken),
           portalFetch('/portal-api/tenant/billing/plan', session.idToken),
           portalFetch('/portal-api/tenant/brains', session.idToken),
+          portalFetch('/portal-api/tenant/me/memory-brain', session.idToken),
           portalFetch('/portal-api/tenant/tokens', session.idToken),
           portalFetch('/portal-api/api/providers/config/available', session.idToken),
           portalFetch('/portal-api/api/providers/config/', session.idToken)
@@ -605,6 +610,7 @@ function App() {
         setContext(workspaceContext as PortalContext);
         setBilling(workspaceBilling as PortalBilling);
         setBrains(nextBrains);
+        setMemoryBrainPreference(workspaceMemoryBrain as MemoryBrainPreference);
         setTokens(nextTokens);
         setAvailableProviders(nextAvailableProviders);
         setConfiguredProviders(nextConfiguredProviders);
@@ -619,6 +625,7 @@ function App() {
           setContext(null);
           setBilling(null);
           setBrains([]);
+          setMemoryBrainPreference(null);
           setTokens([]);
           setAvailableProviders([]);
           setConfiguredProviders([]);
@@ -648,290 +655,118 @@ function App() {
     setActiveBrainId((current) => selectActiveBrainId(current, brains, context));
   }, [authSession, brains, context]);
 
-  useEffect(() => {
-    if (!authSession || !activeBrainId) {
-      setDocuments([]);
-      setDocumentsError(null);
-      setDocumentsLoading(false);
-      setSelectedDocumentId(null);
-      setSelectedDocument(null);
-      setDocumentError(null);
-      setDocumentLoading(false);
-      setIsCreatingDocument(false);
-      setDocumentDraft(buildEmptyDocumentDraft());
-      setDocumentSaveState('idle');
-      setDocumentSaveMessage('Make a change to enable save.');
-      setDocumentVersions([]);
-      setVersionsLoading(false);
-      setVersionsError(null);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-      setVersionLoading(false);
-      setVersionError(null);
-      return;
+  const getValidSession = useCallback(async () => {
+    if (!authSession) {
+      throw new Error('Sign in before using the portal.');
     }
 
-    let cancelled = false;
-
-    async function loadDocuments() {
-      setDocumentsLoading(true);
-      setDocumentsError(null);
-
-      try {
-        const session = await ensureValidSession(authSession);
-        if (cancelled) {
-          return;
-        }
-
-        if (session !== authSession) {
-          setAuthSession(session);
-        }
-
-        const response = (await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents?limit=200`,
-          session.idToken
-        )) as DocumentListResponse;
-
-        if (cancelled) {
-          return;
-        }
-
-        const nextDocuments = Array.isArray(response.documents) ? response.documents : [];
-        setDocuments(nextDocuments);
-
-        setSelectedDocumentId((currentSelectedId) => {
-          const preferredId = currentSelectedId && nextDocuments.some((document) => document.managedDocumentId === currentSelectedId)
-            ? currentSelectedId
-            : nextDocuments[0]?.managedDocumentId ?? null;
-
-          if (!preferredId) {
-            setSelectedDocument(null);
-            setDocumentError(null);
-          }
-
-          return preferredId;
-        });
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setDocuments([]);
-        setSelectedDocumentId(null);
-        setSelectedDocument(null);
-        setDocumentsError(error instanceof Error ? error.message : 'Failed to load documents.');
-      } finally {
-        if (!cancelled) {
-          setDocumentsLoading(false);
-        }
-      }
+    const session = await ensureValidSession(authSession);
+    if (session !== authSession) {
+      setAuthSession(session);
     }
 
-    void loadDocuments();
+    return session;
+  }, [authSession]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession, activeBrainId, documentRefreshNonce]);
+  const {
+    documentDraft,
+    documentError,
+    documentIsDirty,
+    documentLoading,
+    documentSaveMessage,
+    documentSaveState,
+    documentVersions,
+    documents,
+    documentsError,
+    documentsLoading,
+    isCreatingDocument,
+    selectedDocument,
+    selectedDocumentId,
+    selectedVersion,
+    selectedVersionId,
+    versionError,
+    versionLoading,
+    versionsError,
+    versionsLoading,
+    handleCreateDocument,
+    handleDeleteDocument,
+    handleDraftChange,
+    handleExportDocument,
+    handleImportDocument,
+    handleRefreshDocuments,
+    handleRefreshVersions,
+    handleRestoreVersion,
+    handleRevertDocument,
+    handleSaveDocument,
+    handleSelectDocument: selectDocumentById,
+    handleSelectVersion,
+    showDocumentStatus,
+  } = useManagedDocumentWorkspace({
+    activeBrainId,
+    enabled: Boolean(authSession && activeBrainId),
+    hasSession: Boolean(authSession),
+    singularLabel: 'document',
+    deleteActionLabel: 'Delete',
+    deletePastTense: 'deleted',
+    getValidSession,
+    portalFetch,
+    downloadTextFile,
+    formatDateTime,
+    listQuery: {
+      excludePathPrefix: 'memories/',
+    },
+  });
 
-  useEffect(() => {
-    if (!authSession || !activeBrainId || !selectedDocumentId) {
-      setSelectedDocument(null);
-      setDocumentError(null);
-      setDocumentLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadDocument() {
-      setDocumentLoading(true);
-      setDocumentError(null);
-
-      try {
-        const session = await ensureValidSession(authSession);
-        if (cancelled) {
-          return;
-        }
-
-        if (session !== authSession) {
-          setAuthSession(session);
-        }
-
-        const document = (await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocumentId)}`,
-          session.idToken
-        )) as DocumentDetail;
-
-        if (!cancelled) {
-          setSelectedDocument(document);
-          setIsCreatingDocument(false);
-        }
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setSelectedDocument(null);
-        setDocumentError(error instanceof Error ? error.message : 'Failed to load the selected document.');
-      } finally {
-        if (!cancelled) {
-          setDocumentLoading(false);
-        }
-      }
-    }
-
-    void loadDocument();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession, activeBrainId, selectedDocumentId, documentDetailNonce]);
-
-  useEffect(() => {
-    if (isCreatingDocument) {
-      setDocumentVersions([]);
-      setVersionsLoading(false);
-      setVersionsError(null);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-      setVersionLoading(false);
-      setVersionError(null);
-      return;
-    }
-
-    if (!selectedDocument) {
-      setDocumentDraft(buildEmptyDocumentDraft());
-      setDocumentSaveState('idle');
-      setDocumentSaveMessage('Make a change to enable save.');
-      return;
-    }
-
-    setDocumentDraft(buildDraftFromDocument(selectedDocument));
-    setDocumentSaveState('info');
-    setDocumentSaveMessage('All changes saved.');
-  }, [isCreatingDocument, selectedDocument]);
-
-  useEffect(() => {
-    if (!authSession || !activeBrainId || !selectedDocumentId || isCreatingDocument) {
-      setDocumentVersions([]);
-      setVersionsLoading(false);
-      setVersionsError(null);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-      setVersionLoading(false);
-      setVersionError(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadVersions() {
-      setVersionsLoading(true);
-      setVersionsError(null);
-
-      try {
-        const session = await ensureValidSession(authSession);
-        if (cancelled) {
-          return;
-        }
-
-        if (session !== authSession) {
-          setAuthSession(session);
-        }
-
-        const response = (await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocumentId)}/versions?limit=25`,
-          session.idToken
-        )) as DocumentVersionListResponse;
-
-        if (cancelled) {
-          return;
-        }
-
-        const nextVersions = Array.isArray(response.versions) ? response.versions : [];
-        setDocumentVersions(nextVersions);
-        setSelectedVersionId((currentSelectedVersionId) => (
-          currentSelectedVersionId && nextVersions.some((version) => version.managedDocumentVersionId === currentSelectedVersionId)
-            ? currentSelectedVersionId
-            : null
-        ));
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setDocumentVersions([]);
-        setSelectedVersionId(null);
-        setSelectedVersion(null);
-        setVersionsError(error instanceof Error ? error.message : 'Failed to load document versions.');
-      } finally {
-        if (!cancelled) {
-          setVersionsLoading(false);
-        }
-      }
-    }
-
-    void loadVersions();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession, activeBrainId, selectedDocumentId, isCreatingDocument, versionRefreshNonce]);
-
-  useEffect(() => {
-    if (!authSession || !activeBrainId || !selectedDocumentId || !selectedVersionId || isCreatingDocument) {
-      setSelectedVersion(null);
-      setVersionError(null);
-      setVersionLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadVersionDetail() {
-      setVersionLoading(true);
-      setVersionError(null);
-
-      try {
-        const session = await ensureValidSession(authSession);
-        if (cancelled) {
-          return;
-        }
-
-        if (session !== authSession) {
-          setAuthSession(session);
-        }
-
-        const version = (await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocumentId)}/versions/${encodeURIComponent(selectedVersionId)}`,
-          session.idToken
-        )) as DocumentVersionDetail;
-
-        if (!cancelled) {
-          setSelectedVersion(version);
-        }
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setSelectedVersion(null);
-        setVersionError(error instanceof Error ? error.message : 'Failed to load the selected version.');
-      } finally {
-        if (!cancelled) {
-          setVersionLoading(false);
-        }
-      }
-    }
-
-    void loadVersionDetail();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession, activeBrainId, selectedDocumentId, selectedVersionId, isCreatingDocument]);
-
+  const {
+    documentDraft: memoryDraft,
+    documentError: memoryError,
+    documentIsDirty: memoryIsDirty,
+    documentLoading: memoryLoading,
+    documentSaveMessage: memorySaveMessage,
+    documentSaveState: memorySaveState,
+    documentVersions: memoryVersions,
+    documents: memories,
+    documentsError: memoriesError,
+    documentsLoading: memoriesLoading,
+    isCreatingDocument: isCreatingMemory,
+    selectedDocument: selectedMemory,
+    selectedDocumentId: selectedMemoryId,
+    selectedVersion: selectedMemoryVersion,
+    selectedVersionId: selectedMemoryVersionId,
+    versionError: memoryVersionError,
+    versionLoading: memoryVersionLoading,
+    versionsError: memoryVersionsError,
+    versionsLoading: memoryVersionsLoading,
+    handleCreateDocument: handleCreateMemory,
+    handleDeleteDocument: handleDeleteMemory,
+    handleDraftChange: handleMemoryDraftChange,
+    handleExportDocument: handleExportMemory,
+    handleImportDocument: handleImportMemory,
+    handleRefreshDocuments: handleRefreshMemories,
+    handleRefreshVersions: handleRefreshMemoryVersions,
+    handleRestoreVersion: handleRestoreMemoryVersion,
+    handleRevertDocument: handleRevertMemory,
+    handleSaveDocument: handleSaveMemory,
+    handleSelectDocument: selectMemoryById,
+    handleSelectVersion: handleSelectMemoryVersion,
+    showDocumentStatus: showMemoryStatus,
+  } = useManagedDocumentWorkspace({
+    activeBrainId,
+    enabled: activeView === 'memories',
+    hasSession: Boolean(authSession),
+    singularLabel: 'memory',
+    deleteActionLabel: 'Forget',
+    deletePastTense: 'forgotten',
+    getValidSession,
+    portalFetch,
+    downloadTextFile,
+    formatDateTime,
+    listQuery: {
+      pathPrefix: 'memories/',
+    },
+    normalizeDraftForEdit: normalizeMemoryDraftForEdit,
+    normalizeDraftForSave: normalizeMemoryDraftForSave,
+  });
   useEffect(() => {
     if (!authSession || brains.length === 0) {
       setToolQueryBrainId('');
@@ -999,341 +834,95 @@ function App() {
       cancelled = true;
     };
   }, [authSession, activeBrainId, indexingRefreshNonce]);
-  async function getValidSession() {
-    if (!authSession) {
-      throw new Error('Sign in before using the portal.');
-    }
 
-    const session = await ensureValidSession(authSession);
-    if (session !== authSession) {
-      setAuthSession(session);
-    }
-
-    return session;
+function handleChangeBrain(nextBrainId: string) {
+  if (nextBrainId === activeBrainId) {
+    return;
   }
 
-  const documentIsDirty = useMemo(
-    () => hasUnsavedDocumentChanges(documentDraft, isCreatingDocument, selectedDocument),
-    [documentDraft, isCreatingDocument, selectedDocument]
-  );
-
-  function handleDraftChange<K extends keyof DocumentDraft>(field: K, value: DocumentDraft[K]) {
-    setDocumentDraft((current) => ({
-      ...current,
-      [field]: value,
-    }));
-    setDocumentSaveState('idle');
-    setDocumentSaveMessage('Unsaved changes.');
+  if (!confirmDiscardDocumentChanges(documentIsDirty || memoryIsDirty, 'Switch brains and discard unsaved changes?')) {
+    return;
   }
 
-  function handleChangeBrain(nextBrainId: string) {
-    if (nextBrainId === activeBrainId) {
-      return;
-    }
+  setActiveBrainId(nextBrainId);
+}
 
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Switch brains and discard unsaved document changes?')) {
-      return;
-    }
+function handleSelectDocument(nextDocumentId: string) {
+  void selectDocumentById(nextDocumentId);
+}
 
-    setActiveBrainId(nextBrainId);
-    setIsCreatingDocument(false);
-    setSelectedDocumentId(null);
-    setSelectedDocument(null);
-    setDocumentDraft(buildEmptyDocumentDraft());
-    setDocumentSaveState('idle');
-    setDocumentSaveMessage('Make a change to enable save.');
-    setDocumentVersions([]);
-    setSelectedVersionId(null);
-    setSelectedVersion(null);
+function handleSelectMemory(nextMemoryId: string) {
+  void selectMemoryById(nextMemoryId);
+}
+
+async function handleOpenDocumentLink(rawPath: string) {
+  const canonicalPath = normalizeDocumentLinkPath(rawPath);
+  const isMemoryPath = canonicalPath.startsWith('memories/');
+  const showStatus = isMemoryPath ? showMemoryStatus : showDocumentStatus;
+
+  if (!canonicalPath) {
+    showStatus('warn', 'Enter a valid managed document path like daily/notes.md.');
+    return;
   }
 
-  function handleSelectDocument(nextDocumentId: string) {
-    if (!nextDocumentId) {
-      return;
-    }
-
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Open another document and discard unsaved changes?')) {
-      return;
-    }
-
-    setIsCreatingDocument(false);
-    setSelectedDocumentId(nextDocumentId);
-    setSelectedVersionId(null);
-    setSelectedVersion(null);
-    setDocumentSaveState('info');
-    setDocumentSaveMessage('Loading document...');
+  if (!activeBrainId) {
+    showStatus('warn', 'Select a managed-content brain before opening document links.');
+    return;
   }
 
-  async function handleOpenDocumentLink(rawPath: string) {
-    const canonicalPath = normalizeDocumentLinkPath(rawPath);
-    if (!canonicalPath) {
-      setDocumentSaveState('warn');
-      setDocumentSaveMessage('Enter a valid managed document path like daily/notes.md.');
-      return;
-    }
+  const targetIsMemory = canonicalPath.startsWith('memories/');
+  const targetDocuments = targetIsMemory ? memories : documents;
+  const targetIsDirty = targetIsMemory ? memoryIsDirty : documentIsDirty;
+  const targetView = targetIsMemory ? 'memories' : 'documents';
+  const selectTargetDocument = targetIsMemory ? selectMemoryById : selectDocumentById;
+  const refreshTargetDocuments = targetIsMemory ? handleRefreshMemories : handleRefreshDocuments;
 
-    if (!activeBrainId) {
-      setDocumentSaveState('warn');
-      setDocumentSaveMessage('Select a managed-content brain before opening document links.');
-      return;
-    }
+  if (!confirmDiscardDocumentChanges(targetIsDirty, `Open '${canonicalPath}' and discard unsaved changes?`)) {
+    return;
+  }
 
-    if (!confirmDiscardDocumentChanges(documentIsDirty, `Open '${canonicalPath}' and discard unsaved changes?`)) {
-      return;
-    }
+  const existingDocument = targetDocuments.find((document) => {
+    const candidatePath = normalizeDocumentLinkPath(document.canonicalPath || document.slug || '');
+    return candidatePath === canonicalPath;
+  });
 
-    const existingDocument = documents.find((document) => {
-      const candidatePath = normalizeDocumentLinkPath(document.canonicalPath || document.slug || '');
-      return candidatePath === canonicalPath;
+  if (existingDocument?.managedDocumentId) {
+    const selected = selectTargetDocument(existingDocument.managedDocumentId, {
+      loadingMessage: `Loading '${existingDocument.title || existingDocument.canonicalPath || canonicalPath}'...`,
+      skipConfirm: true,
     });
 
-    if (existingDocument?.managedDocumentId) {
-      handleSelectDocument(existingDocument.managedDocumentId);
-      return;
+    if (selected && authSession) {
+      navigateToView(targetView, authSession, setActiveView);
     }
 
-    try {
-      const session = await getValidSession();
-      const resolvedDocument = await portalFetch(
-        `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/by-path?canonicalPath=${encodeURIComponent(canonicalPath)}`,
-        session.idToken
-      ) as DocumentDetail;
-
-      setIsCreatingDocument(false);
-      setSelectedDocumentId(resolvedDocument.managedDocumentId);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-      setDocumentSaveState('info');
-      setDocumentSaveMessage(`Loading '${resolvedDocument.title || resolvedDocument.canonicalPath || canonicalPath}'...`);
-      setDocumentRefreshNonce((value) => value + 1);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : `Failed to open '${canonicalPath}'.`);
-    }
+    return;
   }
 
-  function handleCreateDocument() {
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Create a new document and discard unsaved changes?')) {
+  try {
+    const session = await getValidSession();
+    const resolvedDocument = await portalFetch(
+      `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/by-path?canonicalPath=${encodeURIComponent(canonicalPath)}`,
+      session.idToken,
+    ) as DocumentDetail;
+
+    const selected = selectTargetDocument(resolvedDocument.managedDocumentId, {
+      loadingMessage: `Loading '${resolvedDocument.title || resolvedDocument.canonicalPath || canonicalPath}'...`,
+      skipConfirm: true,
+    });
+
+    if (!selected) {
       return;
     }
 
-    setIsCreatingDocument(true);
-    setSelectedDocumentId(null);
-    setSelectedDocument(null);
-    setDocumentDraft(buildEmptyDocumentDraft());
-    setDocumentSaveState('idle');
-    setDocumentSaveMessage('Start typing, then create the document.');
-    setDocumentVersions([]);
-    setSelectedVersionId(null);
-    setSelectedVersion(null);
+    refreshTargetDocuments();
+    if (authSession) {
+      navigateToView(targetView, authSession, setActiveView);
+    }
+  } catch (error) {
+    showStatus('error', error instanceof Error ? error.message : `Failed to open '${canonicalPath}'.`);
   }
-
-  async function handleSaveDocument() {
-    if (!activeBrainId) {
-      setDocumentSaveState('warn');
-      setDocumentSaveMessage('Select a managed-content brain before saving.');
-      return;
-    }
-
-    try {
-      setDocumentSaveState('saving');
-      setDocumentSaveMessage(isCreatingDocument ? 'Creating document...' : 'Saving document...');
-      const session = await getValidSession();
-      const draft = normalizeDocumentDraft(documentDraft);
-      const payload = buildDocumentPayload(draft);
-
-      if (isCreatingDocument) {
-        const created = await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents`,
-          session.idToken,
-          {
-            method: 'POST',
-            body: JSON.stringify(payload),
-          }
-        ) as DocumentDetail;
-
-        setIsCreatingDocument(false);
-        setSelectedDocumentId(created.managedDocumentId);
-        setDocumentSaveState('info');
-        setDocumentSaveMessage(`Created document '${created.title || created.slug || created.managedDocumentId}'.`);
-        setDocumentRefreshNonce((value) => value + 1);
-        setDocumentDetailNonce((value) => value + 1);
-        setVersionRefreshNonce((value) => value + 1);
-        return;
-      }
-
-      if (!selectedDocument?.managedDocumentId) {
-        setDocumentSaveState('warn');
-        setDocumentSaveMessage('Select a document or create a new one before saving.');
-        return;
-      }
-
-      const updated = await portalFetch(
-        `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocument.managedDocumentId)}`,
-        session.idToken,
-        {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        }
-      ) as DocumentDetail;
-
-      setDocumentSaveState('info');
-      setDocumentSaveMessage(`Saved document '${updated.title || updated.slug || updated.managedDocumentId}'.`);
-      setDocumentRefreshNonce((value) => value + 1);
-      setDocumentDetailNonce((value) => value + 1);
-      setVersionRefreshNonce((value) => value + 1);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : 'Failed to save the document.');
-    }
-  }
-
-  function handleExportDocument() {
-    try {
-      const draft = normalizeDocumentDraft(documentDraft);
-      if (!draft.title && !draft.content.trim()) {
-        setDocumentSaveState('warn');
-        setDocumentSaveMessage('Create or select a document before exporting Markdown.');
-        return;
-      }
-
-      const markdown = buildMarkdownExport(draft, selectedDocument);
-      const fileName = buildDocumentExportFileName(draft, selectedDocument);
-      downloadTextFile(fileName, markdown, 'text/markdown;charset=utf-8');
-      setDocumentSaveState('info');
-      setDocumentSaveMessage(`Exported '${fileName}'.`);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : 'Failed to export the document.');
-    }
-  }
-
-  async function handleDeleteDocument() {
-    if (!selectedDocument?.managedDocumentId || isCreatingDocument) {
-      setDocumentSaveState('warn');
-      setDocumentSaveMessage('Select an existing document before deleting.');
-      return;
-    }
-
-    const label = selectedDocument.title || selectedDocument.managedDocumentId;
-    if (!window.confirm(`Delete document '${label}'?`)) {
-      return;
-    }
-
-    try {
-      const session = await getValidSession();
-      await portalFetch(
-        `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocument.managedDocumentId)}`,
-        session.idToken,
-        {
-          method: 'DELETE',
-        }
-      );
-
-      setSelectedDocumentId(null);
-      setSelectedDocument(null);
-      setDocumentDraft(buildEmptyDocumentDraft());
-      setDocumentSaveState('info');
-      setDocumentSaveMessage('Document deleted.');
-      setDocumentRefreshNonce((value) => value + 1);
-      setDocumentVersions([]);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : 'Failed to delete the document.');
-    }
-  }
-
-  function handleRevertDocument() {
-    if (isCreatingDocument) {
-      setDocumentDraft(buildEmptyDocumentDraft());
-      setDocumentSaveState('idle');
-      setDocumentSaveMessage('Start typing, then create the document.');
-      return;
-    }
-
-    if (selectedDocument) {
-      setDocumentDraft(buildDraftFromDocument(selectedDocument));
-      setDocumentSaveState('info');
-      setDocumentSaveMessage('Changes reverted to the last saved version.');
-      return;
-    }
-
-    setDocumentDraft(buildEmptyDocumentDraft());
-    setDocumentSaveState('idle');
-    setDocumentSaveMessage('Make a change to enable save.');
-  }
-
-
-  async function handleImportDocument(file: File | null) {
-    if (!file) {
-      return;
-    }
-
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Import Markdown and discard unsaved changes?')) {
-      return;
-    }
-
-    try {
-      const imported = parseImportedMarkdown(await file.text(), file.name);
-      setIsCreatingDocument(true);
-      setSelectedDocumentId(null);
-      setSelectedDocument(null);
-      setDocumentDraft(imported);
-      setDocumentSaveState('info');
-      setDocumentSaveMessage('Imported Markdown draft ready.');
-      setDocumentVersions([]);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : 'Failed to import Markdown.');
-    }
-  }
-
-  function handleRefreshVersions() {
-    if (!selectedDocument?.managedDocumentId || isCreatingDocument) {
-      setVersionsError('Select a saved document before loading version history.');
-      return;
-    }
-
-    setVersionRefreshNonce((value) => value + 1);
-  }
-
-  function handleSelectVersion(nextVersionId: string) {
-    setSelectedVersionId((current) => current === nextVersionId ? null : nextVersionId);
-  }
-
-  async function handleRestoreVersion() {
-    if (!selectedDocument?.managedDocumentId || !selectedVersion?.managedDocumentVersionId) {
-      setVersionError('Select a document version before restoring.');
-      return;
-    }
-
-    const restoreTimestamp = formatDateTime(selectedVersion.createdAt);
-    if (!window.confirm(`Restore the selected version from ${restoreTimestamp}? Current draft changes will be replaced.`)) {
-      return;
-    }
-
-    try {
-      const session = await getValidSession();
-      await portalFetch(
-        `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocument.managedDocumentId)}/versions/${encodeURIComponent(selectedVersion.managedDocumentVersionId)}/restore`,
-        session.idToken,
-        {
-          method: 'POST',
-        }
-      );
-
-      setDocumentSaveState('info');
-      setDocumentSaveMessage(`Restored version from ${restoreTimestamp}.`);
-      setDocumentDetailNonce((value) => value + 1);
-      setVersionRefreshNonce((value) => value + 1);
-    } catch (error) {
-      setVersionError(error instanceof Error ? error.message : 'Failed to restore the selected version.');
-    }
-  }
+}
   async function handleAuthenticate(endpoint: '/portal-auth/login' | '/portal-auth/register', action: Exclude<AuthPendingAction, null>) {
     const email = authEmailInput.trim();
     const password = authPasswordInput;
@@ -1417,7 +1006,7 @@ function App() {
   }
 
   async function handleSignOut() {
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Sign out and discard unsaved document changes?')) {
+    if (!confirmDiscardDocumentChanges(documentIsDirty || memoryIsDirty, 'Sign out and discard unsaved changes?')) {
       return;
     }
 
@@ -1463,6 +1052,26 @@ function App() {
       setRefreshNonce((value) => value + 1);
     } catch (error) {
       setAccountActionMessage(error instanceof Error ? error.message : `Failed to save ${providerId} settings.`);
+    }
+  }
+
+  async function handleSaveMemoryBrain(memoryBrainId: string) {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/tenant/me/memory-brain', session.idToken, {
+        method: 'PUT',
+        body: JSON.stringify({
+          memoryBrainId: memoryBrainId || null,
+        }),
+      }) as MemoryBrainPreference;
+
+      setMemoryBrainPreference(response);
+      setAccountActionMessage(memoryBrainId
+        ? 'Memory brain preference saved.'
+        : 'Memory brain preference cleared.');
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to save memory brain preference.');
     }
   }
 
@@ -1539,7 +1148,7 @@ function App() {
     navigateToView('account', authSession, setActiveView);
   }
 
-  async function handleCreateToken() {
+async function handleCreateToken() {
     try {
       const session = await getValidSession();
       const name = tokenNameInput.trim();
@@ -1720,14 +1329,26 @@ function App() {
     [config?.mcpBaseUrl, activeToken?.name]
   );
   const filteredDocuments = useMemo(
-    () => applyDocumentFilter(documents, documentFilter),
-    [documents, documentFilter]
-  );
-  const documentGroups = useMemo(
-    () => buildDocumentDirectoryGroups(filteredDocuments),
-    [filteredDocuments]
-  );
-  const activeBrain = brains.find((brain) => brain.brainId === activeBrainId) ?? null;
+  () => applyDocumentFilter(documents, documentFilter),
+  [documents, documentFilter]
+);
+const filteredMemories = useMemo(
+  () => applyDocumentFilter(memories, memoryFilter),
+  [memories, memoryFilter]
+);
+const documentGroups = useMemo(
+  () => buildDocumentDirectoryGroups(filteredDocuments),
+  [filteredDocuments]
+);
+const memoryDocumentGroups = useMemo(
+  () => buildDocumentDirectoryGroups(filteredMemories),
+  [filteredMemories]
+);
+const availableManagedDocumentLinks = useMemo(
+  () => [...documents, ...memories],
+  [documents, memories]
+);
+const activeBrain = brains.find((brain) => brain.brainId === activeBrainId) ?? null;
 
   return (
     <div className="app-shell">
@@ -1822,6 +1443,7 @@ function App() {
           <DocumentsView
             activeBrain={activeBrain}
             activeBrainId={activeBrainId}
+            availableDocumentLinks={availableManagedDocumentLinks}
             brains={brains}
             documentDraft={documentDraft}
             documentError={documentError}
@@ -1845,7 +1467,7 @@ function App() {
             onExportDocument={handleExportDocument}
             onImportDocument={handleImportDocument}
             onOpenDocumentLink={handleOpenDocumentLink}
-            onRefreshDocuments={() => setDocumentRefreshNonce((value) => value + 1)}
+            onRefreshDocuments={handleRefreshDocuments}
             onRefreshVersions={handleRefreshVersions}
             onRestoreVersion={handleRestoreVersion}
             onRevertDocument={handleRevertDocument}
@@ -1860,6 +1482,50 @@ function App() {
             versionLoading={versionLoading}
             versionsError={versionsError}
             versionsLoading={versionsLoading}
+          />
+        ) : activeView === 'memories' ? (
+          <MemoriesView
+            activeBrain={activeBrain}
+            activeBrainId={activeBrainId}
+            availableDocumentLinks={availableManagedDocumentLinks}
+            brains={brains}
+            documentDraft={memoryDraft}
+            documentError={memoryError}
+            documentFilter={memoryFilter}
+            documentGroups={memoryDocumentGroups}
+            documentIsDirty={memoryIsDirty}
+            documentLoading={memoryLoading}
+            documentSaveMessage={memorySaveMessage}
+            documentSaveState={memorySaveState}
+            documentVersions={memoryVersions}
+            documents={memories}
+            documentsError={memoriesError}
+            documentsLoading={memoriesLoading}
+            filteredDocuments={filteredMemories}
+            isCreatingDocument={isCreatingMemory}
+            onChangeBrain={handleChangeBrain}
+            onChangeDocumentFilter={setMemoryFilter}
+            onCreateDocument={handleCreateMemory}
+            onDeleteDocument={handleDeleteMemory}
+            onDraftChange={handleMemoryDraftChange}
+            onExportDocument={handleExportMemory}
+            onImportDocument={handleImportMemory}
+            onOpenDocumentLink={handleOpenDocumentLink}
+            onRefreshDocuments={handleRefreshMemories}
+            onRefreshVersions={handleRefreshMemoryVersions}
+            onRestoreVersion={handleRestoreMemoryVersion}
+            onRevertDocument={handleRevertMemory}
+            onSaveDocument={handleSaveMemory}
+            onSelectDocument={handleSelectMemory}
+            onSelectVersion={handleSelectMemoryVersion}
+            selectedDocument={selectedMemory}
+            selectedDocumentId={selectedMemoryId}
+            selectedVersion={selectedMemoryVersion}
+            selectedVersionId={selectedMemoryVersionId}
+            versionError={memoryVersionError}
+            versionLoading={memoryVersionLoading}
+            versionsError={memoryVersionsError}
+            versionsLoading={memoryVersionsLoading}
           />
         ) : activeView === 'chat' ? (
           <ChatView
@@ -1915,9 +1581,11 @@ function App() {
             authSession={authSession}
             availableProviders={availableProviders}
             billing={billing}
+            brains={brains}
             configuredProviders={configuredProviders}
             context={context}
             createdToken={createdToken}
+            memoryBrainPreference={memoryBrainPreference}
             onCopyCreatedToken={handleCopyCreatedToken}
             onCreateToken={handleCreateToken}
             onDeleteProvider={handleDeleteProvider}
@@ -1926,6 +1594,7 @@ function App() {
             onRefreshSession={handleRefreshSession}
             onRequestWriteScopeChange={setRequestWriteScope}
             onRevokeToken={handleRevokeToken}
+            onSaveMemoryBrain={handleSaveMemoryBrain}
             onSaveProviderConfig={handleSaveProviderConfig}
             onSignOut={handleSignOut}
             onStartProviderOAuth={handleStartProviderOAuth}
@@ -2420,9 +2089,11 @@ type AccountViewProps = {
   authSession: StoredAuthSession;
   availableProviders: AvailableProvider[];
   billing: PortalBilling | null;
+  brains: BrainSummary[];
   configuredProviders: ConfiguredProviderSummary[];
   context: PortalContext | null;
   createdToken: CreatedTokenState | null;
+  memoryBrainPreference: MemoryBrainPreference | null;
   onCopyCreatedToken: () => void;
   onCreateToken: () => void;
   onDeleteProvider: (providerId: string) => Promise<void>;
@@ -2431,6 +2102,7 @@ type AccountViewProps = {
   onRefreshSession: () => Promise<string | null>;
   onRequestWriteScopeChange: (value: boolean) => void;
   onRevokeToken: (apiTokenId: string) => void;
+  onSaveMemoryBrain: (memoryBrainId: string) => Promise<void>;
   onSaveProviderConfig: (providerId: string, editor: ProviderEditorState) => Promise<void>;
   onSignOut: () => void;
   onStartProviderOAuth: (providerId: string) => Promise<void>;
@@ -2448,9 +2120,11 @@ function AccountView({
   authSession,
   availableProviders,
   billing,
+  brains,
   configuredProviders,
   context,
   createdToken,
+  memoryBrainPreference,
   onCopyCreatedToken,
   onCreateToken,
   onDeleteProvider,
@@ -2459,6 +2133,7 @@ function AccountView({
   onRefreshSession,
   onRequestWriteScopeChange,
   onRevokeToken,
+  onSaveMemoryBrain,
   onSaveProviderConfig,
   onSignOut,
   onStartProviderOAuth,
@@ -2478,11 +2153,17 @@ function AccountView({
   const [providerEditors, setProviderEditors] = useState<Record<string, ProviderEditorState>>(() =>
     buildProviderEditors(availableProviders, configuredProviders)
   );
+  const [selectedMemoryBrainId, setSelectedMemoryBrainId] = useState('');
   const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
+  const [memoryBrainPending, setMemoryBrainPending] = useState(false);
 
   useEffect(() => {
     setProviderEditors(buildProviderEditors(availableProviders, configuredProviders));
   }, [availableProviders, configuredProviders]);
+
+  useEffect(() => {
+    setSelectedMemoryBrainId(memoryBrainPreference?.configuredMemoryBrainId || '');
+  }, [memoryBrainPreference]);
 
   function updateProviderEditor(providerId: string, patch: Partial<ProviderEditorState>) {
     setProviderEditors((current) => ({
@@ -2588,6 +2269,57 @@ function AccountView({
             </section>
           ) : null}
         </section>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>Memory Brain</h3>
+            <p className="summary-detail">Select which managed-content brain stores agent memories under the reserved <code>memories/</code> path.</p>
+          </div>
+        </div>
+
+        <label className="field">
+          <span>Preferred Memory Brain</span>
+          <select value={selectedMemoryBrainId} onChange={(event) => setSelectedMemoryBrainId(event.target.value)} disabled={memoryBrainPending || brains.length === 0}>
+            <option value="">Auto-select the only active managed-content brain</option>
+            {brains.map((brain) => (
+              <option key={brain.brainId} value={brain.brainId}>{brain.name} ({brain.brainId})</option>
+            ))}
+          </select>
+        </label>
+
+        <dl className="facts-list compact-facts">
+          <div className="fact-row"><dt>Configured</dt><dd>{memoryBrainPreference?.configuredMemoryBrainId || 'Auto'}</dd></div>
+          <div className="fact-row"><dt>Effective</dt><dd>{memoryBrainPreference?.effectiveMemoryBrainId || 'Not resolved'}</dd></div>
+          <div className="fact-row"><dt>Status</dt><dd>{memoryBrainPreference?.needsConfiguration ? 'Needs configuration' : 'Ready'}</dd></div>
+        </dl>
+
+        <p className="summary-detail">
+          {memoryBrainPreference?.error
+            ? memoryBrainPreference.error
+            : memoryBrainPreference?.needsConfiguration
+              ? 'Multiple active managed-content brains exist. Choose one explicitly for memory tools.'
+              : 'Memory tools will use the effective brain shown above.'}
+        </p>
+
+        <div className="action-row">
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={async () => {
+              setMemoryBrainPending(true);
+              try {
+                await onSaveMemoryBrain(selectedMemoryBrainId);
+              } finally {
+                setMemoryBrainPending(false);
+              }
+            }}
+            disabled={memoryBrainPending}
+          >
+            Save Memory Brain
+          </button>
+        </div>
       </section>
 
       <section className="panel">
@@ -3276,6 +3008,30 @@ function isCurrentDocumentVersion(document: DocumentDetail | null, version: Docu
 
   return documentTimestamp === versionTimestamp;
 }
+function normalizeMemoryDraftForEdit(draft: DocumentDraft) {
+  const normalized = normalizeDocumentDraft(draft);
+  return normalized.slug
+    ? { ...normalized, slug: ensureMemoryPathPrefix(normalized.slug) }
+    : normalized;
+}
+
+function normalizeMemoryDraftForSave(draft: DocumentDraft) {
+  const normalized = normalizeDocumentDraft(draft);
+  const fallback = normalized.slug || normalized.title || 'memory';
+  return {
+    ...normalized,
+    slug: ensureMemoryPathPrefix(fallback),
+  };
+}
+
+function ensureMemoryPathPrefix(value: string) {
+  const normalized = normalizeDocumentPath(value);
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized.startsWith('memories/') ? normalized : `memories/${normalized}`;
+}
 function confirmDiscardDocumentChanges(isDirty: boolean, message: string) {
   return !isDirty || window.confirm(message);
 }
@@ -3523,6 +3279,41 @@ function handleClearSession() {
 }
 
 export default App;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
