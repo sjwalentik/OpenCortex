@@ -6,12 +6,14 @@ namespace OpenCortex.Tools;
 public sealed record ToolExecutionContext
 {
     /// <summary>
-    /// User ID (derived from Firebase UID or native user ID).
+    /// Stable internal GUID used for executor/workspace correlation.
+    /// Hosted authorization should prefer TenantUserId because hosted and MCP flows may derive this GUID differently.
     /// </summary>
     public required Guid UserId { get; init; }
 
     /// <summary>
-    /// Customer/tenant ID.
+    /// Stable internal tenant GUID used for executor/workspace correlation.
+    /// Hosted authorization should prefer TenantCustomerId because hosted and MCP flows may derive this GUID differently.
     /// </summary>
     public required Guid CustomerId { get; init; }
 
@@ -21,12 +23,12 @@ public sealed record ToolExecutionContext
     public required string ConversationId { get; init; }
 
     /// <summary>
-    /// Tenant user ID when available in hosted flows.
+    /// Hosted tenant user ID when available. Memory tools and hosted authorization should prefer this value.
     /// </summary>
     public string? TenantUserId { get; init; }
 
     /// <summary>
-    /// Tenant customer ID when available in hosted flows.
+    /// Hosted tenant customer ID when available. Memory tools and hosted authorization should prefer this value.
     /// </summary>
     public string? TenantCustomerId { get; init; }
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Query;
@@ -97,6 +98,93 @@ public sealed class MemoryToolHandlersTests
     }
 
     [Fact]
+    public async Task SaveMemoryHandler_ReturnsFailure_WhenTenantScopeMissing()
+    {
+        var handler = new SaveMemoryHandler(
+            new StubManagedDocumentStore(),
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            new StubManagedContentBrainIndexingService(),
+            new StubSubscriptionStore(planId: "pro"),
+            new OpenCortexOptions());
+
+        var response = await handler.ExecuteAsync(
+            JsonDocument.Parse("""
+            {
+              "content": "The user prefers concise architecture summaries.",
+              "category": "preference"
+            }
+            """).RootElement,
+            new ToolExecutionContext
+            {
+                UserId = Guid.NewGuid(),
+                CustomerId = Guid.NewGuid(),
+                ConversationId = "conv-test",
+                BrainId = "brain-memory"
+            },
+            CancellationToken.None);
+
+        using var json = JsonDocument.Parse(response);
+
+        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Contains("hosted tenant context", json.RootElement.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SaveMemoryHandler_ReturnsFailure_WhenCategoryIsInvalid()
+    {
+        var handler = new SaveMemoryHandler(
+            new StubManagedDocumentStore(),
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            new StubManagedContentBrainIndexingService(),
+            new StubSubscriptionStore(planId: "pro"),
+            new OpenCortexOptions());
+
+        var response = await handler.ExecuteAsync(
+            JsonDocument.Parse("""
+            {
+              "content": "The user prefers concise architecture summaries.",
+              "category": "secret"
+            }
+            """).RootElement,
+            CreateContext(),
+            CancellationToken.None);
+
+        using var json = JsonDocument.Parse(response);
+
+        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Contains("Unsupported memory category", json.RootElement.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RecallMemoriesHandler_EscapesOqlSearchLiteral()
+    {
+        var queryStore = new RecordingDocumentQueryStore([]);
+        var handler = new RecallMemoriesHandler(
+            new OqlQueryExecutor(queryStore),
+            new StubManagedDocumentStore(),
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            NullLogger<RecallMemoriesHandler>.Instance);
+        var injectedQuery = "decision\" WHERE path_prefix = \"docs/";
+        var payload = JsonSerializer.Serialize(new
+        {
+            query = injectedQuery,
+            limit = 3
+        });
+
+        var response = await handler.ExecuteAsync(
+            JsonDocument.Parse(payload).RootElement,
+            CreateContext(),
+            CancellationToken.None);
+
+        using var json = JsonDocument.Parse(response);
+
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.NotNull(queryStore.LastQuery);
+        Assert.DoesNotContain("path_prefix", queryStore.LastQuery!.SearchText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(queryStore.LastQuery.Filters, filter => filter.Field == "path_prefix" && filter.Value == "memories/");
+    }
+
+    [Fact]
     public async Task RecallMemoriesHandler_UsesPathPrefixScopedOqlAndReturnsMemoryMetadata()
     {
         var queryStore = new RecordingDocumentQueryStore(
@@ -133,7 +221,8 @@ public sealed class MemoryToolHandlersTests
         var handler = new RecallMemoriesHandler(
             new OqlQueryExecutor(queryStore),
             documentStore,
-            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)));
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            NullLogger<RecallMemoriesHandler>.Instance);
 
         var response = await handler.ExecuteAsync(
             JsonDocument.Parse("""
@@ -160,6 +249,29 @@ public sealed class MemoryToolHandlersTests
         Assert.Equal("memories/decision/abc123.md", memory.GetProperty("path").GetString());
         Assert.Equal("decision", memory.GetProperty("category").GetString());
         Assert.Equal("high", memory.GetProperty("confidence").GetString());
+    }
+
+    [Fact]
+    public async Task ForgetMemoryHandler_ReturnsFailure_WhenPathContainsTraversal()
+    {
+        var handler = new ForgetMemoryHandler(
+            new StubManagedDocumentStore(),
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            new StubManagedContentBrainIndexingService());
+
+        var response = await handler.ExecuteAsync(
+            JsonDocument.Parse("""
+            {
+              "memory_path": "memories/../docs/secret.md"
+            }
+            """).RootElement,
+            CreateContext(),
+            CancellationToken.None);
+
+        using var json = JsonDocument.Parse(response);
+
+        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Contains("Invalid memory path", json.RootElement.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

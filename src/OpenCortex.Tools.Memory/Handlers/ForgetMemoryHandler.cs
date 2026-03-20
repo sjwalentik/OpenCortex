@@ -35,7 +35,16 @@ public sealed class ForgetMemoryHandler : IToolHandler
             ? reasonElement.GetString()?.Trim()
             : null;
 
-        if (!memoryPath.StartsWith("memories/", StringComparison.OrdinalIgnoreCase))
+        if (!MemoryToolSupport.TryNormalizeMemoryPath(memoryPath, out var normalizedMemoryPath))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = false,
+                error = "Invalid memory path."
+            });
+        }
+
+        if (!normalizedMemoryPath.StartsWith("memories/", StringComparison.OrdinalIgnoreCase))
         {
             return JsonSerializer.Serialize(new
             {
@@ -67,7 +76,7 @@ public sealed class ForgetMemoryHandler : IToolHandler
         var document = await _documentStore.GetManagedDocumentByCanonicalPathAsync(
             customerId,
             brainResult.BrainId!,
-            memoryPath,
+            normalizedMemoryPath,
             cancellationToken);
 
         if (document is null)
@@ -75,7 +84,7 @@ public sealed class ForgetMemoryHandler : IToolHandler
             return JsonSerializer.Serialize(new
             {
                 success = false,
-                error = $"Memory not found: {memoryPath}"
+                error = $"Memory not found: {normalizedMemoryPath}"
             });
         }
 
@@ -95,7 +104,7 @@ public sealed class ForgetMemoryHandler : IToolHandler
         return JsonSerializer.Serialize(new
         {
             success = true,
-            forgotten = memoryPath,
+            forgotten = normalizedMemoryPath,
             reason
         });
     }

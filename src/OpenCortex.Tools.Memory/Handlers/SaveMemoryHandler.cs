@@ -60,6 +60,7 @@ public sealed class SaveMemoryHandler : IToolHandler
             });
         }
 
+        var normalizedCategory = MemoryToolSupport.NormalizeCategory(category);
         var confidence = arguments.TryGetProperty("confidence", out var confidenceElement)
             ? MemoryToolSupport.NormalizeConfidence(confidenceElement.GetString())
             : "medium";
@@ -80,6 +81,8 @@ public sealed class SaveMemoryHandler : IToolHandler
         var plan = ResolvePlanEntitlements(billingState.PlanId);
         if (plan.MaxDocuments >= 0)
         {
+            // This is a best-effort guard, not a transactional quota reservation. Concurrent writes can still race
+            // past the limit until document creation is backed by an atomic quota-enforced write path.
             var activeDocuments = await _documentStore.CountActiveManagedDocumentsAsync(customerId, cancellationToken);
             if (activeDocuments >= plan.MaxDocuments)
             {
@@ -91,10 +94,10 @@ public sealed class SaveMemoryHandler : IToolHandler
             }
         }
 
-        var slug = MemoryToolSupport.CreateMemorySlug(category);
+        var slug = MemoryToolSupport.CreateMemorySlug(normalizedCategory);
         var frontmatter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["category"] = MemoryToolSupport.NormalizeCategory(category),
+            ["category"] = normalizedCategory,
             ["confidence"] = confidence,
             ["tags"] = string.Join(",", tags)
         };
@@ -108,7 +111,7 @@ public sealed class SaveMemoryHandler : IToolHandler
             new ManagedDocumentCreateRequest(
                 BrainId: brainResult.BrainId!,
                 CustomerId: customerId,
-                Title: MemoryToolSupport.BuildTitle(category, content),
+                Title: MemoryToolSupport.BuildTitle(normalizedCategory, content),
                 Slug: slug,
                 Content: content,
                 Frontmatter: frontmatter,
@@ -127,7 +130,7 @@ public sealed class SaveMemoryHandler : IToolHandler
             success = true,
             memory_path = document.CanonicalPath,
             brain_id = document.BrainId,
-            category = MemoryToolSupport.NormalizeCategory(category),
+            category = normalizedCategory,
             confidence,
             tags
         });

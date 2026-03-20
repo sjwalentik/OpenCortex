@@ -85,6 +85,50 @@ internal static class MemoryToolSupport
             ? "memories/"
             : $"memories/{NormalizeCategory(category!)}/";
 
+    public static bool TryNormalizeMemoryPath(string? memoryPath, out string normalizedPath)
+    {
+        normalizedPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(memoryPath))
+        {
+            return false;
+        }
+
+        var segments = memoryPath
+            .Trim()
+            .Replace('\\', '/')
+            .TrimStart('/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (segments.Length == 0)
+        {
+            return false;
+        }
+
+        var normalizedSegments = new List<string>(segments.Length);
+        foreach (var segment in segments)
+        {
+            if (string.Equals(segment, ".", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.Equals(segment, "..", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            normalizedSegments.Add(segment);
+        }
+
+        if (normalizedSegments.Count == 0)
+        {
+            return false;
+        }
+
+        normalizedPath = string.Join('/', normalizedSegments);
+        return true;
+    }
+
     public static string InferCategoryFromPath(string canonicalPath)
     {
         var segments = canonicalPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

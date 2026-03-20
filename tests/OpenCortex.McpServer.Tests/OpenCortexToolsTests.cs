@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenCortex.Core.Authoring;
 using OpenCortex.Core.Brains;
 using OpenCortex.Core.Configuration;
@@ -36,7 +37,7 @@ public sealed class OpenCortexToolsTests
         options ??= new OpenCortexOptions { Billing = new BillingOptions() };
         var memoryBrainResolver = new MemoryBrainResolver(catalog, memoryPreferenceStore);
         var saveMemoryHandler = new SaveMemoryHandler(managedDocumentStore, memoryBrainResolver, indexingService, subscriptionStore, options);
-        var recallMemoriesHandler = new RecallMemoriesHandler(executor, managedDocumentStore, memoryBrainResolver);
+        var recallMemoriesHandler = new RecallMemoriesHandler(executor, managedDocumentStore, memoryBrainResolver, NullLogger<RecallMemoriesHandler>.Instance);
         var forgetMemoryHandler = new ForgetMemoryHandler(managedDocumentStore, memoryBrainResolver, indexingService);
 
         return new OpenCortexTools(

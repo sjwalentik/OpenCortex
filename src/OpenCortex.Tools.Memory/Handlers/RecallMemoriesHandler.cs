@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Orchestration.Memory;
 using OpenCortex.Retrieval.Execution;
@@ -10,15 +11,18 @@ public sealed class RecallMemoriesHandler : IToolHandler
     private readonly OqlQueryExecutor _queryExecutor;
     private readonly IManagedDocumentStore _documentStore;
     private readonly IMemoryBrainResolver _brainResolver;
+    private readonly ILogger<RecallMemoriesHandler> _logger;
 
     public RecallMemoriesHandler(
         OqlQueryExecutor queryExecutor,
         IManagedDocumentStore documentStore,
-        IMemoryBrainResolver brainResolver)
+        IMemoryBrainResolver brainResolver,
+        ILogger<RecallMemoriesHandler> logger)
     {
         _queryExecutor = queryExecutor;
         _documentStore = documentStore;
         _brainResolver = brainResolver;
+        _logger = logger;
     }
 
     public string ToolName => "recall_memories";
@@ -93,6 +97,15 @@ public sealed class RecallMemoriesHandler : IToolHandler
                 brainResult.BrainId!,
                 result.CanonicalPath,
                 cancellationToken);
+
+            if (document is null)
+            {
+                _logger.LogWarning(
+                    "Recall skipped memory document {CanonicalPath} because it could not be loaded from brain {BrainId} for customer {CustomerId}.",
+                    result.CanonicalPath,
+                    brainResult.BrainId,
+                    customerId);
+            }
 
             string? resolvedCategory = null;
             string? confidence = null;
