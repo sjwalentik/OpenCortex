@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Orchestration.Memory;
+using OpenCortex.Indexer.Indexing;
 
 namespace OpenCortex.Tools.Memory.Handlers;
 
@@ -8,13 +9,16 @@ public sealed class ForgetMemoryHandler : IToolHandler
 {
     private readonly IManagedDocumentStore _documentStore;
     private readonly IMemoryBrainResolver _brainResolver;
+    private readonly IManagedContentBrainIndexingService _indexingService;
 
     public ForgetMemoryHandler(
         IManagedDocumentStore documentStore,
-        IMemoryBrainResolver brainResolver)
+        IMemoryBrainResolver brainResolver,
+        IManagedContentBrainIndexingService indexingService)
     {
         _documentStore = documentStore;
         _brainResolver = brainResolver;
+        _indexingService = indexingService;
     }
 
     public string ToolName => "forget_memory";
@@ -80,6 +84,12 @@ public sealed class ForgetMemoryHandler : IToolHandler
             brainResult.BrainId!,
             document.ManagedDocumentId,
             userId,
+            cancellationToken);
+
+        await _indexingService.ReindexAsync(
+            customerId,
+            brainResult.BrainId!,
+            "memory-forget",
             cancellationToken);
 
         return JsonSerializer.Serialize(new

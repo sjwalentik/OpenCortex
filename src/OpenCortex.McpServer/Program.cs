@@ -5,9 +5,11 @@ using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Security;
 using OpenCortex.Indexer.Indexing;
 using OpenCortex.McpServer;
+using OpenCortex.Orchestration.Memory;
 using OpenCortex.Persistence.Postgres;
 using OpenCortex.Retrieval.Execution;
 using OpenCortex.Retrieval.Planning;
+using OpenCortex.Tools.Memory.Handlers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -58,6 +60,11 @@ builder.Services.AddSingleton<IApiTokenStore>(_ =>
 builder.Services.AddSingleton<IManagedDocumentStore>(_ =>
     new PostgresManagedDocumentStore(connectionFactory));
 
+builder.Services.AddSingleton<IUserMemoryPreferenceStore>(_ =>
+    new PostgresUserMemoryPreferenceStore(connectionFactory));
+
+builder.Services.AddSingleton<IMemoryBrainResolver, MemoryBrainResolver>();
+
 builder.Services.AddSingleton<ISubscriptionStore>(_ =>
     new PostgresSubscriptionStore(connectionFactory));
 
@@ -73,6 +80,10 @@ builder.Services.AddSingleton<IManagedContentBrainIndexingService>(_ =>
         new PostgresIndexRunStore(connectionFactory),
         new PostgresEmbeddingStore(connectionFactory),
         embeddingProvider));
+
+builder.Services.AddSingleton<SaveMemoryHandler>();
+builder.Services.AddSingleton<RecallMemoriesHandler>();
+builder.Services.AddSingleton<ForgetMemoryHandler>();
 
 // ---------------------------------------------------------------------------
 // MCP server — registers OpenCortexTools via McpServerToolType attribute

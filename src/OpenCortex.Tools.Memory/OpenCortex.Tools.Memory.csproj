@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OpenCortex.Core\OpenCortex.Core.csproj" />
+    <ProjectReference Include="..\OpenCortex.Indexer\OpenCortex.Indexer.csproj" />
     <ProjectReference Include="..\OpenCortex.Orchestration\OpenCortex.Orchestration.csproj" />
     <ProjectReference Include="..\OpenCortex.Retrieval\OpenCortex.Retrieval.csproj" />
     <ProjectReference Include="..\OpenCortex.Tools\OpenCortex.Tools.csproj" />

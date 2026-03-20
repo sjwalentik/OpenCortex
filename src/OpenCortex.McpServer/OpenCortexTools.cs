@@ -1,4 +1,7 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using ModelContextProtocol.Server;
 using OpenCortex.Core.Authoring;
@@ -7,6 +10,8 @@ using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Tenancy;
 using OpenCortex.Indexer.Indexing;
 using OpenCortex.Retrieval.Execution;
+using OpenCortex.Tools;
+using OpenCortex.Tools.Memory.Handlers;
 
 namespace OpenCortex.McpServer;
 
@@ -22,6 +27,9 @@ public sealed class OpenCortexTools(
     IUsageCounterStore usageCounterStore,
     IManagedDocumentStore managedDocumentStore,
     IManagedContentBrainIndexingService managedContentBrainIndexingService,
+    SaveMemoryHandler saveMemoryHandler,
+    RecallMemoriesHandler recallMemoriesHandler,
+    ForgetMemoryHandler forgetMemoryHandler,
     IHttpContextAccessor httpContextAccessor,
     OpenCortexOptions options)
 {
@@ -650,6 +658,107 @@ public sealed class OpenCortexTools(
     }
 
     // -----------------------------------------------------------------------
+    // save_memory
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Save an important fact, decision, preference, or learning for future recall. " +
+        "Creates a managed memory document under memories/ in the resolved memory brain and reindexes immediately. " +
+        "Requires mcp:write scope and an MCP-write-enabled plan.")]
+    public async Task<SaveMemoryResult> save_memory(
+        [Description("The memory content to save.")] string content,
+        [Description("Category of memory. One of: fact, decision, preference, learning.")] string category,
+        [Description("How confident the agent is in this memory. Defaults to medium.")] string? confidence = null,
+        [Description("Optional tags for memory lookup.")] string[]? tags = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tokenContext = GetRequiredTokenContext();
+        var writeAccessError = await ValidateWriteAccessAsync(tokenContext, cancellationToken);
+        if (writeAccessError is not null)
+        {
+            return SaveMemoryResult.Failure(writeAccessError);
+        }
+
+        var arguments = JsonSerializer.SerializeToElement(new
+        {
+            content,
+            category,
+            confidence,
+            tags
+        });
+
+        var response = await saveMemoryHandler.ExecuteAsync(
+            arguments,
+            BuildMemoryToolExecutionContext(tokenContext),
+            cancellationToken);
+
+        return ParseSaveMemoryResult(response);
+    }
+
+    // -----------------------------------------------------------------------
+    // recall_memories
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Search saved memories from past conversations. " +
+        "Queries managed memory documents in the resolved memory brain, scoped to memories/ and optionally to a category.")]
+    public async Task<RecallMemoriesResult> recall_memories(
+        [Description("What to search for in saved memories.")] string query,
+        [Description("Optional memory category filter. One of: fact, decision, preference, learning.")] string? category = null,
+        [Description("Maximum number of memories to return. Defaults to 5.")] int? limit = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tokenContext = GetRequiredTokenContext();
+        var arguments = JsonSerializer.SerializeToElement(new
+        {
+            query,
+            category,
+            limit
+        });
+
+        var response = await recallMemoriesHandler.ExecuteAsync(
+            arguments,
+            BuildMemoryToolExecutionContext(tokenContext),
+            cancellationToken);
+
+        return ParseRecallMemoriesResult(response, query);
+    }
+
+    // -----------------------------------------------------------------------
+    // forget_memory
+    // -----------------------------------------------------------------------
+
+    [McpServerTool, Description(
+        "Delete a saved memory that is no longer accurate or useful. " +
+        "Soft-deletes the managed memory document and reindexes the resolved memory brain immediately. " +
+        "Requires mcp:write scope and an MCP-write-enabled plan.")]
+    public async Task<ForgetMemoryResult> forget_memory(
+        [Description("Canonical path of the memory to delete, for example memories/fact/abc123.md.")] string memory_path,
+        [Description("Optional reason the memory is being removed.")] string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        var tokenContext = GetRequiredTokenContext();
+        var writeAccessError = await ValidateWriteAccessAsync(tokenContext, cancellationToken);
+        if (writeAccessError is not null)
+        {
+            return ForgetMemoryResult.Failure(writeAccessError);
+        }
+
+        var arguments = JsonSerializer.SerializeToElement(new
+        {
+            memory_path,
+            reason
+        });
+
+        var response = await forgetMemoryHandler.ExecuteAsync(
+            arguments,
+            BuildMemoryToolExecutionContext(tokenContext),
+            cancellationToken);
+
+        return ParseForgetMemoryResult(response);
+    }
+
+    // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
@@ -679,6 +788,87 @@ public sealed class OpenCortexTools(
         }
 
         return ids;
+    }
+
+    private static ToolExecutionContext BuildMemoryToolExecutionContext(McpTokenContext tokenContext) => new()
+    {
+        UserId = GuidFromString(tokenContext.UserId),
+        CustomerId = GuidFromString(tokenContext.CustomerId),
+        ConversationId = $"mcp:{tokenContext.ApiTokenId}",
+        TenantUserId = tokenContext.UserId,
+        TenantCustomerId = tokenContext.CustomerId
+    };
+
+    private static Guid GuidFromString(string input)
+    {
+        var hash = MD5.HashData(Encoding.UTF8.GetBytes(input));
+        return new Guid(hash);
+    }
+
+    private static SaveMemoryResult ParseSaveMemoryResult(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        return new SaveMemoryResult(
+            root.GetProperty("success").GetBoolean(),
+            root.TryGetProperty("memory_path", out var memoryPath) ? memoryPath.GetString() : null,
+            root.TryGetProperty("brain_id", out var brainId) ? brainId.GetString() : null,
+            root.TryGetProperty("category", out var category) ? category.GetString() : null,
+            root.TryGetProperty("confidence", out var confidence) ? confidence.GetString() : null,
+            root.TryGetProperty("tags", out var tagsElement) && tagsElement.ValueKind == JsonValueKind.Array
+                ? tagsElement.EnumerateArray()
+                    .Select(element => element.GetString())
+                    .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                    .Select(tag => tag!)
+                    .ToList()
+                : [],
+            root.TryGetProperty("needs_configuration", out var needsConfiguration) && needsConfiguration.GetBoolean(),
+            root.TryGetProperty("error", out var error) ? error.GetString() : null);
+    }
+
+    private static RecallMemoriesResult ParseRecallMemoriesResult(string json, string query)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var memories = root.TryGetProperty("memories", out var memoriesElement) && memoriesElement.ValueKind == JsonValueKind.Array
+            ? memoriesElement.EnumerateArray().Select(memory => new MemoryItem(
+                memory.GetProperty("path").GetString() ?? string.Empty,
+                memory.TryGetProperty("title", out var title) ? title.GetString() : null,
+                memory.TryGetProperty("content", out var content) ? content.GetString() : null,
+                memory.TryGetProperty("category", out var category) ? category.GetString() : null,
+                memory.TryGetProperty("confidence", out var confidence) ? confidence.GetString() : null,
+                memory.TryGetProperty("tags", out var tagsElement) && tagsElement.ValueKind == JsonValueKind.Array
+                    ? tagsElement.EnumerateArray()
+                        .Select(element => element.GetString())
+                        .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                        .Select(tag => tag!)
+                        .ToList()
+                    : [],
+                memory.TryGetProperty("score", out var score) ? RoundFinite(score.GetDouble()) : 0.0))
+            .ToList()
+            : [];
+
+        return new RecallMemoriesResult(
+            root.GetProperty("success").GetBoolean(),
+            root.TryGetProperty("query", out var queryElement) ? queryElement.GetString() ?? query : query,
+            root.TryGetProperty("count", out var count) ? count.GetInt32() : memories.Count,
+            memories,
+            root.TryGetProperty("needs_configuration", out var needsConfiguration) && needsConfiguration.GetBoolean(),
+            root.TryGetProperty("error", out var error) ? error.GetString() : null);
+    }
+
+    private static ForgetMemoryResult ParseForgetMemoryResult(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        return new ForgetMemoryResult(
+            root.GetProperty("success").GetBoolean(),
+            root.TryGetProperty("forgotten", out var forgotten) ? forgotten.GetString() : null,
+            root.TryGetProperty("reason", out var reason) ? reason.GetString() : null,
+            root.TryGetProperty("needs_configuration", out var needsConfiguration) && needsConfiguration.GetBoolean(),
+            root.TryGetProperty("error", out var error) ? error.GetString() : null);
     }
 
     private McpTokenContext GetRequiredTokenContext() =>
@@ -932,6 +1122,52 @@ public sealed record ReindexBrainResult(
     public static ReindexBrainResult Failure(string message) =>
         new(null, message);
 }
+
+public sealed record SaveMemoryResult(
+    bool Success,
+    string? MemoryPath,
+    string? BrainId,
+    string? Category,
+    string? Confidence,
+    IReadOnlyList<string> Tags,
+    bool NeedsConfiguration,
+    string? Error)
+{
+    public static SaveMemoryResult Failure(string message) =>
+        new(false, null, null, null, null, [], false, message);
+}
+
+public sealed record RecallMemoriesResult(
+    bool Success,
+    string Query,
+    int Count,
+    IReadOnlyList<MemoryItem> Memories,
+    bool NeedsConfiguration,
+    string? Error)
+{
+    public static RecallMemoriesResult Failure(string query, string message) =>
+        new(false, query, 0, [], false, message);
+}
+
+public sealed record ForgetMemoryResult(
+    bool Success,
+    string? Forgotten,
+    string? Reason,
+    bool NeedsConfiguration,
+    string? Error)
+{
+    public static ForgetMemoryResult Failure(string message) =>
+        new(false, null, null, false, message);
+}
+
+public sealed record MemoryItem(
+    string Path,
+    string? Title,
+    string? Content,
+    string? Category,
+    string? Confidence,
+    IReadOnlyList<string> Tags,
+    double Score);
 
 public sealed record ManagedDocumentItem(
     string ManagedDocumentId,

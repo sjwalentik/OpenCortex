@@ -777,6 +777,15 @@ builder.Services.AddSingleton<IBrainCatalogStore>(_ => brainCatalogStore);
 builder.Services.AddSingleton<IManagedDocumentStore>(_ => managedDocumentStore);
 builder.Services.AddSingleton<IDocumentQueryStore>(_ => documentQueryStore);
 builder.Services.AddSingleton<OqlQueryExecutor>();
+builder.Services.AddSingleton<IManagedContentBrainIndexingService>(_ =>
+    new ManagedContentBrainIndexingService(
+        new PostgresManagedDocumentStore(connectionFactory),
+        new PostgresDocumentCatalogStore(connectionFactory),
+        new PostgresChunkStore(connectionFactory),
+        new PostgresLinkGraphStore(connectionFactory),
+        new PostgresIndexRunStore(connectionFactory),
+        new PostgresEmbeddingStore(connectionFactory),
+        embeddingProvider));
 builder.Services.AddSingleton<IUserMemoryPreferenceStore>(sp =>
     new PostgresUserMemoryPreferenceStore(connectionFactory));
 

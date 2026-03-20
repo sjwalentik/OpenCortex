@@ -23,7 +23,7 @@ public sealed class McpServerHttpTests : IClassFixture<McpServerHttpTests.McpSer
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("OpenCortex.McpServer", json.RootElement.GetProperty("service").GetString());
         Assert.Equal("/tool-manifest", json.RootElement.GetProperty("toolManifestUrl").GetString());
-        Assert.True(json.RootElement.GetProperty("toolCount").GetInt32() >= 9);
+        Assert.True(json.RootElement.GetProperty("toolCount").GetInt32() >= 12);
     }
 
     [Fact]
@@ -37,9 +37,12 @@ public sealed class McpServerHttpTests : IClassFixture<McpServerHttpTests.McpSer
         var tools = json.RootElement.GetProperty("tools").EnumerateArray().ToList();
         var toolNames = tools.Select(tool => tool.GetProperty("name").GetString()).ToList();
 
-        Assert.True(json.RootElement.GetProperty("count").GetInt32() >= 9);
+        Assert.True(json.RootElement.GetProperty("count").GetInt32() >= 12);
         Assert.Contains(tools, tool => string.Equals(tool.GetProperty("name").GetString(), "get_document", StringComparison.Ordinal));
         Assert.Contains(tools, tool => string.Equals(tool.GetProperty("name").GetString(), "save_document", StringComparison.Ordinal));
+        Assert.Contains(tools, tool => string.Equals(tool.GetProperty("name").GetString(), "save_memory", StringComparison.Ordinal));
+        Assert.Contains(tools, tool => string.Equals(tool.GetProperty("name").GetString(), "recall_memories", StringComparison.Ordinal));
+        Assert.Contains(tools, tool => string.Equals(tool.GetProperty("name").GetString(), "forget_memory", StringComparison.Ordinal));
         Assert.True(toolNames.IndexOf("save_document") < toolNames.IndexOf("create_document"));
         Assert.True(toolNames.IndexOf("save_document") < toolNames.IndexOf("update_document"));
 
@@ -64,6 +67,12 @@ public sealed class McpServerHttpTests : IClassFixture<McpServerHttpTests.McpSer
         Assert.Contains(deleteParameters, parameter => string.Equals(parameter.GetProperty("name").GetString(), "brain_id", StringComparison.Ordinal));
         Assert.Contains(deleteParameters, parameter => string.Equals(parameter.GetProperty("name").GetString(), "managed_document_id", StringComparison.Ordinal));
         Assert.Contains(deleteParameters, parameter => string.Equals(parameter.GetProperty("name").GetString(), "canonical_path", StringComparison.Ordinal));
+
+        var saveMemory = tools.Single(tool => string.Equals(tool.GetProperty("name").GetString(), "save_memory", StringComparison.Ordinal));
+        var saveMemoryParameters = saveMemory.GetProperty("parameters").EnumerateArray().ToList();
+
+        Assert.Contains(saveMemoryParameters, parameter => string.Equals(parameter.GetProperty("name").GetString(), "content", StringComparison.Ordinal));
+        Assert.Contains(saveMemoryParameters, parameter => string.Equals(parameter.GetProperty("name").GetString(), "category", StringComparison.Ordinal));
     }
 
     public sealed class McpServerWebApplicationFactory : WebApplicationFactory<Program>

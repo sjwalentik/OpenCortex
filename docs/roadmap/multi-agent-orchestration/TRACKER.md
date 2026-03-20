@@ -45,9 +45,9 @@ This document tracks the implementation status of all user stories across the mu
 
 | Status | ID | User Story | Assignee | Notes |
 |--------|-----|------------|----------|-------|
-| `[~]` | US-002 | Save Memory Tool | | Initial handler, definitions, and tests are in progress |
-| `[~]` | US-003 | Recall Memories Tool | | Initial OQL-backed recall handler and tests are in progress; hosted agentic chat now appends explicit memory-tool guidance when memory tools are available |
-| `[~]` | US-004 | Forget Memory Tool | | Initial delete handler and tests are in progress |
+| `[~]` | US-002 | Save Memory Tool | | Initial handler, definitions, hosted agentic guidance, MCP exposure, and immediate-reindex coverage are in progress |
+| `[~]` | US-003 | Recall Memories Tool | | Initial OQL-backed recall handler and tests are in progress; hosted agentic chat now appends explicit memory-tool guidance when memory tools are available, and MCP consumers can now use recall_memories directly |
+| `[~]` | US-004 | Forget Memory Tool | | Initial delete handler, MCP exposure, and immediate-reindex coverage are in progress |
 
 ### Feature 3: Portal UI
 
@@ -76,6 +76,7 @@ This document tracks the implementation status of all user stories across the mu
 - 2026-03-19: Added App-level frontend coverage for the Memories fetch/load/delete flow so the portal shell wiring is tested above the view component.
 - 2026-03-19: Extracted a shared managed-document workspace hook in the portal so Documents and Memories now reuse the same controller logic for list/detail/draft/version workflows, not just the same view surface.
 - 2026-03-19: Updated hosted agentic chat request building so memory-tool guidance is injected into the system prompt when memory tools are available, and added endpoint tests to verify the real `/api/chat/completions/agentic` path.
+- 2026-03-20: Exposed `save_memory`, `recall_memories`, and `forget_memory` through the local MCP server so MCP consumers can use the same memory workflow directly, and updated memory save/forget handlers to reindex immediately so recall can see new changes without waiting for a later background cycle.
 
 ---
 

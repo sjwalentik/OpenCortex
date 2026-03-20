@@ -6,7 +6,9 @@ using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Indexer.Indexing;
 using OpenCortex.McpServer;
+using OpenCortex.Orchestration.Memory;
 using OpenCortex.Retrieval.Execution;
+using OpenCortex.Tools.Memory.Handlers;
 
 namespace OpenCortex.McpServer.Tests;
 
@@ -19,6 +21,7 @@ public sealed class OpenCortexToolsTests
         IUsageCounterStore? usageCounterStore = null,
         IManagedDocumentStore? managedDocumentStore = null,
         IManagedContentBrainIndexingService? indexingService = null,
+        IUserMemoryPreferenceStore? memoryPreferenceStore = null,
         IHttpContextAccessor? httpContextAccessor = null,
         OpenCortexOptions? options = null)
     {
@@ -28,8 +31,13 @@ public sealed class OpenCortexToolsTests
         usageCounterStore ??= new StubUsageCounterStore();
         managedDocumentStore ??= new StubManagedDocumentStore();
         indexingService ??= new StubManagedContentBrainIndexingService();
+        memoryPreferenceStore ??= new StubUserMemoryPreferenceStore();
         httpContextAccessor ??= BuildHttpContextAccessor();
         options ??= new OpenCortexOptions { Billing = new BillingOptions() };
+        var memoryBrainResolver = new MemoryBrainResolver(catalog, memoryPreferenceStore);
+        var saveMemoryHandler = new SaveMemoryHandler(managedDocumentStore, memoryBrainResolver, indexingService);
+        var recallMemoriesHandler = new RecallMemoriesHandler(executor, managedDocumentStore, memoryBrainResolver);
+        var forgetMemoryHandler = new ForgetMemoryHandler(managedDocumentStore, memoryBrainResolver, indexingService);
 
         return new OpenCortexTools(
             catalog,
@@ -38,6 +46,9 @@ public sealed class OpenCortexToolsTests
             usageCounterStore,
             managedDocumentStore,
             indexingService,
+            saveMemoryHandler,
+            recallMemoriesHandler,
+            forgetMemoryHandler,
             httpContextAccessor,
             options);
     }
@@ -90,6 +101,21 @@ public sealed class OpenCortexToolsTests
         Assert.Contains("Preferred write tool", saveDocument.Description, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("prefer save_document", manifest.Single(item => string.Equals(item.Name, "create_document", StringComparison.Ordinal)).Description, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("prefer save_document", manifest.Single(item => string.Equals(item.Name, "update_document", StringComparison.Ordinal)).Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ToolManifest_IncludesMemoryHelpers()
+    {
+        var manifest = OpenCortexToolManifest.Build();
+
+        var saveMemory = manifest.Single(item => string.Equals(item.Name, "save_memory", StringComparison.Ordinal));
+        var recallMemories = manifest.Single(item => string.Equals(item.Name, "recall_memories", StringComparison.Ordinal));
+        var forgetMemory = manifest.Single(item => string.Equals(item.Name, "forget_memory", StringComparison.Ordinal));
+
+        Assert.Contains(saveMemory.Parameters, parameter => string.Equals(parameter.Name, "content", StringComparison.Ordinal));
+        Assert.Contains(saveMemory.Parameters, parameter => string.Equals(parameter.Name, "category", StringComparison.Ordinal));
+        Assert.Contains(recallMemories.Parameters, parameter => string.Equals(parameter.Name, "query", StringComparison.Ordinal));
+        Assert.Contains(forgetMemory.Parameters, parameter => string.Equals(parameter.Name, "memory_path", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -576,6 +602,138 @@ public sealed class OpenCortexToolsTests
         Assert.Contains("managed-content", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task SaveMemory_CreatesManagedMemoryDocumentAndReindexes()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            managedDocumentStore: managedDocumentStore,
+            indexingService: indexingService,
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .save_memory(
+                "The user prefers concise architecture summaries.",
+                "preference",
+                "high",
+                ["user", "style"],
+                CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Null(result.Error);
+        Assert.NotNull(result.MemoryPath);
+        Assert.StartsWith("memories/preference/", result.MemoryPath!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("brain-write", result.BrainId);
+        Assert.Equal("preference", result.Category);
+        Assert.Equal("high", result.Confidence);
+        Assert.Contains("style", result.Tags);
+        Assert.Single(indexingService.Calls);
+        Assert.Equal("memory-save", indexingService.Calls[0].TriggerType);
+        var saved = Assert.Single(managedDocumentStore.Documents.Where(document =>
+            string.Equals(document.CanonicalPath, result.MemoryPath, StringComparison.OrdinalIgnoreCase)));
+        Assert.False(saved.Frontmatter.ContainsKey("source_conversation"));
+    }
+
+    [Fact]
+    public async Task SaveMemory_ReturnsFailure_WhenTokenLacksWriteScope()
+    {
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            httpContextAccessor: BuildHttpContextAccessor(scopes: "mcp:read"))
+            .save_memory(
+                "The user prefers concise architecture summaries.",
+                "preference",
+                "high",
+                ["user", "style"],
+                CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Contains("mcp:write", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RecallMemories_ReturnsScopedMemories()
+    {
+        var queryStore = new StubDocumentQueryStore(
+            new RetrievalResultRecord(
+                "memory-doc-1",
+                "brain-write",
+                "memories/decision/abc123.md",
+                "[decision] Use OQL path prefix on day one",
+                null,
+                "Use OQL path prefix on day one for memory recall.",
+                0.91,
+                "semantic",
+                new ScoreBreakdown(0.0, 0.91, 0.0)));
+        var managedDocumentStore = new StubManagedDocumentStore();
+        await managedDocumentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                "brain-write",
+                "cus_test",
+                "[decision] Use OQL path prefix on day one",
+                "memories/decision/abc123",
+                "Use OQL path prefix on day one for memory recall.",
+                new Dictionary<string, string> { ["category"] = "decision", ["confidence"] = "high", ["tags"] = "roadmap,p1" },
+                "published",
+                "user_test"),
+            CancellationToken.None);
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            executor: new OqlQueryExecutor(queryStore),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            managedDocumentStore: managedDocumentStore)
+            .recall_memories("day one memory recall", "decision", 3, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Null(result.Error);
+        Assert.Equal(1, result.Count);
+        Assert.Single(result.Memories);
+        Assert.Equal("memories/decision/abc123.md", result.Memories[0].Path);
+        Assert.Equal("decision", result.Memories[0].Category);
+        Assert.Equal("high", result.Memories[0].Confidence);
+    }
+
+    [Fact]
+    public async Task ForgetMemory_DeletesManagedMemoryDocumentAndReindexes()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
+        var existing = await managedDocumentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                "brain-write",
+                "cus_test",
+                "[fact] Ollama is the default local provider",
+                "memories/fact/ollama-default",
+                "Ollama is the default local provider.",
+                new Dictionary<string, string> { ["category"] = "fact" },
+                "published",
+                "user_test"),
+            CancellationToken.None);
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            managedDocumentStore: managedDocumentStore,
+            indexingService: indexingService,
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"))
+            .forget_memory(
+                "memories/fact/ollama-default.md",
+                "Superseded by a newer routing rule.",
+                CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Null(result.Error);
+        Assert.Equal("memories/fact/ollama-default.md", result.Forgotten);
+        Assert.Contains(managedDocumentStore.SoftDeletedManagedDocumentIds, id => id == existing.ManagedDocumentId);
+        Assert.Single(indexingService.Calls);
+        Assert.Equal("memory-forget", indexingService.Calls[0].TriggerType);
+    }
+
     private static StubBrainCatalogStore BuildManagedContentCatalog() =>
         new(new Dictionary<string, IReadOnlyList<BrainSummary>>
         {
@@ -788,6 +946,10 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
     private readonly List<ManagedDocumentVersionDetail> _versions = [];
     private int _nextId = 1;
 
+    public IReadOnlyList<ManagedDocumentDetail> Documents => _documents.Values.ToList();
+
+    public List<string> SoftDeletedManagedDocumentIds { get; } = [];
+
     public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
         string customerId,
         string brainId,
@@ -955,6 +1117,8 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
             UpdatedAt = DateTimeOffset.UtcNow,
         };
 
+        SoftDeletedManagedDocumentIds.Add(managedDocumentId);
+
         return Task.FromResult(true);
     }
 
@@ -1065,6 +1229,20 @@ internal sealed class StubManagedDocumentStore : IManagedDocumentStore
 
     private static bool HasExcludedPathPrefix(string canonicalPath, string? pathPrefix)
         => !string.IsNullOrWhiteSpace(pathPrefix) && MatchesPathPrefix(canonicalPath, pathPrefix);
+}
+
+internal sealed class StubUserMemoryPreferenceStore(string? memoryBrainId = null) : IUserMemoryPreferenceStore
+{
+    public string? MemoryBrainId { get; private set; } = memoryBrainId;
+
+    public Task<string?> GetMemoryBrainIdAsync(string userId, CancellationToken cancellationToken = default)
+        => Task.FromResult(MemoryBrainId);
+
+    public Task SetMemoryBrainIdAsync(string userId, string? memoryBrainId, CancellationToken cancellationToken = default)
+    {
+        MemoryBrainId = memoryBrainId;
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class ThrowingManagedDocumentStore : IManagedDocumentStore

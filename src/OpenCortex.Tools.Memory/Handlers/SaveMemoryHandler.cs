@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Orchestration.Memory;
+using OpenCortex.Indexer.Indexing;
 
 namespace OpenCortex.Tools.Memory.Handlers;
 
@@ -8,13 +9,16 @@ public sealed class SaveMemoryHandler : IToolHandler
 {
     private readonly IManagedDocumentStore _documentStore;
     private readonly IMemoryBrainResolver _brainResolver;
+    private readonly IManagedContentBrainIndexingService _indexingService;
 
     public SaveMemoryHandler(
         IManagedDocumentStore documentStore,
-        IMemoryBrainResolver brainResolver)
+        IMemoryBrainResolver brainResolver,
+        IManagedContentBrainIndexingService indexingService)
     {
         _documentStore = documentStore;
         _brainResolver = brainResolver;
+        _indexingService = indexingService;
     }
 
     public string ToolName => "save_memory";
@@ -65,6 +69,18 @@ public sealed class SaveMemoryHandler : IToolHandler
         }
 
         var slug = MemoryToolSupport.CreateMemorySlug(category);
+        var frontmatter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["category"] = MemoryToolSupport.NormalizeCategory(category),
+            ["confidence"] = confidence,
+            ["tags"] = string.Join(",", tags)
+        };
+
+        if (!context.ConversationId.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
+        {
+            frontmatter["source_conversation"] = context.ConversationId;
+        }
+
         var document = await _documentStore.CreateManagedDocumentAsync(
             new ManagedDocumentCreateRequest(
                 BrainId: brainResult.BrainId!,
@@ -72,15 +88,15 @@ public sealed class SaveMemoryHandler : IToolHandler
                 Title: MemoryToolSupport.BuildTitle(category, content),
                 Slug: slug,
                 Content: content,
-                Frontmatter: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["category"] = MemoryToolSupport.NormalizeCategory(category),
-                    ["confidence"] = confidence,
-                    ["tags"] = string.Join(",", tags),
-                    ["source_conversation"] = context.ConversationId
-                },
+                Frontmatter: frontmatter,
                 Status: "published",
                 UserId: userId),
+            cancellationToken);
+
+        await _indexingService.ReindexAsync(
+            customerId,
+            brainResult.BrainId!,
+            "memory-save",
             cancellationToken);
 
         return JsonSerializer.Serialize(new

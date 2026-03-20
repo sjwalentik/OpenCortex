@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Query;
+using OpenCortex.Indexer.Indexing;
 using OpenCortex.Orchestration.Memory;
 using OpenCortex.Retrieval.Execution;
 using OpenCortex.Tools;
@@ -14,9 +15,11 @@ public sealed class MemoryToolHandlersTests
     public async Task SaveMemoryHandler_CreatesManagedDocumentUnderMemoriesPath()
     {
         var documentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
         var handler = new SaveMemoryHandler(
             documentStore,
-            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)));
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            indexingService);
 
         var response = await handler.ExecuteAsync(
             JsonDocument.Parse("""
@@ -41,6 +44,8 @@ public sealed class MemoryToolHandlersTests
         Assert.Equal("preference", saved.Frontmatter["category"]);
         Assert.Equal("high", saved.Frontmatter["confidence"]);
         Assert.Equal("user,style", saved.Frontmatter["tags"]);
+        Assert.Single(indexingService.Calls);
+        Assert.Equal("memory-save", indexingService.Calls[0].TriggerType);
     }
 
     [Fact]
@@ -113,6 +118,7 @@ public sealed class MemoryToolHandlersTests
     public async Task ForgetMemoryHandler_SoftDeletesManagedMemoryDocument()
     {
         var documentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
         var document = await documentStore.CreateManagedDocumentAsync(
             new ManagedDocumentCreateRequest(
                 BrainId: "brain-memory",
@@ -130,7 +136,8 @@ public sealed class MemoryToolHandlersTests
 
         var handler = new ForgetMemoryHandler(
             documentStore,
-            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)));
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            indexingService);
 
         var response = await handler.ExecuteAsync(
             JsonDocument.Parse("""
@@ -147,6 +154,8 @@ public sealed class MemoryToolHandlersTests
         Assert.True(json.RootElement.GetProperty("success").GetBoolean());
         Assert.Equal("memories/fact/ollama-default.md", json.RootElement.GetProperty("forgotten").GetString());
         Assert.Contains(documentStore.SoftDeletedManagedDocumentIds, id => id == document.ManagedDocumentId);
+        Assert.Single(indexingService.Calls);
+        Assert.Equal("memory-forget", indexingService.Calls[0].TriggerType);
     }
 
     private static ToolExecutionContext CreateContext() => new()
@@ -267,5 +276,26 @@ public sealed class MemoryToolHandlersTests
 
         public Task<ManagedDocumentDetail?> RestoreManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, string userId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
+    }
+
+    private sealed class StubManagedContentBrainIndexingService : IManagedContentBrainIndexingService
+    {
+        public List<(string CustomerId, string BrainId, string TriggerType)> Calls { get; } = [];
+
+        public Task<IndexRunRecord> ReindexAsync(string customerId, string brainId, string triggerType, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((customerId, brainId, triggerType));
+            return Task.FromResult(new IndexRunRecord(
+                $"idx-{Calls.Count:D4}",
+                brainId,
+                triggerType,
+                "completed",
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                1,
+                1,
+                0,
+                null));
+        }
     }
 }
