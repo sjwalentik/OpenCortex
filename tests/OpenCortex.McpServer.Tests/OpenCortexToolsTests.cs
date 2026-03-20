@@ -704,6 +704,9 @@ public sealed class OpenCortexToolsTests
         Assert.False(result.Success);
         Assert.NotNull(result.Error);
         Assert.Contains("Document limit reached", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.QuotaExceeded);
+        Assert.NotNull(result.Suggestion);
+        Assert.Contains("Memories page", result.Suggestion, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(10, managedDocumentStore.Documents.Count);
     }
 

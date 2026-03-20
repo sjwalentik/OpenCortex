@@ -824,7 +824,9 @@ public sealed class OpenCortexTools(
                     .ToList()
                 : [],
             root.TryGetProperty("needs_configuration", out var needsConfiguration) && needsConfiguration.GetBoolean(),
-            root.TryGetProperty("error", out var error) ? error.GetString() : null);
+            root.TryGetProperty("error", out var error) ? error.GetString() : null,
+            root.TryGetProperty("quota_exceeded", out var quotaExceeded) && quotaExceeded.GetBoolean(),
+            root.TryGetProperty("suggestion", out var suggestion) ? suggestion.GetString() : null);
     }
 
     private static RecallMemoriesResult ParseRecallMemoriesResult(string json, string query)
@@ -1131,10 +1133,12 @@ public sealed record SaveMemoryResult(
     string? Confidence,
     IReadOnlyList<string> Tags,
     bool NeedsConfiguration,
-    string? Error)
+    string? Error,
+    bool QuotaExceeded,
+    string? Suggestion)
 {
     public static SaveMemoryResult Failure(string message) =>
-        new(false, null, null, null, null, [], false, message);
+        new(false, null, null, null, null, [], false, message, false, null);
 }
 
 public sealed record RecallMemoriesResult(

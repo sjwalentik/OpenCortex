@@ -89,7 +89,10 @@ public sealed class SaveMemoryHandler : IToolHandler
                 return JsonSerializer.Serialize(new
                 {
                     success = false,
-                    error = $"Document limit reached for plan '{billingState.PlanId}'. Upgrade to continue adding more content."
+                    error = $"Document limit reached for plan '{billingState.PlanId}'. Review existing memories, forget one if needed, or upgrade before retrying save_memory.",
+                    error_code = "memory_quota_reached",
+                    quota_exceeded = true,
+                    suggestion = "Use recall_memories to review what is already saved, remove an older or low-value memory with forget_memory or from the Memories page, or upgrade your plan, then retry save_memory."
                 });
             }
         }

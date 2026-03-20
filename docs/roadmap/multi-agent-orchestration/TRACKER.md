@@ -78,6 +78,7 @@ This document tracks the implementation status of all user stories across the mu
 - 2026-03-19: Updated hosted agentic chat request building so memory-tool guidance is injected into the system prompt when memory tools are available, and added endpoint tests to verify the real `/api/chat/completions/agentic` path.
 - 2026-03-20: Exposed `save_memory`, `recall_memories`, and `forget_memory` through the local MCP server so MCP consumers can use the same memory workflow directly, and updated memory save/forget handlers to reindex immediately so recall can see new changes without waiting for a later background cycle.
 - 2026-03-20: Corrected memory-brain preference scope from user-global storage to customer-membership storage with `0009a_customer_membership_memory_brain.sql`, plus resolver and endpoint coverage to prevent cross-workspace preference bleed.
+- 2026-03-20: Improved `save_memory` quota-hit guidance so agentic chat and MCP consumers receive an explicit next step to review memories, forget one, or upgrade before retrying.
 
 ---
 

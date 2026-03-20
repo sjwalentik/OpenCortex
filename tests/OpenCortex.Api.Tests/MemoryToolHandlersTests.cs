@@ -94,6 +94,9 @@ public sealed class MemoryToolHandlersTests
 
         Assert.False(json.RootElement.GetProperty("success").GetBoolean());
         Assert.Contains("Document limit reached", json.RootElement.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("memory_quota_reached", json.RootElement.GetProperty("error_code").GetString());
+        Assert.True(json.RootElement.GetProperty("quota_exceeded").GetBoolean());
+        Assert.Contains("forget_memory", json.RootElement.GetProperty("suggestion").GetString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(10, documentStore.Documents.Count);
     }
 
