@@ -1,5 +1,7 @@
 using System.Text.Json;
+using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Persistence;
+using OpenCortex.Core.Tenancy;
 using OpenCortex.Orchestration.Memory;
 using OpenCortex.Indexer.Indexing;
 
@@ -10,15 +12,21 @@ public sealed class SaveMemoryHandler : IToolHandler
     private readonly IManagedDocumentStore _documentStore;
     private readonly IMemoryBrainResolver _brainResolver;
     private readonly IManagedContentBrainIndexingService _indexingService;
+    private readonly ISubscriptionStore _subscriptionStore;
+    private readonly OpenCortexOptions _options;
 
     public SaveMemoryHandler(
         IManagedDocumentStore documentStore,
         IMemoryBrainResolver brainResolver,
-        IManagedContentBrainIndexingService indexingService)
+        IManagedContentBrainIndexingService indexingService,
+        ISubscriptionStore subscriptionStore,
+        OpenCortexOptions options)
     {
         _documentStore = documentStore;
         _brainResolver = brainResolver;
         _indexingService = indexingService;
+        _subscriptionStore = subscriptionStore;
+        _options = options;
     }
 
     public string ToolName => "save_memory";
@@ -68,6 +76,21 @@ public sealed class SaveMemoryHandler : IToolHandler
             });
         }
 
+        var billingState = await GetBillingStateAsync(customerId, cancellationToken);
+        var plan = ResolvePlanEntitlements(billingState.PlanId);
+        if (plan.MaxDocuments >= 0)
+        {
+            var activeDocuments = await _documentStore.CountActiveManagedDocumentsAsync(customerId, cancellationToken);
+            if (activeDocuments >= plan.MaxDocuments)
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    success = false,
+                    error = $"Document limit reached for plan '{billingState.PlanId}'. Upgrade to continue adding more content."
+                });
+            }
+        }
+
         var slug = MemoryToolSupport.CreateMemorySlug(category);
         var frontmatter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -108,5 +131,23 @@ public sealed class SaveMemoryHandler : IToolHandler
             confidence,
             tags
         });
+    }
+
+    private PlanEntitlements ResolvePlanEntitlements(string? planId)
+    {
+        if (!string.IsNullOrWhiteSpace(planId)
+            && _options.Billing.Plans.TryGetValue(planId, out var configuredPlan))
+        {
+            return configuredPlan;
+        }
+
+        return _options.Billing.Plans[HostedBillingStateResolver.FreePlanId];
+    }
+
+    private async Task<EffectiveBillingState> GetBillingStateAsync(string customerId, CancellationToken cancellationToken)
+    {
+        var subscription = await _subscriptionStore.GetSubscriptionAsync(customerId, cancellationToken)
+            ?? await _subscriptionStore.EnsureFreeSubscriptionAsync(customerId, cancellationToken);
+        return HostedBillingStateResolver.Resolve(subscription, DateTimeOffset.UtcNow);
     }
 }

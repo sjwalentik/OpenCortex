@@ -1,4 +1,5 @@
 using System.Text.Json;
+using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Query;
 using OpenCortex.Indexer.Indexing;
@@ -19,7 +20,9 @@ public sealed class MemoryToolHandlersTests
         var handler = new SaveMemoryHandler(
             documentStore,
             new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
-            indexingService);
+            indexingService,
+            new StubSubscriptionStore(planId: "pro"),
+            new OpenCortexOptions());
 
         var response = await handler.ExecuteAsync(
             JsonDocument.Parse("""
@@ -46,6 +49,51 @@ public sealed class MemoryToolHandlersTests
         Assert.Equal("user,style", saved.Frontmatter["tags"]);
         Assert.Single(indexingService.Calls);
         Assert.Equal("memory-save", indexingService.Calls[0].TriggerType);
+    }
+
+    [Fact]
+    public async Task SaveMemoryHandler_ReturnsFailure_WhenWorkspaceIsAtDocumentLimit()
+    {
+        var documentStore = new StubManagedDocumentStore();
+        for (var index = 0; index < 10; index++)
+        {
+            await documentStore.CreateManagedDocumentAsync(
+                new ManagedDocumentCreateRequest(
+                    BrainId: "brain-memory",
+                    CustomerId: "cust-test",
+                    Title: $"Existing {index}",
+                    Slug: $"existing/{index}",
+                    Content: "existing content",
+                    Frontmatter: new Dictionary<string, string>(),
+                    Status: "published",
+                    UserId: "user-test"),
+                CancellationToken.None);
+        }
+
+        var handler = new SaveMemoryHandler(
+            documentStore,
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            new StubManagedContentBrainIndexingService(),
+            new StubSubscriptionStore(planId: "free"),
+            new OpenCortexOptions());
+
+        var response = await handler.ExecuteAsync(
+            JsonDocument.Parse("""
+            {
+              "content": "The user prefers concise architecture summaries.",
+              "category": "preference",
+              "confidence": "high",
+              "tags": ["user", "style"]
+            }
+            """).RootElement,
+            CreateContext(),
+            CancellationToken.None);
+
+        using var json = JsonDocument.Parse(response);
+
+        Assert.False(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Contains("Document limit reached", json.RootElement.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(10, documentStore.Documents.Count);
     }
 
     [Fact]
@@ -172,6 +220,48 @@ public sealed class MemoryToolHandlersTests
     {
         public Task<MemoryBrainResult> ResolveAsync(string customerId, string userId, CancellationToken cancellationToken = default)
             => Task.FromResult(result);
+    }
+
+    private sealed class StubSubscriptionStore(string planId = "free", string status = "active") : ISubscriptionStore
+    {
+        public Task<SubscriptionRecord> EnsureFreeSubscriptionAsync(string customerId, CancellationToken cancellationToken = default)
+            => Task.FromResult(BuildSubscription(customerId, "free", "active"));
+
+        public Task<SubscriptionRecord?> GetSubscriptionAsync(string customerId, CancellationToken cancellationToken = default)
+            => Task.FromResult<SubscriptionRecord?>(BuildSubscription(customerId, planId, status));
+
+        public Task<CustomerBillingProfile?> GetCustomerBillingProfileAsync(string customerId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<string?> FindCustomerIdByStripeCustomerIdAsync(string stripeCustomerId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task LinkStripeCustomerAsync(string customerId, string stripeCustomerId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<SubscriptionRecord> UpsertSubscriptionAsync(SubscriptionUpsertRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<bool> TryRecordSubscriptionEventAsync(SubscriptionEventRecord record, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task MarkSubscriptionEventProcessedAsync(string stripeEventId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        private static SubscriptionRecord BuildSubscription(string customerId, string planId, string status) =>
+            new(
+                "sub_test",
+                customerId,
+                planId,
+                status,
+                null,
+                null,
+                1,
+                null,
+                DateTimeOffset.UtcNow.AddDays(30),
+                false,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow);
     }
 
     private sealed class RecordingDocumentQueryStore(IReadOnlyList<RetrievalResultRecord> results) : IDocumentQueryStore

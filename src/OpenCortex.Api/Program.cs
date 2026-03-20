@@ -67,6 +67,8 @@ var stripeConfigured = options.Billing.Stripe.Enabled
     && !string.IsNullOrWhiteSpace(options.Billing.Stripe.SecretKey)
     && !string.IsNullOrWhiteSpace(options.Billing.Stripe.WebhookSecret);
 
+builder.Services.AddSingleton(options);
+
 if (stripeConfigured)
 {
     StripeConfiguration.ApiKey = options.Billing.Stripe.SecretKey;

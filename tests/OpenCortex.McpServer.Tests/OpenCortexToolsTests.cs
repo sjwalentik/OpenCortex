@@ -35,7 +35,7 @@ public sealed class OpenCortexToolsTests
         httpContextAccessor ??= BuildHttpContextAccessor();
         options ??= new OpenCortexOptions { Billing = new BillingOptions() };
         var memoryBrainResolver = new MemoryBrainResolver(catalog, memoryPreferenceStore);
-        var saveMemoryHandler = new SaveMemoryHandler(managedDocumentStore, memoryBrainResolver, indexingService);
+        var saveMemoryHandler = new SaveMemoryHandler(managedDocumentStore, memoryBrainResolver, indexingService, subscriptionStore, options);
         var recallMemoriesHandler = new RecallMemoriesHandler(executor, managedDocumentStore, memoryBrainResolver);
         var forgetMemoryHandler = new ForgetMemoryHandler(managedDocumentStore, memoryBrainResolver, indexingService);
 
@@ -653,6 +653,57 @@ public sealed class OpenCortexToolsTests
         Assert.False(result.Success);
         Assert.NotNull(result.Error);
         Assert.Contains("mcp:write", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SaveMemory_ReturnsFailure_WhenWorkspaceIsAtDocumentLimit()
+    {
+        var managedDocumentStore = new StubManagedDocumentStore();
+        for (var index = 0; index < 10; index++)
+        {
+            await managedDocumentStore.CreateManagedDocumentAsync(
+                new ManagedDocumentCreateRequest(
+                    "brain-write",
+                    "cus_test",
+                    $"Existing {index}",
+                    $"existing/{index}",
+                    "existing content",
+                    new Dictionary<string, string>(),
+                    "published",
+                    "user_test"),
+                CancellationToken.None);
+        }
+
+        var options = new OpenCortexOptions
+        {
+            Billing = new BillingOptions
+            {
+                Plans = new Dictionary<string, PlanEntitlements>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["free"] = new() { MaxDocuments = 10, MaxBrains = 1, McpQueriesPerMonth = 100, McpWrite = false },
+                    ["pro"] = new() { MaxDocuments = 10, MaxBrains = 3, McpQueriesPerMonth = -1, McpWrite = true },
+                    ["teams"] = new() { MaxDocuments = 2000, MaxBrains = 10, McpQueriesPerMonth = -1, McpWrite = true },
+                }
+            }
+        };
+
+        var result = await BuildTools(
+            catalog: BuildManagedContentCatalog(),
+            subscriptionStore: new StubSubscriptionStore(planId: "pro"),
+            managedDocumentStore: managedDocumentStore,
+            httpContextAccessor: BuildHttpContextAccessor("cus_test", "mcp:read", "mcp:write"),
+            options: options)
+            .save_memory(
+                "The user prefers concise architecture summaries.",
+                "preference",
+                "high",
+                ["user", "style"],
+                CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Contains("Document limit reached", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(10, managedDocumentStore.Documents.Count);
     }
 
     [Fact]
