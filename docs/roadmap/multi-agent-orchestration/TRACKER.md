@@ -2,7 +2,7 @@
 
 This document tracks the implementation status of all user stories across the multi-agent orchestration roadmap.
 
-**Last Updated**: 2026-03-19
+**Last Updated**: 2026-03-20
 
 ---
 
@@ -39,7 +39,7 @@ This document tracks the implementation status of all user stories across the mu
 
 | Status | ID | User Story | Assignee | Notes |
 |--------|-----|------------|----------|-------|
-| `[~]` | US-001 | Resolve Memory Brain | | `IMemoryBrainResolver`, `IUserMemoryPreferenceStore`, and `0009_user_memory_brain.sql` are in progress |
+| `[~]` | US-001 | Resolve Memory Brain | | `IMemoryBrainResolver`, `IUserMemoryPreferenceStore`, and customer-scoped memory-brain persistence are in progress |
 
 ### Feature 2: Memory Tools
 
@@ -61,7 +61,7 @@ This document tracks the implementation status of all user stories across the mu
 
 | Status | Migration | Description |
 |--------|-----------|-------------|
-| `[~]` | `0009_user_memory_brain.sql` | Adds memory_brain_id to users table |
+| `[~]` | `0009_user_memory_brain.sql` + `0009a_customer_membership_memory_brain.sql` | Adds and then scopes memory_brain_id to customer memberships |
 
 ### P1 Implementation Notes
 
@@ -77,6 +77,7 @@ This document tracks the implementation status of all user stories across the mu
 - 2026-03-19: Extracted a shared managed-document workspace hook in the portal so Documents and Memories now reuse the same controller logic for list/detail/draft/version workflows, not just the same view surface.
 - 2026-03-19: Updated hosted agentic chat request building so memory-tool guidance is injected into the system prompt when memory tools are available, and added endpoint tests to verify the real `/api/chat/completions/agentic` path.
 - 2026-03-20: Exposed `save_memory`, `recall_memories`, and `forget_memory` through the local MCP server so MCP consumers can use the same memory workflow directly, and updated memory save/forget handlers to reindex immediately so recall can see new changes without waiting for a later background cycle.
+- 2026-03-20: Corrected memory-brain preference scope from user-global storage to customer-membership storage with `0009a_customer_membership_memory_brain.sql`, plus resolver and endpoint coverage to prevent cross-workspace preference bleed.
 
 ---
 

@@ -63,6 +63,8 @@ public sealed class MemoryBrainEndpointsTests
         Assert.Equal(StatusCodes.Status200OK, statusCode);
         Assert.NotNull(json);
         Assert.Equal("brain-b", preferenceStore.MemoryBrainId);
+        Assert.Equal("cust-test", preferenceStore.CustomerId);
+        Assert.Equal("user-test", preferenceStore.UserId);
         Assert.Equal("brain-b", json!.RootElement.GetProperty("configuredMemoryBrainId").GetString());
         Assert.Equal("brain-b", json.RootElement.GetProperty("effectiveMemoryBrainId").GetString());
         Assert.False(json.RootElement.GetProperty("needsConfiguration").GetBoolean());
@@ -148,13 +150,17 @@ public sealed class MemoryBrainEndpointsTests
 
     private sealed class StubUserMemoryPreferenceStore : IUserMemoryPreferenceStore
     {
+        public string? CustomerId { get; private set; }
+        public string? UserId { get; private set; }
         public string? MemoryBrainId { get; private set; }
 
-        public Task<string?> GetMemoryBrainIdAsync(string userId, CancellationToken cancellationToken = default)
+        public Task<string?> GetMemoryBrainIdAsync(string customerId, string userId, CancellationToken cancellationToken = default)
             => Task.FromResult(MemoryBrainId);
 
-        public Task SetMemoryBrainIdAsync(string userId, string? memoryBrainId, CancellationToken cancellationToken = default)
+        public Task SetMemoryBrainIdAsync(string customerId, string userId, string? memoryBrainId, CancellationToken cancellationToken = default)
         {
+            CustomerId = customerId;
+            UserId = userId;
             MemoryBrainId = memoryBrainId;
             return Task.CompletedTask;
         }

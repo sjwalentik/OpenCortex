@@ -56,7 +56,7 @@ internal static class MemoryBrainEndpoints
             }
         }
 
-        await memoryPreferenceStore.SetMemoryBrainIdAsync(context!.UserId, requestedBrainId, cancellationToken);
+        await memoryPreferenceStore.SetMemoryBrainIdAsync(context!.CustomerId, context.UserId, requestedBrainId, cancellationToken);
         return await BuildMemoryBrainResponseAsync(
             context,
             brainCatalogStore,
@@ -73,7 +73,7 @@ internal static class MemoryBrainEndpoints
         CancellationToken cancellationToken)
     {
         var availableBrains = await ListAvailableMemoryBrainsAsync(context.CustomerId, brainCatalogStore, cancellationToken);
-        var configuredMemoryBrainId = await memoryPreferenceStore.GetMemoryBrainIdAsync(context.UserId, cancellationToken);
+        var configuredMemoryBrainId = await memoryPreferenceStore.GetMemoryBrainIdAsync(context.CustomerId, context.UserId, cancellationToken);
         var resolved = await memoryBrainResolver.ResolveAsync(context.CustomerId, context.UserId, cancellationToken);
 
         return Results.Ok(new

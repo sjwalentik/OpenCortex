@@ -44,7 +44,7 @@ public sealed class MemoryBrainResolver : IMemoryBrainResolver
                 NeedsConfiguration: false);
         }
 
-        var memoryBrainId = await _memoryPreferenceStore.GetMemoryBrainIdAsync(userId, cancellationToken);
+        var memoryBrainId = await _memoryPreferenceStore.GetMemoryBrainIdAsync(customerId, userId, cancellationToken);
         if (string.IsNullOrWhiteSpace(memoryBrainId))
         {
             return new MemoryBrainResult(

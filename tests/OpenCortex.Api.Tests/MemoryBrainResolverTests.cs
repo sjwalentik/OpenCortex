@@ -74,6 +74,28 @@ public sealed class MemoryBrainResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_UsesCustomerScopedPreference_WhenSameUserHasDifferentWorkspaceSelections()
+    {
+        var resolver = new MemoryBrainResolver(
+            new StubBrainCatalogStore(
+                new BrainSummary("brain-a", "Brain A", "brain-a", "managed-content", "active", 0),
+                new BrainSummary("brain-b", "Brain B", "brain-b", "managed-content", "active", 0)),
+            new StubUserMemoryPreferenceStore(new Dictionary<(string CustomerId, string UserId), string?>
+            {
+                [("cust-a", "user-a")] = "brain-a",
+                [("cust-b", "user-a")] = "brain-b"
+            }));
+
+        var resultA = await resolver.ResolveAsync("cust-a", "user-a");
+        var resultB = await resolver.ResolveAsync("cust-b", "user-a");
+
+        Assert.True(resultA.Success);
+        Assert.Equal("brain-a", resultA.BrainId);
+        Assert.True(resultB.Success);
+        Assert.Equal("brain-b", resultB.BrainId);
+    }
+
+    [Fact]
     public async Task ResolveAsync_ReturnsError_WhenNoActiveManagedContentBrainsExist()
     {
         var resolver = new MemoryBrainResolver(
@@ -128,12 +150,27 @@ public sealed class MemoryBrainResolverTests
             => throw new NotImplementedException();
     }
 
-    private sealed class StubUserMemoryPreferenceStore(string? memoryBrainId = null) : IUserMemoryPreferenceStore
+    private sealed class StubUserMemoryPreferenceStore : IUserMemoryPreferenceStore
     {
-        public Task<string?> GetMemoryBrainIdAsync(string userId, CancellationToken cancellationToken = default)
-            => Task.FromResult(memoryBrainId);
+        private readonly IReadOnlyDictionary<(string CustomerId, string UserId), string?> _memoryBrainIds;
 
-        public Task SetMemoryBrainIdAsync(string userId, string? newMemoryBrainId, CancellationToken cancellationToken = default)
+        public StubUserMemoryPreferenceStore(string? memoryBrainId = null)
+            : this(new Dictionary<(string CustomerId, string UserId), string?>
+            {
+                [("cust-a", "user-a")] = memoryBrainId
+            })
+        {
+        }
+
+        public StubUserMemoryPreferenceStore(IReadOnlyDictionary<(string CustomerId, string UserId), string?> memoryBrainIds)
+        {
+            _memoryBrainIds = memoryBrainIds;
+        }
+
+        public Task<string?> GetMemoryBrainIdAsync(string customerId, string userId, CancellationToken cancellationToken = default)
+            => Task.FromResult(_memoryBrainIds.TryGetValue((customerId, userId), out var memoryBrainId) ? memoryBrainId : null);
+
+        public Task SetMemoryBrainIdAsync(string customerId, string userId, string? newMemoryBrainId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
     }
 }

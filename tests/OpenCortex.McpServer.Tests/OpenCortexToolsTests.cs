@@ -1286,10 +1286,10 @@ internal sealed class StubUserMemoryPreferenceStore(string? memoryBrainId = null
 {
     public string? MemoryBrainId { get; private set; } = memoryBrainId;
 
-    public Task<string?> GetMemoryBrainIdAsync(string userId, CancellationToken cancellationToken = default)
+    public Task<string?> GetMemoryBrainIdAsync(string customerId, string userId, CancellationToken cancellationToken = default)
         => Task.FromResult(MemoryBrainId);
 
-    public Task SetMemoryBrainIdAsync(string userId, string? memoryBrainId, CancellationToken cancellationToken = default)
+    public Task SetMemoryBrainIdAsync(string customerId, string userId, string? memoryBrainId, CancellationToken cancellationToken = default)
     {
         MemoryBrainId = memoryBrainId;
         return Task.CompletedTask;
