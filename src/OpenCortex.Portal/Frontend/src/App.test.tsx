@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import App from './App';
+import App, { resolveDocumentLinkBrainId } from './App';
 
 type StoredAuthSession = {
   idToken: string;
@@ -178,6 +178,14 @@ function createPortalFetchMock(initialMemories: MemoryDocument[], options: Porta
   return { fetchMock, requests };
 }
 
+describe('resolveDocumentLinkBrainId', () => {
+  it('uses the effective memory brain for memories paths', () => {
+    expect(resolveDocumentLinkBrainId('memories/fact/stephen.md', 'brain-docs', 'brain-memory')).toBe('brain-memory');
+    expect(resolveDocumentLinkBrainId('daily/notes.md', 'brain-docs', 'brain-memory')).toBe('brain-docs');
+    expect(resolveDocumentLinkBrainId('memories/fact/stephen.md', 'brain-docs', null)).toBe('');
+  });
+});
+
 describe('App memories integration', () => {
   beforeEach(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(buildSession()));
@@ -306,11 +314,4 @@ describe('App memories integration', () => {
     expect(requests.some((request) => request.method === 'DELETE' && request.url === '/portal-api/tenant/brains/brain-1/documents/mem-1')).toBe(true);
   });
 });
-
-
-
-
-
-
-
 

@@ -114,6 +114,18 @@ type MemoryBrainPreference = {
   error?: string | null;
 };
 
+export function resolveDocumentLinkBrainId(
+  canonicalPath: string,
+  activeBrainId: string,
+  effectiveMemoryBrainId?: string | null,
+) {
+  if (canonicalPath.startsWith('memories/')) {
+    return effectiveMemoryBrainId || '';
+  }
+
+  return activeBrainId;
+}
+
 type TokenSummary = {
   apiTokenId: string;
   name: string;
@@ -859,14 +871,24 @@ async function handleOpenDocumentLink(rawPath: string) {
   const canonicalPath = normalizeDocumentLinkPath(rawPath);
   const isMemoryPath = canonicalPath.startsWith('memories/');
   const showStatus = isMemoryPath ? showMemoryStatus : showDocumentStatus;
+  const targetBrainId = resolveDocumentLinkBrainId(
+    canonicalPath,
+    activeBrainId,
+    memoryBrainPreference?.effectiveMemoryBrainId,
+  );
 
   if (!canonicalPath) {
     showStatus('warn', 'Enter a valid managed document path like daily/notes.md.');
     return;
   }
 
-  if (!activeBrainId) {
-    showStatus('warn', 'Select a managed-content brain before opening document links.');
+  if (!targetBrainId) {
+    showStatus(
+      'warn',
+      isMemoryPath
+        ? 'Select or configure a memory brain before opening memory links.'
+        : 'Select a managed-content brain before opening document links.',
+    );
     return;
   }
 
@@ -902,7 +924,7 @@ async function handleOpenDocumentLink(rawPath: string) {
   try {
     const session = await getValidSession();
     const resolvedDocument = await portalFetch(
-      `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/by-path?canonicalPath=${encodeURIComponent(canonicalPath)}`,
+      `/portal-api/tenant/brains/${encodeURIComponent(targetBrainId)}/documents/by-path?canonicalPath=${encodeURIComponent(canonicalPath)}`,
       session.idToken,
     ) as DocumentDetail;
 
@@ -3279,100 +3301,4 @@ function handleClearSession() {
 }
 
 export default App;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
