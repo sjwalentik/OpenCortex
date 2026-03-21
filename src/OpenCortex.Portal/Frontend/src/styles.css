@@ -220,12 +220,12 @@ h3 {
 }
 
 .auth-fallback-note a {
-  color: var(--primary-strong);
+  color: #5b2d11;
 }
 
 .session-chip {
   padding: 12px 18px;
-  color: var(--primary-strong);
+  color: #5b2d11;
   font-weight: 700;
 }
 
@@ -241,13 +241,13 @@ h3 {
   border-radius: 999px;
   border: 1px solid rgba(138, 75, 36, 0.18);
   background: rgba(255, 251, 244, 0.9);
-  color: var(--primary-strong);
+  color: #5b2d11;
   cursor: pointer;
   transition: transform 140ms ease, background 140ms ease, border-color 140ms ease;
 }
 
 .app-nav-link {
-  padding: 10px 14px;
+  padding: 12px 16px;
 }
 
 .app-nav-link.active {
@@ -348,12 +348,12 @@ h3 {
 
 .field {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .field span {
   color: var(--primary);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -367,7 +367,7 @@ h3 {
   border-radius: 16px;
   background: rgba(255, 251, 244, 0.94);
   color: var(--text);
-  padding: 12px 14px;
+  padding: 14px 16px;
 }
 
 .workspace-toolbar {
@@ -452,7 +452,7 @@ h3 {
 }
 
 .document-folder-name {
-  color: var(--primary-strong);
+  color: #5b2d11;
 }
 
 .document-folder-count {
@@ -586,12 +586,12 @@ h3 {
 .editor-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 .editor-toolbar-button {
   padding: 8px 12px;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
 }
 
 .editor-toolbar-button.active {
@@ -621,12 +621,12 @@ h3 {
   border-radius: 16px;
   background: rgba(255, 251, 244, 0.96);
   color: var(--text);
-  padding: 10px 14px;
+  padding: 12px 16px;
 }
 
 .editor-link-suggestion-list {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .editor-link-suggestion {
@@ -634,7 +634,7 @@ h3 {
   gap: 2px;
   width: 100%;
   text-align: left;
-  padding: 10px 14px;
+  padding: 12px 16px;
   border: 1px solid rgba(138, 75, 36, 0.14);
   border-radius: 16px;
   background: rgba(255, 251, 244, 0.94);
@@ -883,7 +883,7 @@ h3 {
   align-items: center;
   border-radius: 999px;
   padding: 6px 10px;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
@@ -1057,7 +1057,7 @@ h3 {
 .chat-sidebar-loading,
 .chat-sidebar-empty {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   padding: 12px 0;
 }
 
@@ -1072,7 +1072,7 @@ h3 {
 .chat-conversation-list li {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   border-radius: 8px;
   margin-bottom: 4px;
 }
@@ -1102,7 +1102,7 @@ h3 {
 
 .chat-conversation-title {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1175,7 +1175,7 @@ h3 {
   max-width: 85%;
   padding: 14px 18px;
   border-radius: 16px;
-  background: rgba(138, 75, 36, 0.06);
+  background: rgba(138, 75, 36, 0.08);
 }
 
 .chat-message-user {
@@ -1263,7 +1263,7 @@ h3 {
   border-top: 1px solid var(--line);
   background: rgba(138, 75, 36, 0.08);
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.95rem;
 }
 
 .chat-activity-indicator {
@@ -1271,7 +1271,7 @@ h3 {
   align-items: flex-start;
   gap: 12px;
   padding: 12px 18px;
-  background: rgba(138, 75, 36, 0.06);
+  background: rgba(138, 75, 36, 0.08);
   color: var(--muted);
   font-size: 0.85rem;
   border-top: 1px solid var(--line);
@@ -1289,7 +1289,7 @@ h3 {
 .chat-activity-copy {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -1353,7 +1353,7 @@ h3 {
 
 .chat-input-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 @media (max-width: 768px) {
@@ -1382,7 +1382,7 @@ h3 {
 .chat-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
 }
 
@@ -1412,12 +1412,12 @@ h3 {
 }
 
 .chat-tool-call {
-  background: rgba(255, 249, 240, 0.96);
-  border: 1px solid rgba(71, 50, 31, 0.14);
+  background: #f8efe2;
+  border: 1px solid rgba(71, 50, 31, 0.18);
   border-radius: 16px;
   overflow: hidden;
   color: var(--text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78), 0 8px 18px rgba(88, 60, 25, 0.08);
 }
 
 .chat-tool-call[open] {
@@ -1439,16 +1439,16 @@ h3 {
 .chat-tool-call summary {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 12px 16px;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: var(--text);
   list-style: none;
 }
 
 .chat-tool-call summary:hover {
-  background: rgba(138, 75, 36, 0.06);
+  background: rgba(138, 75, 36, 0.08);
 }
 
 .chat-tool-call summary::-webkit-details-marker {
@@ -1479,12 +1479,12 @@ h3 {
 .chat-tool-name {
   font-weight: 600;
   font-family: monospace;
-  color: var(--primary-strong);
+  color: #5b2d11;
 }
 
 .chat-tool-duration {
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   margin-left: auto;
 }
 
@@ -1492,9 +1492,9 @@ h3 {
 .chat-tool-result {
   display: grid;
   gap: 6px;
-  padding: 12px 14px;
-  border-top: 1px solid rgba(71, 50, 31, 0.1);
-  font-size: 0.84rem;
+  padding: 14px 16px;
+  border-top: 1px solid rgba(71, 50, 31, 0.14);
+  font-size: 0.88rem;
   color: var(--text);
 }
 
@@ -1502,7 +1502,7 @@ h3 {
 .chat-tool-result strong,
 .chat-tool-error strong {
   color: var(--primary);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1510,38 +1510,38 @@ h3 {
 .chat-tool-args pre,
 .chat-tool-result pre {
   margin: 0;
-  padding: 12px 14px;
-  background: rgba(71, 50, 31, 0.06);
-  border: 1px solid rgba(71, 50, 31, 0.1);
+  padding: 14px 16px;
+  background: rgba(255, 253, 249, 0.96);
+  border: 1px solid rgba(71, 50, 31, 0.14);
   border-radius: 12px;
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 0.78rem;
-  line-height: 1.55;
+  font-size: 0.82rem;
+  line-height: 1.65;
   color: var(--text);
-  max-height: 260px;
+  max-height: 320px;
   overflow-y: auto;
 }
 
 .chat-tool-error {
   display: grid;
   gap: 6px;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border-top: 1px solid rgba(150, 47, 47, 0.14);
   background: rgba(150, 47, 47, 0.06);
   color: var(--danger);
-  font-size: 0.84rem;
+  font-size: 0.88rem;
 }
 
 /* Telemetry summary */
 .chat-telemetry {
   margin-top: 8px;
-  padding: 10px 14px;
-  background: rgba(255, 249, 240, 0.96);
-  border: 1px solid rgba(71, 50, 31, 0.14);
+  padding: 12px 16px;
+  background: #f8efe2;
+  border: 1px solid rgba(71, 50, 31, 0.18);
   border-radius: 16px;
-  font-size: 0.84rem;
+  font-size: 0.88rem;
   color: var(--text);
 }
 
@@ -1561,6 +1561,7 @@ h3 {
   gap: 4px;
   color: var(--muted);
 }
+
 
 
 
