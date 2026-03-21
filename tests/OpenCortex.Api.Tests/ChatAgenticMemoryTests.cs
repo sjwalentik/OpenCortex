@@ -102,6 +102,126 @@ public sealed class ChatAgenticMemoryTests : IClassFixture<ChatAgenticMemoryTest
         Assert.Contains("save_memory", _factory.Engine.LastRequest.SystemMessage, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task AgenticStream_EmitsMemoryToolEventsOverSse()
+    {
+        _factory.Engine.LastRequest = null;
+        _factory.Engine.StreamHandler = request => StreamMemoryEvents(request);
+
+        var response = await _client.PostAsync(
+            "/api/chat/completions/agentic/stream",
+            Json("""
+            {
+              "messages": [
+                { "role": "user", "content": "What do you remember about camping?" }
+              ],
+              "enableTools": true
+            }
+            """));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+
+        var payload = await response.Content.ReadAsStringAsync();
+
+        Assert.NotNull(_factory.Engine.LastRequest);
+        Assert.Contains("\"eventType\":\"tool_calls\"", payload, StringComparison.Ordinal);
+        Assert.Contains("\"toolName\":\"recall_memories\"", payload, StringComparison.Ordinal);
+        Assert.Contains("\"eventType\":\"tool_result\"", payload, StringComparison.Ordinal);
+        Assert.Contains("Stephen likes to camp", payload, StringComparison.Ordinal);
+        Assert.Contains("\"eventType\":\"complete\"", payload, StringComparison.Ordinal);
+        Assert.Contains("[DONE]", payload, StringComparison.Ordinal);
+    }
+
+    private static async IAsyncEnumerable<AgenticStreamEvent> StreamMemoryEvents(
+        AgenticOrchestrationRequest request)
+    {
+        yield return new AgenticIterationStartEvent
+        {
+            Iteration = 1,
+            TraceId = "trace-memory"
+        };
+
+        yield return new AgenticToolCallStartEvent
+        {
+            Iteration = 1,
+            ToolCalls =
+            [
+                new ToolCall
+                {
+                    Id = "tool-1",
+                    Function = new FunctionCall
+                    {
+                        Name = "recall_memories",
+                        Arguments = """{"query":"camp","limit":3}"""
+                    }
+                }
+            ]
+        };
+
+        yield return new AgenticToolResultEvent
+        {
+            Iteration = 1,
+            Result = ToolExecutionResult.Ok(
+                "tool-1",
+                "recall_memories",
+                """{"success":true,"count":1,"memories":[{"path":"memories/fact/stephen-camping.md","content":"Stephen likes to camp."}]}""",
+                TimeSpan.FromMilliseconds(5))
+        };
+
+        yield return new AgenticIterationCompleteEvent
+        {
+            Iteration = 1,
+            Duration = TimeSpan.FromMilliseconds(8),
+            TokenUsage = TokenUsage.Empty,
+            HasToolCalls = true
+        };
+
+        yield return new AgenticTextEvent
+        {
+            Iteration = 2,
+            Content = "Stephen likes to camp."
+        };
+
+        yield return new AgenticIterationCompleteEvent
+        {
+            Iteration = 2,
+            Duration = TimeSpan.FromMilliseconds(4),
+            TokenUsage = TokenUsage.Empty,
+            HasToolCalls = false
+        };
+
+        yield return new AgenticCompleteEvent
+        {
+            Result = new AgenticOrchestrationResult
+            {
+                Completion = new ChatCompletion
+                {
+                    Content = "Stephen likes to camp.",
+                    Usage = TokenUsage.Empty,
+                    FinishReason = FinishReason.Stop,
+                    Model = "test-model"
+                },
+                Conversation = request.Messages,
+                ToolExecutions =
+                [
+                    ToolExecutionResult.Ok(
+                        "tool-1",
+                        "recall_memories",
+                        """{"success":true,"count":1}""",
+                        TimeSpan.FromMilliseconds(5))
+                ],
+                Iterations = 2,
+                Duration = TimeSpan.FromMilliseconds(12),
+                ProviderId = "test-provider",
+                ModelId = "test-model",
+                ReachedMaxIterations = false
+            }
+        };
+
+        await Task.CompletedTask;
+    }
+
     private static StringContent Json(string body) =>
         new(body, Encoding.UTF8, "application/json");
 
@@ -158,6 +278,7 @@ public sealed class ChatAgenticMemoryTests : IClassFixture<ChatAgenticMemoryTest
     public sealed class RecordingAgenticEngine : IAgenticOrchestrationEngine
     {
         public AgenticOrchestrationRequest? LastRequest { get; set; }
+        public Func<AgenticOrchestrationRequest, IAsyncEnumerable<AgenticStreamEvent>>? StreamHandler { get; set; }
 
         public Task<AgenticOrchestrationResult> ExecuteAgenticAsync(AgenticOrchestrationRequest request, CancellationToken cancellationToken = default)
         {
@@ -186,8 +307,16 @@ public sealed class ChatAgenticMemoryTests : IClassFixture<ChatAgenticMemoryTest
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             LastRequest = request;
-            await Task.CompletedTask;
-            yield break;
+            if (StreamHandler is null)
+            {
+                await Task.CompletedTask;
+                yield break;
+            }
+
+            await foreach (var streamEvent in StreamHandler(request).WithCancellation(cancellationToken))
+            {
+                yield return streamEvent;
+            }
         }
     }
 

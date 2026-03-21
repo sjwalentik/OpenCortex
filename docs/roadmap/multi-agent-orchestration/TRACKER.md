@@ -80,6 +80,7 @@ This document tracks the implementation status of all user stories across the mu
 - 2026-03-20: Corrected memory-brain preference scope from user-global storage to customer-membership storage with `0009a_customer_membership_memory_brain.sql`, plus resolver and endpoint coverage to prevent cross-workspace preference bleed.
 - 2026-03-20: Improved `save_memory` quota-hit guidance so agentic chat and MCP consumers receive an explicit next step to review memories, forget one, or upgrade before retrying.
 - 2026-03-20: Moved document quota enforcement into managed-document creation so hosted document creates, MCP document creates, and memory saves all fail before write when the workspace is already full.
+- 2026-03-20: Added `AgenticOrchestrationEngine` memory-loop tests so hosted agentic execution is now covered beyond prompt guidance alone, including real `save_memory` execution and streaming `recall_memories` tool-result events.
 
 ---
 
