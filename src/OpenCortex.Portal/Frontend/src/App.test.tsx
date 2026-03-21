@@ -25,7 +25,8 @@ type MemoryDocument = {
 
 type PortalFetchMockOptions = {
   activeBrainId?: string;
-  effectiveMemoryBrainId?: string;
+  effectiveMemoryBrainId?: string | null;
+  needsMemoryConfiguration?: boolean;
 };
 
 const storageKey = 'opencortex.portal.auth_session';
@@ -55,7 +56,8 @@ function jsonResponse(payload: unknown, status = 200) {
 
 function createPortalFetchMock(initialMemories: MemoryDocument[], options: PortalFetchMockOptions = {}) {
   const activeBrainId = options.activeBrainId || 'brain-1';
-  const effectiveMemoryBrainId = options.effectiveMemoryBrainId || 'brain-1';
+  const effectiveMemoryBrainId = options.effectiveMemoryBrainId === undefined ? 'brain-1' : options.effectiveMemoryBrainId;
+  const needsMemoryConfiguration = options.needsMemoryConfiguration || false;
   let memories = [...initialMemories];
   const requests: Array<{ url: string; method: string }> = [];
 
@@ -99,23 +101,32 @@ function createPortalFetchMock(initialMemories: MemoryDocument[], options: Porta
     }
 
     if (url === '/portal-api/tenant/brains') {
-      return jsonResponse({
-        brains: [
-          {
-            brainId: activeBrainId,
-            name: 'Daily Brain',
-            mode: 'managed-content',
-            status: 'active',
-          },
-        ],
-      });
+      const brains = [
+        {
+          brainId: activeBrainId,
+          name: 'Daily Brain',
+          mode: 'managed-content',
+          status: 'active',
+        },
+      ];
+
+      if (effectiveMemoryBrainId && effectiveMemoryBrainId !== activeBrainId) {
+        brains.push({
+          brainId: effectiveMemoryBrainId,
+          name: 'Memory Brain',
+          mode: 'managed-content',
+          status: 'active',
+        });
+      }
+
+      return jsonResponse({ brains });
     }
 
     if (url === '/portal-api/tenant/me/memory-brain') {
       return jsonResponse({
         configuredMemoryBrainId: effectiveMemoryBrainId,
         effectiveMemoryBrainId,
-        needsConfiguration: false,
+        needsConfiguration: needsMemoryConfiguration,
       });
     }
 
@@ -268,6 +279,54 @@ describe('App memories integration', () => {
     expect(requests.some((request) => request.url === '/portal-api/tenant/brains/brain-2/documents?limit=200&pathPrefix=memories%2F')).toBe(true);
     expect(requests.some((request) => request.url === '/portal-api/tenant/brains/brain-2/documents/mem-1')).toBe(true);
     expect(requests.some((request) => request.url === '/portal-api/tenant/brains/brain-1/documents?limit=200&pathPrefix=memories%2F')).toBe(false);
+  });
+
+  it('binds the Memories view controls to the resolved memory brain and disables create when none is resolved', async () => {
+    const { fetchMock, requests } = createPortalFetchMock([], {
+      activeBrainId: 'brain-1',
+      effectiveMemoryBrainId: null,
+      needsMemoryConfiguration: true,
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect((screen.getByRole('button', { name: 'New Memory' }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    expect((screen.getByLabelText('Brain') as HTMLSelectElement).disabled).toBe(true);
+    expect(requests.some((request) => request.url.includes('/documents?limit=200&pathPrefix=memories%2F'))).toBe(false);
+  });
+
+  it('shows the resolved memory brain in the Memories view instead of the active workspace brain', async () => {
+    const { fetchMock } = createPortalFetchMock([
+      {
+        managedDocumentId: 'mem-1',
+        title: '[fact] Stephen likes camping',
+        slug: 'memories/fact/stephen-camping',
+        canonicalPath: 'memories/fact/stephen-camping.md',
+        status: 'published',
+        updatedAt: '2026-03-20T12:00:00Z',
+        wordCount: 5,
+        content: 'Stephen likes camping.',
+        frontmatter: { category: 'fact', confidence: 'high' },
+      },
+    ], {
+      activeBrainId: 'brain-1',
+      effectiveMemoryBrainId: 'brain-2',
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Stephen likes camping.')).toBeTruthy();
+    });
+
+    expect(screen.getByDisplayValue('Memory Brain | managed-content | active')).toBeTruthy();
   });
 
   it('forgets the selected memory and refreshes the list through App fetch wiring', async () => {

@@ -1371,6 +1371,9 @@ const availableManagedDocumentLinks = useMemo(
   [documents, memories]
 );
 const activeBrain = brains.find((brain) => brain.brainId === activeBrainId) ?? null;
+const effectiveMemoryBrainId = memoryBrainPreference?.effectiveMemoryBrainId || '';
+const memoryActiveBrain = brains.find((brain) => brain.brainId === effectiveMemoryBrainId) ?? null;
+const memoryViewBrains = memoryActiveBrain ? [memoryActiveBrain] : [];
 
   return (
     <div className="app-shell">
@@ -1507,10 +1510,10 @@ const activeBrain = brains.find((brain) => brain.brainId === activeBrainId) ?? n
           />
         ) : activeView === 'memories' ? (
           <MemoriesView
-            activeBrain={activeBrain}
-            activeBrainId={activeBrainId}
+            activeBrain={memoryActiveBrain}
+            activeBrainId={effectiveMemoryBrainId}
             availableDocumentLinks={availableManagedDocumentLinks}
-            brains={brains}
+            brains={memoryViewBrains}
             documentDraft={memoryDraft}
             documentError={memoryError}
             documentFilter={memoryFilter}
