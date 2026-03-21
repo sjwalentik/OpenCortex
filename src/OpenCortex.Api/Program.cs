@@ -24,6 +24,7 @@ using OpenCortex.Providers.Abstractions;
 using OpenCortex.Retrieval.Execution;
 using OpenCortex.Tools;
 using OpenCortex.Tools.GitHub;
+using OpenCortex.Tools.Memory;
 using Stripe;
 using BillingPortalSessionService = Stripe.BillingPortal.SessionService;
 using BillingPortalSessionCreateOptions = Stripe.BillingPortal.SessionCreateOptions;
@@ -58,12 +59,15 @@ var subscriptionStore = new PostgresSubscriptionStore(connectionFactory);
 var apiTokenStore = new PostgresApiTokenStore(connectionFactory);
 var usageCounterStore = new PostgresUsageCounterStore(connectionFactory);
 var embeddingProvider = EmbeddingProviderFactory.Create(options.Embeddings);
+var documentQueryStore = new PostgresDocumentQueryStore(connectionFactory, embeddingProvider);
 var indexRunStore = new PostgresIndexRunStore(connectionFactory);
 var hostedAuthConfigured = options.HostedAuth.Enabled
     && !string.IsNullOrWhiteSpace(options.HostedAuth.FirebaseProjectId);
 var stripeConfigured = options.Billing.Stripe.Enabled
     && !string.IsNullOrWhiteSpace(options.Billing.Stripe.SecretKey)
     && !string.IsNullOrWhiteSpace(options.Billing.Stripe.WebhookSecret);
+
+builder.Services.AddSingleton(options);
 
 if (stripeConfigured)
 {
@@ -771,6 +775,21 @@ else
 // Register user provider configuration repository
 builder.Services.AddScoped<IUserProviderConfigRepository>(sp =>
     new PostgresUserProviderConfigRepository(connectionFactory));
+builder.Services.AddSingleton<IBrainCatalogStore>(_ => brainCatalogStore);
+builder.Services.AddSingleton<IManagedDocumentStore>(_ => managedDocumentStore);
+builder.Services.AddSingleton<IDocumentQueryStore>(_ => documentQueryStore);
+builder.Services.AddSingleton<OqlQueryExecutor>();
+builder.Services.AddSingleton<IManagedContentBrainIndexingService>(_ =>
+    new ManagedContentBrainIndexingService(
+        new PostgresManagedDocumentStore(connectionFactory),
+        new PostgresDocumentCatalogStore(connectionFactory),
+        new PostgresChunkStore(connectionFactory),
+        new PostgresLinkGraphStore(connectionFactory),
+        new PostgresIndexRunStore(connectionFactory),
+        new PostgresEmbeddingStore(connectionFactory),
+        embeddingProvider));
+builder.Services.AddSingleton<IUserMemoryPreferenceStore>(sp =>
+    new PostgresUserMemoryPreferenceStore(connectionFactory));
 
 // Register OAuth service for provider authentication
 builder.Services.Configure<ProviderOAuthConfig>(builder.Configuration.GetSection(ProviderOAuthConfig.SectionName));
@@ -786,6 +805,7 @@ builder.Services.AddScoped<OpenCortex.Core.Credentials.IUserCredentialService,
 // Register tools infrastructure
 builder.Services.AddTools();
 builder.Services.AddGitHubTools();
+builder.Services.AddMemoryTools();
 
 // Register conversation services
 builder.Services.AddConversations();
@@ -1203,6 +1223,9 @@ if (hostedAuthConfigured)
 
         return Results.Ok(context);
     });
+
+    tenantRoutes.MapGet("/me/memory-brain", MemoryBrainEndpoints.GetMemoryBrainAsync);
+    tenantRoutes.MapPut("/me/memory-brain", MemoryBrainEndpoints.UpdateMemoryBrainAsync);
 
     tenantRoutes.MapGet("/brains", async (
         System.Security.Claims.ClaimsPrincipal user,
@@ -1624,6 +1647,8 @@ if (hostedAuthConfigured)
 
     tenantDocumentRoutes.MapGet("", async (
         string brainId,
+        string? pathPrefix,
+        string? excludePathPrefix,
         int? limit,
         System.Security.Claims.ClaimsPrincipal user,
         ITenantCatalogStore catalogStore,
@@ -1649,6 +1674,8 @@ if (hostedAuthConfigured)
         var documents = await managedDocumentStore.ListManagedDocumentsAsync(
             context.CustomerId,
             brainId,
+            pathPrefix,
+            excludePathPrefix,
             Math.Clamp(limit ?? 200, 1, 500),
             cancellationToken);
 
@@ -1826,14 +1853,6 @@ if (hostedAuthConfigured)
 
         var billingState = await GetEffectiveBillingStateAsync(context.CustomerId, cancellationToken);
         var plan = ResolvePlanEntitlements(billingState.PlanId);
-        if (plan.MaxDocuments >= 0)
-        {
-            var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(context.CustomerId, cancellationToken);
-            if (activeDocuments >= plan.MaxDocuments)
-            {
-                return BuildQuotaExceededResult(billingState.PlanId, activeDocuments, plan);
-            }
-        }
 
         try
         {
@@ -1846,7 +1865,9 @@ if (hostedAuthConfigured)
                     Content: request.Content ?? string.Empty,
                     Frontmatter: request.Frontmatter ?? new Dictionary<string, string>(),
                     Status: request.Status ?? "draft",
-                    UserId: context.UserId),
+                    UserId: context.UserId,
+                    MaxActiveDocuments: plan.MaxDocuments >= 0 ? plan.MaxDocuments : null,
+                    QuotaExceededMessage: $"Your {billingState.PlanId} plan allows {plan.MaxDocuments} documents. Upgrade to continue adding more."),
                 cancellationToken);
 
             await BuildManagedContentIndexingService().ReindexAsync(
@@ -1858,6 +1879,10 @@ if (hostedAuthConfigured)
             await SyncActiveDocumentCounterAsync(context.CustomerId, cancellationToken);
 
             return Results.Created($"/tenant/brains/{brainId}/documents/{document.ManagedDocumentId}", document);
+        }
+        catch (ManagedDocumentQuotaExceededException)
+        {
+            return BuildQuotaExceededResult(billingState.PlanId, plan.MaxDocuments, plan);
         }
         catch (InvalidOperationException ex)
         {

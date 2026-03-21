@@ -24,7 +24,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\OpenCortex.McpServer\OpenCortex.McpServer.csproj" />
     <ProjectReference Include="..\..\src\OpenCortex.Core\OpenCortex.Core.csproj" />
+    <ProjectReference Include="..\..\src\OpenCortex.Orchestration\OpenCortex.Orchestration.csproj" />
     <ProjectReference Include="..\..\src\OpenCortex.Retrieval\OpenCortex.Retrieval.csproj" />
+    <ProjectReference Include="..\..\src\OpenCortex.Tools.Memory\OpenCortex.Tools.Memory.csproj" />
   </ItemGroup>
 
 </Project>

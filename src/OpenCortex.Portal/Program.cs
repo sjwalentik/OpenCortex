@@ -344,7 +344,7 @@ static bool IsAllowedPortalApiPath(string path, string method)
     return normalizedMethod switch
     {
         "GET" =>
-            normalizedPath is "tenant/me" or "tenant/brains" or "tenant/billing/plan" or "tenant/tokens" or "tenant/conversations"
+            normalizedPath is "tenant/me" or "tenant/me/memory-brain" or "tenant/brains" or "tenant/billing/plan" or "tenant/tokens" or "tenant/conversations"
             || normalizedPath.StartsWith("tenant/brains/", StringComparison.OrdinalIgnoreCase)
             || normalizedPath.StartsWith("tenant/conversations/", StringComparison.OrdinalIgnoreCase)
             || string.Equals(normalizedPath, "tenant/query", StringComparison.OrdinalIgnoreCase)
@@ -361,6 +361,7 @@ static bool IsAllowedPortalApiPath(string path, string method)
             || IsProviderConfigOAuthActionPath(normalizedPath),
         "PUT" =>
             IsTenantBrainDocumentItemPath(normalizedPath)
+            || string.Equals(normalizedPath, "tenant/me/memory-brain", StringComparison.OrdinalIgnoreCase)
             || IsProviderConfigItemPath(normalizedPath),
         "PATCH" => IsTenantConversationItemPath(normalizedPath),
         "DELETE" =>

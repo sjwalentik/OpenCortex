@@ -570,6 +570,9 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             UserId = request.UserId,
             CustomerId = request.CustomerId,
             ConversationId = request.ConversationId,
+            TenantUserId = request.RoutingContext?.UserId,
+            TenantCustomerId = request.RoutingContext?.CustomerId,
+            BrainId = request.RoutingContext?.BrainId,
             WorkspacePath = workspacePath,
             Credentials = request.Credentials,
             CommandMode = request.CommandMode
@@ -707,6 +710,13 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             return "shell";
         }
 
+        if (string.Equals(toolName, "save_memory", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(toolName, "recall_memories", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(toolName, "forget_memory", StringComparison.OrdinalIgnoreCase))
+        {
+            return "memory";
+        }
+
         return null;
     }
 
@@ -763,3 +773,4 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         }
     }
 }
+

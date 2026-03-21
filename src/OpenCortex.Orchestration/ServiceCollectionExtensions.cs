@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using OpenCortex.Orchestration.Configuration;
 using OpenCortex.Orchestration.Execution;
+using OpenCortex.Orchestration.Memory;
 using OpenCortex.Orchestration.Routing;
 
 namespace OpenCortex.Orchestration;
@@ -29,6 +30,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITaskClassifier, KeywordTaskClassifier>();
         services.AddSingleton<IModelRouter, DefaultRouter>();
         services.AddSingleton<IOrchestrationEngine, OrchestrationEngine>();
+        services.AddSingleton<IMemoryBrainResolver, MemoryBrainResolver>();
         services.AddScoped<IUserOrchestrationService, UserOrchestrationService>();
         services.AddScoped<IAgenticOrchestrationEngine, AgenticOrchestrationEngine>();
 
@@ -48,6 +50,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITaskClassifier, KeywordTaskClassifier>();
         services.AddSingleton<IModelRouter, DefaultRouter>();
         services.AddSingleton<IOrchestrationEngine, OrchestrationEngine>();
+        services.AddSingleton<IMemoryBrainResolver, MemoryBrainResolver>();
         services.AddScoped<IUserOrchestrationService, UserOrchestrationService>();
         services.AddScoped<IAgenticOrchestrationEngine, AgenticOrchestrationEngine>();
 

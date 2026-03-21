@@ -5,6 +5,8 @@ public interface IManagedDocumentStore
     Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
         string customerId,
         string brainId,
+        string? pathPrefix = null,
+        string? excludePathPrefix = null,
         int limit = 200,
         CancellationToken cancellationToken = default);
 
@@ -75,7 +77,17 @@ public sealed record ManagedDocumentCreateRequest(
     string Content,
     IReadOnlyDictionary<string, string> Frontmatter,
     string Status,
-    string UserId);
+    string UserId,
+    int? MaxActiveDocuments = null,
+    string? QuotaExceededMessage = null);
+
+public sealed class ManagedDocumentQuotaExceededException : InvalidOperationException
+{
+    public ManagedDocumentQuotaExceededException(string message)
+        : base(message)
+    {
+    }
+}
 
 public sealed record ManagedDocumentUpdateRequest(
     string ManagedDocumentId,

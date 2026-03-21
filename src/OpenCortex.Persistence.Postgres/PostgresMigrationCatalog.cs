@@ -12,5 +12,7 @@ public static class PostgresMigrationCatalog
         new("0006", "Managed document versions schema", "infra/postgres/migrations/0006_managed_document_versions.sql"),
         new("0007", "Conversations schema", "infra/postgres/migrations/0007_conversations.sql"),
         new("0008", "User provider configuration schema", "infra/postgres/migrations/0008_user_provider_configs.sql"),
+        new("0009", "User memory brain preference schema", "infra/postgres/migrations/0009_user_memory_brain.sql"),
+        new("0009a", "Customer membership memory brain preference schema", "infra/postgres/migrations/0009a_customer_membership_memory_brain.sql"),
     ];
 }

@@ -141,6 +141,7 @@ internal sealed class InMemoryDocumentQueryStore : IDocumentQueryStore
                 "tag"   => doc.Frontmatter.TryGetValue("tag", out var tag) && string.Equals(tag, filter.Value, StringComparison.OrdinalIgnoreCase),
                 "title" => string.Equals(doc.Title, filter.Value, StringComparison.OrdinalIgnoreCase),
                 "path"  => string.Equals(doc.CanonicalPath, filter.Value, StringComparison.OrdinalIgnoreCase),
+                "path_prefix" => doc.CanonicalPath.StartsWith(BuildPathPrefixValue(filter.Value), StringComparison.OrdinalIgnoreCase),
                 "type"  => string.Equals(doc.DocumentType, filter.Value, StringComparison.OrdinalIgnoreCase),
                 _       => true,
             };
@@ -150,6 +151,14 @@ internal sealed class InMemoryDocumentQueryStore : IDocumentQueryStore
         }
 
         return true;
+    }
+
+    private static string BuildPathPrefixValue(string pathPrefix)
+    {
+        var normalized = pathPrefix.Trim().Replace('\\', '/').Trim('/');
+        return string.IsNullOrWhiteSpace(normalized)
+            ? string.Empty
+            : normalized + "/";
     }
 
     private static float[] BuildQueryVector(string text, int dimensions)

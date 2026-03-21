@@ -32,6 +32,11 @@ public interface IModelRouter
 public sealed record RoutingContext
 {
     /// <summary>
+    /// Customer/tenant ID for tenant-scoped tools and routing.
+    /// </summary>
+    public string? CustomerId { get; init; }
+
+    /// <summary>
     /// User ID for personalized routing.
     /// </summary>
     public string? UserId { get; init; }

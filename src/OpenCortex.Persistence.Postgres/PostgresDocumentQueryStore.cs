@@ -262,6 +262,10 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
                     command.Parameters.AddWithValue(parameterName, filter.Value);
                     clauses.Add($"d.canonical_path = @{parameterName}");
                     break;
+                case "path_prefix":
+                    command.Parameters.AddWithValue(parameterName, BuildPathPrefixPattern(filter.Value));
+                    clauses.Add($"d.canonical_path LIKE @{parameterName}");
+                    break;
                 case "type":
                     command.Parameters.AddWithValue(parameterName, filter.Value);
                     clauses.Add($"COALESCE(d.document_type, '') = @{parameterName}");
@@ -275,5 +279,13 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
         }
 
         return "AND " + string.Join(" AND ", clauses);
+    }
+
+    private static string BuildPathPrefixPattern(string pathPrefix)
+    {
+        var normalized = pathPrefix.Trim().Replace('\\', '/').Trim('/');
+        return string.IsNullOrWhiteSpace(normalized)
+            ? "%"
+            : normalized + "/%";
     }
 }
