@@ -777,6 +777,7 @@ builder.Services.AddScoped<IUserProviderConfigRepository>(sp =>
     new PostgresUserProviderConfigRepository(connectionFactory));
 builder.Services.AddSingleton<IBrainCatalogStore>(_ => brainCatalogStore);
 builder.Services.AddSingleton<IManagedDocumentStore>(_ => managedDocumentStore);
+builder.Services.AddSingleton<ISubscriptionStore>(_ => subscriptionStore);
 builder.Services.AddSingleton<IDocumentQueryStore>(_ => documentQueryStore);
 builder.Services.AddSingleton<OqlQueryExecutor>();
 builder.Services.AddSingleton<IManagedContentBrainIndexingService>(_ =>
