@@ -18,12 +18,14 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
     public async Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
         string customerId,
         string brainId,
+        string? pathPrefix = null,
+        string? excludePathPrefix = null,
         int limit = 200,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = $"""
+        var sql = $"""
             SELECT
                 managed_document_id,
                 brain_id,
@@ -38,9 +40,23 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
             WHERE customer_id = @customer_id
               AND brain_id = @brain_id
               AND is_deleted = false
-            ORDER BY updated_at DESC
-            LIMIT CAST(@limit AS integer);
             """;
+
+        if (!string.IsNullOrWhiteSpace(pathPrefix))
+        {
+            sql += "\n  AND slug LIKE @path_prefix_like";
+            command.Parameters.AddWithValue("path_prefix_like", BuildSlugPrefixPattern(pathPrefix));
+        }
+
+        if (!string.IsNullOrWhiteSpace(excludePathPrefix))
+        {
+            sql += "\n  AND slug NOT LIKE @exclude_path_prefix_like";
+            command.Parameters.AddWithValue("exclude_path_prefix_like", BuildSlugPrefixPattern(excludePathPrefix));
+        }
+
+        sql += "\nORDER BY updated_at DESC\nLIMIT CAST(@limit AS integer);";
+
+        command.CommandText = sql;
         command.Parameters.AddWithValue("customer_id", customerId);
         command.Parameters.AddWithValue("brain_id", brainId);
         command.Parameters.AddWithValue("limit", NpgsqlDbType.Integer, limit);
@@ -240,6 +256,20 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
     {
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await AcquireCreateQuotaLockAsync(connection, transaction, request.CustomerId, cancellationToken);
+
+        if (request.MaxActiveDocuments is int maxActiveDocuments && maxActiveDocuments >= 0)
+        {
+            var activeDocuments = await CountActiveManagedDocumentsAsync(connection, transaction, request.CustomerId, cancellationToken);
+            if (activeDocuments >= maxActiveDocuments)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw new ManagedDocumentQuotaExceededException(
+                    request.QuotaExceededMessage
+                    ?? $"Document limit reached for customer '{request.CustomerId}'.");
+            }
+        }
+
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
 
@@ -823,6 +853,39 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task AcquireCreateQuotaLockAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string customerId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT pg_advisory_xact_lock(hashtext(@customer_id));";
+        command.Parameters.AddWithValue("customer_id", customerId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<int> CountActiveManagedDocumentsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string customerId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            SELECT COUNT(*)::int
+            FROM {_connectionFactory.Schema}.managed_documents
+            WHERE customer_id = @customer_id
+              AND is_deleted = false;
+            """;
+        command.Parameters.AddWithValue("customer_id", customerId);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is int count ? count : Convert.ToInt32(result);
+    }
+
     private static ManagedDocumentDetail ReadDetail(NpgsqlDataReader reader)
     {
         var slug = reader.GetString(4);
@@ -920,5 +983,13 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
 
             return result;
         }
+    }
+
+    private static string BuildSlugPrefixPattern(string pathPrefix)
+    {
+        var normalized = pathPrefix.Trim().Replace('\\', '/').Trim('/');
+        return string.IsNullOrWhiteSpace(normalized)
+            ? "%"
+            : normalized + "/%";
     }
 }

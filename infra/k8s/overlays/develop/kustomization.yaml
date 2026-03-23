@@ -8,9 +8,11 @@ resources:
   - namespace.yaml
   # Note: ingressroute.yaml is applied separately with domain substitution in the deploy workflow
 
-commonLabels:
-  app.kubernetes.io/instance: develop
-  environment: develop
+labels:
+  - pairs:
+      app.kubernetes.io/instance: develop
+      environment: develop
+    includeSelectors: false
 
 images:
   - name: opencortex/api
@@ -31,3 +33,4 @@ patches:
   - path: patches/resources.yaml
   - path: patches/image-pull-secret.yaml
   - path: patches/configmap.yaml
+  - path: patches/api-workspace.yaml

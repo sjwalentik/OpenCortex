@@ -2,7 +2,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: opencortex-config
-  namespace: opencortex
 data:
   HOSTED_AUTH_ENABLED: "true"
   STRIPE_ENABLED: "false"

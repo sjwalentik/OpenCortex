@@ -1,0 +1,61 @@
+# Resource quota for agent-workspaces namespace
+# Prevents runaway resource consumption
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: agent-workspaces-quota
+  namespace: agent-workspaces
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: agent-workspaces
+spec:
+  hard:
+    # Total CPU across all pods
+    requests.cpu: "50"
+    limits.cpu: "100"
+    # Total memory across all pods
+    requests.memory: "50Gi"
+    limits.memory: "100Gi"
+    # Max number of pods
+    pods: "200"
+    # Max number of PVCs
+    persistentvolumeclaims: "500"
+    # Total storage
+    requests.storage: "1Ti"
+---
+# Limit range to enforce per-pod limits
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: agent-pod-limits
+  namespace: agent-workspaces
+  labels:
+    app.kubernetes.io/name: opencortex
+    app.kubernetes.io/component: agent-workspaces
+spec:
+  limits:
+    - type: Pod
+      max:
+        cpu: "2"
+        memory: "4Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "256Mi"
+      max:
+        cpu: "2"
+        memory: "4Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    - type: PersistentVolumeClaim
+      max:
+        storage: "50Gi"
+      min:
+        storage: "1Gi"

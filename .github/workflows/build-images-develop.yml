@@ -41,8 +41,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_PREFIX }}/api:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_PREFIX }}/api:develop
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=build-develop-api
+          cache-to: type=gha,mode=max,scope=build-develop-api
 
       - name: Build and push Portal image
         uses: docker/build-push-action@v5
@@ -53,8 +53,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_PREFIX }}/portal:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_PREFIX }}/portal:develop
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=build-develop-portal
+          cache-to: type=gha,mode=max,scope=build-develop-portal
 
       - name: Build and push MCP image
         uses: docker/build-push-action@v5
@@ -65,8 +65,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_PREFIX }}/mcp:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_PREFIX }}/mcp:develop
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=build-develop-mcp
+          cache-to: type=gha,mode=max,scope=build-develop-mcp
 
       - name: Build and push Workers image
         uses: docker/build-push-action@v5
@@ -77,5 +77,17 @@ jobs:
           tags: |
             ${{ env.IMAGE_PREFIX }}/workers:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_PREFIX }}/workers:develop
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=build-develop-workers
+          cache-to: type=gha,mode=max,scope=build-develop-workers
+
+      - name: Build and push Agent Runtime image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/agent-runtime.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/agent-runtime:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/agent-runtime:develop
+          cache-from: type=gha,scope=build-develop-agent-runtime
+          cache-to: type=gha,mode=max,scope=build-develop-agent-runtime

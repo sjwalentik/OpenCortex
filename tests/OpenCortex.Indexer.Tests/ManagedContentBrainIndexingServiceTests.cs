@@ -81,7 +81,13 @@ public sealed class ManagedContentBrainIndexingServiceTests
             _documents = documents;
         }
 
-        public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(string customerId, string brainId, int limit = 200, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
+            string customerId,
+            string brainId,
+            string? pathPrefix = null,
+            string? excludePathPrefix = null,
+            int limit = 200,
+            CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<ManagedDocumentSummary>>([]);
 
         public Task<int> CountActiveManagedDocumentsAsync(string customerId, CancellationToken cancellationToken = default)

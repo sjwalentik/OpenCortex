@@ -240,3 +240,136 @@ Current repo status: migration `0006_managed_document_versions.sql` exists and t
 Token format: `oct_<32+ bytes base62-encoded random>`. Shown once at creation. Validated by hashing the presented token and looking up `token_hash`.
 
 See `docs/architecture/auth-and-identity.md`, `docs/architecture/billing-and-quotas.md`, and `docs/architecture/mcp-security.md` for full design.
+
+### Migration 0006: Managed Document Versions
+
+**Additional table for document versioning** — extends the managed-content schema with version tracking and restore capabilities.
+
+**Purpose:** Enables version history, audit trails, and document restoration for managed-content brains. All version table operations are scoped by `managed_document_id`.
+
+**Tables:**
+
+#### `managed_document_versions`
+- `managed_document_version_id` (text PRIMARY KEY)
+- `managed_document_id` (text, NOT NULL, references `managed_documents.managed_document_id` ON DELETE CASCADE)
+- `brain_id` (text, NOT NULL, references `brains.brain_id` ON DELETE CASCADE)
+- `customer_id` (text, NOT NULL, references `customers.customer_id` ON DELETE CASCADE)
+- `title` (text, nullable)
+- `slug` (text, nullable)
+- `content` (text, nullable)
+- `frontmatter` (jsonb, nullable)
+- `content_hash` (text, nullable)
+- `status` (text, nullable) — draft/published/archived
+- `word_count` (int, nullable)
+- `snapshot_kind` (text, NOT NULL) — created/updated/deleted/restored
+- `snapshot_by` (text, nullable, references `users.user_id` ON DELETE SET NULL)
+- `created_at` (timestamptz, NOT NULL, default now())
+
+**Indexes:**
+- `ix_mdv_version_by_document` on `(managed_document_id, created_at DESC)`
+- `ix_mdv_customer_snapshots` on `(customer_id, created_at)`
+- Unique index on `(managed_document_id, snapshot_kind)` — prevents duplicate kinds for same document
+
+**Behavior:**
+- Trigger fires automatically on managed_documents INSERT/UPDATE/DELETE
+- Each write operation creates a snapshot row before the mutation completes
+- Snapshot contains full document state at point of mutation
+- Snapshot tracks actor via `snapshot_by`
+- Snapshot tracks type of change via `snapshot_kind`
+- Soft-deleted documents create "deleted" snapshots for audit
+
+**Current repo status:** migration `0006_managed_document_versions.sql` exists and the tenant API now supports list/get/restore routes for managed-document versions. Every managed-content create, update, delete, and restore persists a snapshot row before the request returns.
+
+### Migration 0007: Conversations
+
+**Purpose:** Multi-model orchestration support for chat/conversational AI patterns.
+
+**Tables:**
+
+#### `conversations`
+- `conversation_id` (text PRIMARY KEY)
+- `brain_id` (text, nullable, references `brains.brain_id` ON DELETE SET NULL)
+- `customer_id` (text, NOT NULL, references `customers.customer_id` ON DELETE CASCADE)
+- `user_id` (text, nullable, references `users.user_id` ON DELETE SET NULL)
+- `title` (text, nullable)
+- `system_prompt` (text, nullable)
+- `status` (text, default 'active')
+- `metadata` (jsonb, nullable)
+- `created_at` (timestamptz, default now())
+- `last_message_at` (timestamptz, nullable)
+- `updated_at` (timestamptz, NOT NULL, default now())
+
+**Indexes:**
+- `ix_conversations_customer_id` on `customer_id`
+- `ix_conversations_user_id` on `user_id` (filtered WHERE user_id IS NOT NULL)
+- `ix_conversations_brain_id` on `brain_id` (filtered WHERE brain_id IS NOT NULL)
+- `ix_conversations_status` on `(customer_id, status)`
+- `ix_conversations_last_message` on `(customer_id, last_message_at DESC NULLS LAST)` (filtered WHERE status = 'active')
+
+#### `messages`
+- `message_id` (text PRIMARY KEY)
+- `conversation_id` (text, NOT NULL, references `conversations.conversation_id` ON DELETE CASCADE)
+- `parent_message_id` (text, nullable, references `messages.message_id` ON DELETE SET NULL)
+- `role` (text, NOT NULL)
+- `content` (text, nullable)
+- `provider_id` (text, nullable)
+- `model_id` (text, nullable)
+- `tool_calls` (jsonb, nullable)
+- `token_usage` (jsonb, nullable)
+- `latency_ms` (int, nullable)
+- `metadata` (jsonb, nullable)
+- `created_at` (timestamptz, NOT NULL, default now())
+
+**Indexes:**
+- `ix_messages_conversation_id` on `(conversation_id, created_at)`
+- `ix_messages_parent` on `parent_message_id` (filtered WHERE parent_message_id IS NOT NULL)
+
+#### `conversation_summaries`
+- `summary_id` (text PRIMARY KEY)
+- `conversation_id` (text, NOT NULL, references `conversations.conversation_id` ON DELETE CASCADE)
+- `summary_text` (text, NOT NULL)
+- `message_range_start` (text, NOT NULL, references `messages.message_id`)
+- `message_range_end` (text, NOT NULL, references `messages.message_id`)
+- `message_count` (int, NOT NULL)
+- `created_at` (timestamptz, NOT NULL, default now())
+
+**Indexes:**
+- `ix_conversation_summaries_conversation` on `(conversation_id, created_at)`
+
+**Triggers:**
+- `opencortex.update_conversation_timestamp()` triggers on messages table INSERT
+- Automatically updates `conversations.updated_at` and `conversations.last_message_at` when new messages arrive
+
+**Current repo status:** Migration exists. Chat/conversation application logic still pending.
+
+### Migration 0008: User Provider Configs
+
+**Purpose:** Allows users to configure their own LLM provider credentials (API keys, tokens, OAuth) instead of relying solely on platform-managed providers.
+
+**Table: `user_provider_configs`**
+
+- `config_id` (text PRIMARY KEY)
+- `customer_id` (text, NOT NULL, references `customers.customer_id` ON DELETE CASCADE)
+- `user_id` (text, NOT NULL, references `users.user_id` ON DELETE CASCADE)
+- `provider_id` (text, NOT NULL)
+- `auth_type` (text, NOT NULL) — enum like `api_key`, `oauth_token`, `bearer_token`
+- `encrypted_api_key` (text, nullable)
+- `encrypted_access_token` (text, nullable)
+- `encrypted_refresh_token` (text, nullable)
+- `token_expires_at` (timestamptz, nullable)
+- `settings_json` (jsonb, nullable) — provider-specific settings (region, custom endpoint, etc.)
+- `is_enabled` (boolean, default true)
+- `created_at` (timestamptz, NOT NULL, default now())
+- `updated_at` (timestamptz, NOT NULL, default now())
+
+**Indexes:**
+- `ix_user_provider_configs_customer_user` on `(customer_id, user_id, provider_id)`
+- `ix_user_provider_configs_customer` on `customer_id`
+
+**Design notes:**
+- All sensitive credential fields are encrypted at rest
+- Users can configure their own credentials per provider
+- Platform can still fall back to platform-managed providers when user provides none
+- Enables BYOK (Bring Your Own Key) pattern for enterprise customers
+
+**Current repo status:** The base provider-config table shipped in `0008_user_provider_configs.sql`. Tenant scoping was corrected in `0010_tenant_scoped_user_provider_configs.sql`, so provider configs are now stored and resolved by `(customer_id, user_id, provider_id)` instead of only `(user_id, provider_id)`.

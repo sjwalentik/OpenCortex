@@ -189,8 +189,32 @@ public sealed class TenantManagedDocumentEndpointsTests
         private readonly Dictionary<string, ManagedDocumentDetail> _documents = new(StringComparer.OrdinalIgnoreCase);
         private int _nextId = 1;
 
-        public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(string customerId, string brainId, int limit = 200, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
+        public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
+            string customerId,
+            string brainId,
+            string? pathPrefix = null,
+            string? excludePathPrefix = null,
+            int limit = 200,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ManagedDocumentSummary>>(_documents.Values
+                .Where(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                    && !document.IsDeleted
+                    && MatchesPathPrefix(document.CanonicalPath, pathPrefix)
+                    && !HasExcludedPathPrefix(document.CanonicalPath, excludePathPrefix))
+                .Take(limit)
+                .Select(document => new ManagedDocumentSummary(
+                    document.ManagedDocumentId,
+                    document.BrainId,
+                    document.CustomerId,
+                    document.Title,
+                    document.Slug,
+                    document.CanonicalPath,
+                    document.Status,
+                    document.WordCount,
+                    document.CreatedAt,
+                    document.UpdatedAt))
+                .ToList());
 
         public Task<int> CountActiveManagedDocumentsAsync(string customerId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -216,6 +240,16 @@ public sealed class TenantManagedDocumentEndpointsTests
 
         public Task<ManagedDocumentDetail> CreateManagedDocumentAsync(ManagedDocumentCreateRequest request, CancellationToken cancellationToken = default)
         {
+            var activeDocuments = _documents.Values.Count(document =>
+                string.Equals(document.CustomerId, request.CustomerId, StringComparison.OrdinalIgnoreCase)
+                && !document.IsDeleted);
+            if (request.MaxActiveDocuments is int maxActiveDocuments && activeDocuments >= maxActiveDocuments)
+            {
+                throw new ManagedDocumentQuotaExceededException(
+                    request.QuotaExceededMessage
+                    ?? $"Document limit reached for customer '{request.CustomerId}'.");
+            }
+
             var now = DateTimeOffset.UtcNow;
             var managedDocumentId = $"md-{_nextId++:D4}";
             var slug = request.Slug ?? request.Title;
@@ -250,5 +284,24 @@ public sealed class TenantManagedDocumentEndpointsTests
 
         public Task<ManagedDocumentDetail?> RestoreManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, string userId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
+
+        private static bool MatchesPathPrefix(string canonicalPath, string? pathPrefix)
+        {
+            if (string.IsNullOrWhiteSpace(pathPrefix))
+            {
+                return true;
+            }
+
+            var normalizedPrefix = pathPrefix.Trim().Replace('\\', '/').Trim('/');
+            if (string.IsNullOrWhiteSpace(normalizedPrefix))
+            {
+                return true;
+            }
+
+            return canonicalPath.StartsWith(normalizedPrefix + "/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool HasExcludedPathPrefix(string canonicalPath, string? pathPrefix)
+            => !string.IsNullOrWhiteSpace(pathPrefix) && MatchesPathPrefix(canonicalPath, pathPrefix);
     }
 }

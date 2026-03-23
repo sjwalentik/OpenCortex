@@ -1,17 +1,30 @@
 using System.Threading.RateLimiting;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using OpenCortex.Api;
+using OpenCortex.Conversations;
+using OpenCortex.Core;
 using OpenCortex.Core.Configuration;
+using OpenCortex.Core.OAuth;
 using OpenCortex.Core.Embeddings;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Query;
 using OpenCortex.Core.Security;
 using OpenCortex.Core.Tenancy;
 using OpenCortex.Indexer.Indexing;
+using OpenCortex.Orchestration;
+using OpenCortex.Orchestration.Routing;
 using OpenCortex.Persistence.Postgres;
+using OpenCortex.Providers.Anthropic;
+using OpenCortex.Providers.OpenAI;
+using OpenCortex.Providers.Ollama;
+using OpenCortex.Providers.Abstractions;
 using OpenCortex.Retrieval.Execution;
+using OpenCortex.Tools;
+using OpenCortex.Tools.GitHub;
+using OpenCortex.Tools.Memory;
 using Stripe;
 using BillingPortalSessionService = Stripe.BillingPortal.SessionService;
 using BillingPortalSessionCreateOptions = Stripe.BillingPortal.SessionCreateOptions;
@@ -30,15 +43,8 @@ var connectionFactory = new PostgresConnectionFactory(new PostgresConnectionSett
 });
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    try
-    {
-        validationErrors.AddRange(await new PostgresEmbeddingSchemaValidator(connectionFactory)
-            .ValidateAsync(options.Embeddings.Dimensions));
-    }
-    catch (Exception ex) when (ex is Npgsql.NpgsqlException or TimeoutException or InvalidOperationException)
-    {
-        validationErrors.Add($"Postgres schema validation failed: {ex.Message}");
-    }
+    validationErrors.AddRange(await PostgresStartupSchemaValidator
+        .ValidateAsync(connectionFactory, options.Embeddings.Dimensions));
 }
 
 if (validationErrors.Count > 0)
@@ -53,12 +59,15 @@ var subscriptionStore = new PostgresSubscriptionStore(connectionFactory);
 var apiTokenStore = new PostgresApiTokenStore(connectionFactory);
 var usageCounterStore = new PostgresUsageCounterStore(connectionFactory);
 var embeddingProvider = EmbeddingProviderFactory.Create(options.Embeddings);
+var documentQueryStore = new PostgresDocumentQueryStore(connectionFactory, embeddingProvider);
 var indexRunStore = new PostgresIndexRunStore(connectionFactory);
 var hostedAuthConfigured = options.HostedAuth.Enabled
     && !string.IsNullOrWhiteSpace(options.HostedAuth.FirebaseProjectId);
 var stripeConfigured = options.Billing.Stripe.Enabled
     && !string.IsNullOrWhiteSpace(options.Billing.Stripe.SecretKey)
     && !string.IsNullOrWhiteSpace(options.Billing.Stripe.WebhookSecret);
+
+builder.Services.AddSingleton(options);
 
 if (stripeConfigured)
 {
@@ -517,39 +526,175 @@ if (hostedAuthConfigured)
 // Rate limiting policies
 // ---------------------------------------------------------------------------
 
+// Helper to get user ID from JWT claims for rate limiting
+static string GetRateLimitPartitionKey(HttpContext context)
+{
+    var user = context.User;
+
+    // Try standard JWT claims for user identity (same as HostedTenantClaims)
+    var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+        ?? user.FindFirst("user_id")?.Value
+        ?? user.FindFirst("sub")?.Value;
+
+    if (!string.IsNullOrEmpty(userId))
+    {
+        return userId;
+    }
+
+    // Fallback to IP address
+    return context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+}
+
+static string? GetAppliedRateLimitPolicyName(HttpContext context)
+    => context.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName;
+
+static string GetRateLimitRoute(HttpContext context)
+    => context.GetEndpoint() is RouteEndpoint routeEndpoint
+        ? routeEndpoint.RoutePattern.RawText ?? context.Request.Path.Value ?? "(unknown)"
+        : context.Request.Path.Value ?? "(unknown)";
+
 builder.Services.AddRateLimiter(rateLimiter =>
 {
+    var fixedWindowPolicies = new Dictionary<string, FixedWindowRateLimitDescriptor>(StringComparer.OrdinalIgnoreCase);
+
+    void AddFixedWindowPolicy(
+        string policyName,
+        int permitLimit,
+        TimeSpan window,
+        Func<HttpContext, string> resolvePartitionKey)
+    {
+        fixedWindowPolicies[policyName] = new FixedWindowRateLimitDescriptor(
+            policyName,
+            permitLimit,
+            window,
+            resolvePartitionKey);
+
+        rateLimiter.AddPolicy(policyName, context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: resolvePartitionKey(context),
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = permitLimit,
+                    Window = window,
+                }));
+    }
+
     rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    rateLimiter.OnRejected = async (context, cancellationToken) =>
+    {
+        var httpContext = context.HttpContext;
+        var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger("OpenCortex.Api.RateLimiting");
+        var policyName = GetAppliedRateLimitPolicyName(httpContext) ?? "unknown";
+        fixedWindowPolicies.TryGetValue(policyName, out var descriptor);
+
+        var retryAfterSeconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+            ? Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))
+            : (int?)null;
+        var route = GetRateLimitRoute(httpContext);
+        var partitionKey = descriptor?.ResolvePartitionKey(httpContext) ?? "unknown";
+
+        if (descriptor is not null)
+        {
+            httpContext.Response.Headers["X-RateLimit-Policy"] = descriptor.PolicyName;
+            httpContext.Response.Headers["X-RateLimit-Limit"] = descriptor.PermitLimit.ToString();
+            httpContext.Response.Headers["X-RateLimit-Remaining"] = "0";
+            httpContext.Response.Headers["X-RateLimit-Window-Seconds"] = ((int)descriptor.Window.TotalSeconds).ToString();
+        }
+
+        if (retryAfterSeconds.HasValue)
+        {
+            httpContext.Response.Headers.RetryAfter = retryAfterSeconds.Value.ToString();
+            httpContext.Response.Headers["X-RateLimit-Retry-After-Seconds"] = retryAfterSeconds.Value.ToString();
+        }
+
+        logger.LogWarning(
+            "Rate limit rejected request. Policy={PolicyName} Route={Route} PartitionKey={PartitionKey} Method={Method} Path={Path} Limit={PermitLimit} WindowSeconds={WindowSeconds} RetryAfterSeconds={RetryAfterSeconds}",
+            policyName,
+            route,
+            partitionKey,
+            httpContext.Request.Method,
+            httpContext.Request.Path.Value ?? "(unknown)",
+            descriptor?.PermitLimit,
+            descriptor is null ? null : (int)descriptor.Window.TotalSeconds,
+            retryAfterSeconds);
+
+        httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        httpContext.Response.ContentType = "application/problem+json";
+
+        await httpContext.Response.WriteAsync(
+            JsonSerializer.Serialize(new
+            {
+                type = "https://tools.ietf.org/html/rfc9110#section-15.5.9",
+                title = "Request rate limit exceeded.",
+                status = StatusCodes.Status429TooManyRequests,
+                detail = descriptor is null
+                    ? "The request exceeded the configured rate limit."
+                    : $"The request exceeded rate-limit policy '{descriptor.PolicyName}' ({descriptor.PermitLimit} requests per {(int)descriptor.Window.TotalSeconds} seconds).",
+                policy = descriptor?.PolicyName ?? policyName,
+                route,
+                limit = descriptor?.PermitLimit,
+                remaining = 0,
+                windowSeconds = descriptor is null ? (int?)null : (int)descriptor.Window.TotalSeconds,
+                retryAfterSeconds,
+                traceId = httpContext.TraceIdentifier,
+            }),
+            cancellationToken);
+    };
 
     // Strict limit for token creation (5 per minute per user)
-    rateLimiter.AddPolicy("token-creation", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 5,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    AddFixedWindowPolicy(
+        "token-creation",
+        5,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
 
-    // Moderate limit for tenant API (100 per minute per user)
-    rateLimiter.AddPolicy("tenant-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 100,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    // Tenant workspace flows fan out multiple reads after each mutation, so keep this comfortably above
+    // normal portal bursts while still providing abuse protection.
+    AddFixedWindowPolicy(
+        "tenant-api",
+        300,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
+
+    // Managed-document authoring flows refresh list/detail/version state aggressively after each mutation.
+    // Keep document work isolated from the general tenant bucket so bulk edits/deletes do not trip unrelated UI traffic.
+    AddFixedWindowPolicy(
+        "documents-api",
+        600,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
+
+    // Conversation archive/load flows are chat-adjacent workspace actions and should not contend with
+    // generic tenant reads like billing, brains, or tokens.
+    AddFixedWindowPolicy(
+        "conversations-api",
+        300,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
+
+    // Chat gets its own bucket so portal page activity does not starve completions.
+    AddFixedWindowPolicy(
+        "chat-api",
+        60,
+        TimeSpan.FromMinutes(1),
+        GetRateLimitPartitionKey);
 
     // Webhook limit (50 per minute - defensive against replay)
-    rateLimiter.AddPolicy("webhooks", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 50,
-                Window = TimeSpan.FromMinutes(1),
-            }));
+    AddFixedWindowPolicy(
+        "webhooks",
+        50,
+        TimeSpan.FromMinutes(1),
+        context => context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
+    if (builder.Environment.IsEnvironment("Testing"))
+    {
+        AddFixedWindowPolicy(
+            "testing-low-limit",
+            1,
+            TimeSpan.FromMinutes(1),
+            _ => "integration-test");
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -577,6 +722,100 @@ builder.Services.AddCors(cors =>
         }
     });
 });
+
+// ---------------------------------------------------------------------------
+// Multi-model orchestration services
+// ---------------------------------------------------------------------------
+
+var orchestrationConfig = builder.Configuration.GetSection("OpenCortex:Orchestration");
+// Register orchestration services
+builder.Services.AddOrchestration(orchestrationConfig.Key);
+
+// Register HTTP clients for providers (used by UserProviderFactory)
+builder.Services.AddHttpClient("Anthropic");
+builder.Services.AddHttpClient("OpenAI");
+builder.Services.AddHttpClient("Ollama");
+
+// Register static model providers only when hosted auth is disabled.
+// Hosted mode now resolves providers from each user's stored configuration.
+if (!hostedAuthConfigured)
+{
+    var anthropicApiKey = builder.Configuration["OpenCortex:Providers:Anthropic:ApiKey"];
+    if (!string.IsNullOrWhiteSpace(anthropicApiKey))
+    {
+        builder.Services.AddAnthropicProvider("OpenCortex:Providers:Anthropic");
+    }
+
+    var openAiApiKey = builder.Configuration["OpenCortex:Providers:OpenAI:ApiKey"];
+    if (!string.IsNullOrWhiteSpace(openAiApiKey))
+    {
+        builder.Services.AddOpenAIProvider("OpenCortex:Providers:OpenAI");
+    }
+
+    var ollamaEndpoint = builder.Configuration["OpenCortex:Providers:Ollama:Endpoint"];
+    if (!string.IsNullOrWhiteSpace(ollamaEndpoint))
+    {
+        builder.Services.AddOllamaProvider("OpenCortex:Providers:Ollama");
+    }
+}
+
+// Register credential encryption for user provider configs
+var encryptionKey = builder.Configuration["OpenCortex:Security:EncryptionKey"];
+if (!string.IsNullOrEmpty(encryptionKey))
+{
+    builder.Services.AddSingleton<ICredentialEncryption>(new AesCredentialEncryption(encryptionKey));
+}
+else if (builder.Environment.IsEnvironment("Testing"))
+{
+    var ephemeralTestKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+    builder.Services.AddSingleton<ICredentialEncryption>(new AesCredentialEncryption(ephemeralTestKey));
+}
+else
+{
+    throw new InvalidOperationException(
+        "OpenCortex:Security:EncryptionKey is not set. Startup is blocked because user provider credentials cannot be encrypted securely.");
+}
+
+// Register user provider configuration repository
+builder.Services.AddScoped<IUserProviderConfigRepository>(sp =>
+    new PostgresUserProviderConfigRepository(connectionFactory));
+builder.Services.AddSingleton<IBrainCatalogStore>(_ => brainCatalogStore);
+builder.Services.AddSingleton<IManagedDocumentStore>(_ => managedDocumentStore);
+builder.Services.AddSingleton<ISubscriptionStore>(_ => subscriptionStore);
+builder.Services.AddSingleton<IDocumentQueryStore>(_ => documentQueryStore);
+builder.Services.AddSingleton<OqlQueryExecutor>();
+builder.Services.AddSingleton<IManagedContentBrainIndexingService>(_ =>
+    new ManagedContentBrainIndexingService(
+        new PostgresManagedDocumentStore(connectionFactory),
+        new PostgresDocumentCatalogStore(connectionFactory),
+        new PostgresChunkStore(connectionFactory),
+        new PostgresLinkGraphStore(connectionFactory),
+        new PostgresIndexRunStore(connectionFactory),
+        new PostgresEmbeddingStore(connectionFactory),
+        embeddingProvider));
+builder.Services.AddSingleton<IUserMemoryPreferenceStore>(sp =>
+    new PostgresUserMemoryPreferenceStore(connectionFactory));
+
+// Register OAuth service for provider authentication
+builder.Services.Configure<ProviderOAuthConfig>(builder.Configuration.GetSection(ProviderOAuthConfig.SectionName));
+builder.Services.AddHttpClient<IProviderOAuthService, ProviderOAuthService>();
+
+// Register user provider factory (creates providers with user credentials)
+builder.Services.AddScoped<IUserProviderFactory, UserProviderFactory>();
+
+// Register user credential service (provides decrypted credentials for tool execution)
+builder.Services.AddScoped<OpenCortex.Core.Credentials.IUserCredentialService,
+    OpenCortex.Core.Credentials.UserCredentialService>();
+
+// Register tools infrastructure
+builder.Services.AddTools();
+builder.Services.AddGitHubTools();
+builder.Services.AddMemoryTools();
+
+// Register conversation services
+builder.Services.AddConversations();
+builder.Services.AddScoped<IConversationRepository>(sp =>
+    new PostgresConversationRepository(connectionFactory));
 
 var app = builder.Build();
 
@@ -639,8 +878,18 @@ app.MapGet("/", () => Results.Ok(new
 app.MapGet("/health", () => Results.Ok(new
 {
     service = "OpenCortex.Api",
-    validationErrors,
+    validationErrors = app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing")
+        ? validationErrors.ToArray()
+        : validationErrors.Count == 0
+            ? Array.Empty<string>()
+            : ["Configuration validation failed."],
 }));
+
+if (app.Environment.IsEnvironment("Testing"))
+{
+    app.MapGet("/_testing/rate-limit", () => Results.Ok(new { ok = true }))
+        .RequireRateLimiting("testing-low-limit");
+}
 
 app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken cancellationToken) =>
 {
@@ -682,7 +931,11 @@ app.MapPost("/webhooks/stripe", async (HttpRequest request, CancellationToken ca
     }
     catch (Exception ex)
     {
-        return Results.BadRequest(new { message = $"Invalid Stripe webhook signature: {ex.Message}" });
+        return Results.BadRequest(new
+        {
+            message = "Invalid Stripe webhook signature.",
+            detail = ErrorMessages.ForExternalFailure("Stripe signature verification failed.", ex.Message)
+        });
     }
 
     await ProcessStripeEventAsync(stripeEvent, payload, cancellationToken);
@@ -955,6 +1208,12 @@ if (hostedAuthConfigured)
     var tenantRoutes = app.MapGroup("/tenant")
         .RequireAuthorization()
         .RequireRateLimiting("tenant-api");
+    var tenantDocumentRoutes = app.MapGroup("/tenant/brains/{brainId}/documents")
+        .RequireAuthorization()
+        .RequireRateLimiting("documents-api");
+    var tenantConversationRoutes = app.MapGroup("/tenant/conversations")
+        .RequireAuthorization()
+        .RequireRateLimiting("conversations-api");
 
     tenantRoutes.MapGet("/me", async (
         System.Security.Claims.ClaimsPrincipal user,
@@ -969,6 +1228,9 @@ if (hostedAuthConfigured)
 
         return Results.Ok(context);
     });
+
+    tenantRoutes.MapGet("/me/memory-brain", MemoryBrainEndpoints.GetMemoryBrainAsync);
+    tenantRoutes.MapPut("/me/memory-brain", MemoryBrainEndpoints.UpdateMemoryBrainAsync);
 
     tenantRoutes.MapGet("/brains", async (
         System.Security.Claims.ClaimsPrincipal user,
@@ -1189,14 +1451,21 @@ if (hostedAuthConfigured)
                 {
                     type = "forbidden",
                     title = "Insufficient plan for requested token scope",
-                    detail = ex.Message,
+                    detail = ErrorMessages.ForExternalFailure(
+                        "The requested token scope is not available for the current plan.",
+                        ex.Message),
                     requiredScope = "mcp:write",
                 },
                 statusCode: StatusCodes.Status403Forbidden);
         }
         catch (InvalidOperationException ex)
         {
-            return Results.BadRequest(new { message = ex.Message });
+            return Results.BadRequest(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The requested token scopes are invalid.",
+                    ex.Message)
+            });
         }
 
         var generatedToken = PersonalApiToken.Generate();
@@ -1281,7 +1550,12 @@ if (hostedAuthConfigured)
         }
         catch (Exception ex)
         {
-            return Results.BadRequest(new { message = ex.Message });
+            return Results.BadRequest(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The query could not be parsed.",
+                    ex.Message)
+            });
         }
 
         var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, query.BrainId, cancellationToken);
@@ -1376,8 +1650,10 @@ if (hostedAuthConfigured)
         return Results.Ok(run);
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents", async (
+    tenantDocumentRoutes.MapGet("", async (
         string brainId,
+        string? pathPrefix,
+        string? excludePathPrefix,
         int? limit,
         System.Security.Claims.ClaimsPrincipal user,
         ITenantCatalogStore catalogStore,
@@ -1403,6 +1679,8 @@ if (hostedAuthConfigured)
         var documents = await managedDocumentStore.ListManagedDocumentsAsync(
             context.CustomerId,
             brainId,
+            pathPrefix,
+            excludePathPrefix,
             Math.Clamp(limit ?? 200, 1, 500),
             cancellationToken);
 
@@ -1414,7 +1692,7 @@ if (hostedAuthConfigured)
         });
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents/by-path", async (
+    tenantDocumentRoutes.MapGet("/by-path", async (
         string brainId,
         HttpRequest request,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1442,7 +1720,7 @@ if (hostedAuthConfigured)
             cancellationToken);
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}", async (
+    tenantDocumentRoutes.MapGet("/{managedDocumentId}", async (
         string brainId,
         string managedDocumentId,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1472,7 +1750,7 @@ if (hostedAuthConfigured)
             : Results.Ok(document);
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}/versions", async (
+    tenantDocumentRoutes.MapGet("/{managedDocumentId}/versions", async (
         string brainId,
         string managedDocumentId,
         int? limit,
@@ -1512,7 +1790,7 @@ if (hostedAuthConfigured)
         });
     });
 
-    tenantRoutes.MapGet("/brains/{brainId}/documents/{managedDocumentId}/versions/{managedDocumentVersionId}", async (
+    tenantDocumentRoutes.MapGet("/{managedDocumentId}/versions/{managedDocumentVersionId}", async (
         string brainId,
         string managedDocumentId,
         string managedDocumentVersionId,
@@ -1549,7 +1827,7 @@ if (hostedAuthConfigured)
             : Results.Ok(version);
     });
 
-    tenantRoutes.MapPost("/brains/{brainId}/documents", async (
+    tenantDocumentRoutes.MapPost("", async (
         string brainId,
         CreateManagedDocumentRequest request,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1580,14 +1858,6 @@ if (hostedAuthConfigured)
 
         var billingState = await GetEffectiveBillingStateAsync(context.CustomerId, cancellationToken);
         var plan = ResolvePlanEntitlements(billingState.PlanId);
-        if (plan.MaxDocuments >= 0)
-        {
-            var activeDocuments = await managedDocumentStore.CountActiveManagedDocumentsAsync(context.CustomerId, cancellationToken);
-            if (activeDocuments >= plan.MaxDocuments)
-            {
-                return BuildQuotaExceededResult(billingState.PlanId, activeDocuments, plan);
-            }
-        }
 
         try
         {
@@ -1600,7 +1870,9 @@ if (hostedAuthConfigured)
                     Content: request.Content ?? string.Empty,
                     Frontmatter: request.Frontmatter ?? new Dictionary<string, string>(),
                     Status: request.Status ?? "draft",
-                    UserId: context.UserId),
+                    UserId: context.UserId,
+                    MaxActiveDocuments: plan.MaxDocuments >= 0 ? plan.MaxDocuments : null,
+                    QuotaExceededMessage: $"Your {billingState.PlanId} plan allows {plan.MaxDocuments} documents. Upgrade to continue adding more."),
                 cancellationToken);
 
             await BuildManagedContentIndexingService().ReindexAsync(
@@ -1613,13 +1885,22 @@ if (hostedAuthConfigured)
 
             return Results.Created($"/tenant/brains/{brainId}/documents/{document.ManagedDocumentId}", document);
         }
+        catch (ManagedDocumentQuotaExceededException)
+        {
+            return BuildQuotaExceededResult(billingState.PlanId, plan.MaxDocuments, plan);
+        }
         catch (InvalidOperationException ex)
         {
-            return Results.Conflict(new { message = ex.Message });
+            return Results.Conflict(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The document could not be created.",
+                    ex.Message)
+            });
         }
     });
 
-    tenantRoutes.MapPut("/brains/{brainId}/documents/{managedDocumentId}", async (
+    tenantDocumentRoutes.MapPut("/{managedDocumentId}", async (
         string brainId,
         string managedDocumentId,
         UpdateManagedDocumentRequest request,
@@ -1679,11 +1960,16 @@ if (hostedAuthConfigured)
         }
         catch (InvalidOperationException ex)
         {
-            return Results.Conflict(new { message = ex.Message });
+            return Results.Conflict(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The document could not be updated.",
+                    ex.Message)
+            });
         }
     });
 
-    tenantRoutes.MapDelete("/brains/{brainId}/documents/{managedDocumentId}", async (
+    tenantDocumentRoutes.MapDelete("/{managedDocumentId}", async (
         string brainId,
         string managedDocumentId,
         System.Security.Claims.ClaimsPrincipal user,
@@ -1730,7 +2016,10 @@ if (hostedAuthConfigured)
         return Results.Ok(new { message = $"Document '{managedDocumentId}' was deleted." });
     });
 
-    tenantRoutes.MapPost("/brains/{brainId}/documents/{managedDocumentId}/versions/{managedDocumentVersionId}/restore", async (
+    // Conversation management endpoints
+    tenantConversationRoutes.MapConversationEndpoints();
+
+    tenantDocumentRoutes.MapPost("/{managedDocumentId}/versions/{managedDocumentVersionId}/restore", async (
         string brainId,
         string managedDocumentId,
         string managedDocumentVersionId,
@@ -1782,7 +2071,12 @@ if (hostedAuthConfigured)
         }
         catch (InvalidOperationException ex)
         {
-            return Results.Conflict(new { message = ex.Message });
+            return Results.Conflict(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The document version could not be restored.",
+                    ex.Message)
+            });
         }
     });
 }
@@ -1843,6 +2137,13 @@ else
         return Results.Ok(new { brainId, count = documents.Count, documents });
     });
 }
+
+// ---------------------------------------------------------------------------
+// Chat and orchestration endpoints
+// ---------------------------------------------------------------------------
+
+app.MapChatEndpoints(hostedAuthConfigured);
+app.MapProviderConfigEndpoints();
 
 app.Run();
 

@@ -60,6 +60,11 @@ jobs:
             --from-literal=connection-string="${DB_CONNECTION_STRING}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+          kubectl create secret generic opencortex-security \
+            --namespace=opencortex-develop \
+            --from-literal=encryption-key="${{ secrets.OPENCORTEX_ENCRYPTION_KEY }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
           kubectl create secret generic opencortex-firebase \
             --namespace=opencortex-develop \
             --from-literal=project-id="${{ secrets.FIREBASE_PROJECT_ID }}" \
@@ -86,9 +91,29 @@ jobs:
           export DOMAIN="${{ env.DOMAIN }}"
           sed "s|\${DOMAIN}|${DOMAIN}|g" infra/k8s/overlays/develop/ingressroute.yaml | kubectl apply -f -
 
+      - name: Deploy agent-workspaces infrastructure
+        run: |
+          kubectl apply -k k8s/agent-workspaces/
+
+      - name: Copy image pull secret to agent-workspaces
+        run: |
+          kubectl get secret ghcr-pull-secret -n opencortex-develop -o yaml | \
+            sed 's/namespace: opencortex-develop/namespace: agent-workspaces/' | \
+            kubectl apply -f -
+
+      - name: Delete deployments for selector migration
+        run: |
+          # One-time migration: selectors changed from commonLabels to labels
+          # Kubernetes doesn't allow selector changes, so we must delete and recreate
+          # This step can be removed after successful deployment
+          kubectl delete deployment opencortex-api opencortex-portal opencortex-mcp opencortex-workers \
+            -n opencortex-develop --ignore-not-found --wait=true
+          # Give k8s a moment to finalize deletion
+          sleep 5
+
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -k infra/k8s/overlays/develop
+          kubectl apply -k infra/k8s/overlays/develop --server-side --force-conflicts
           kubectl set image deployment/opencortex-api api=${{ env.IMAGE_PREFIX }}/api:${{ env.IMAGE_TAG }} -n opencortex-develop
           kubectl set image deployment/opencortex-portal portal=${{ env.IMAGE_PREFIX }}/portal:${{ env.IMAGE_TAG }} -n opencortex-develop
           kubectl set image deployment/opencortex-mcp mcp=${{ env.IMAGE_PREFIX }}/mcp:${{ env.IMAGE_TAG }} -n opencortex-develop

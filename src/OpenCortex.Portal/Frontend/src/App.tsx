@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChatView } from './ChatView';
+import { DocumentsView } from './DocumentsView';
+import { MemoriesView } from './MemoriesView';
+import { normalizeDocumentLinkPath } from './documentLinks';
+import { normalizeDocumentDraft, normalizeDocumentPath } from './documentDraft';
+import { useManagedDocumentWorkspace } from './useManagedDocumentWorkspace';
 
-type PortalView = 'signin' | 'documents' | 'account' | 'usage' | 'tools';
+type PortalView = 'signin' | 'documents' | 'memories' | 'chat' | 'account' | 'usage' | 'tools';
 
 type PortalConfig = {
   apiBaseUrlConfigured: boolean;
@@ -95,10 +101,30 @@ type PortalBilling = {
 
 type BrainSummary = {
   brainId: string;
+  slug?: string;
   name: string;
   mode: string;
   status: string;
 };
+
+type MemoryBrainPreference = {
+  configuredMemoryBrainId?: string | null;
+  effectiveMemoryBrainId?: string | null;
+  needsConfiguration?: boolean;
+  error?: string | null;
+};
+
+export function resolveDocumentLinkBrainId(
+  canonicalPath: string,
+  activeBrainId: string,
+  effectiveMemoryBrainId?: string | null,
+) {
+  if (canonicalPath.startsWith('memories/')) {
+    return effectiveMemoryBrainId || '';
+  }
+
+  return activeBrainId;
+}
 
 type TokenSummary = {
   apiTokenId: string;
@@ -116,6 +142,58 @@ type CreatedTokenState = {
   meta: string;
 };
 
+type ProviderSettings = {
+  defaultModel?: string | null;
+  baseUrl?: string | null;
+  maxTokens?: number | null;
+  temperature?: number | null;
+};
+
+type ConfiguredProviderSummary = {
+  providerId: string;
+  authType?: string;
+  isEnabled: boolean;
+  hasCredentials: boolean;
+  settings?: ProviderSettings | null;
+  tokenExpiresAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type AvailableProvider = {
+  providerId: string;
+  name: string;
+  authTypes: string[];
+  defaultModel: string;
+  configUrl?: string | null;
+  oauthConfigured?: boolean;
+  OAuthConfigured?: boolean;
+};
+
+type AvailableProviderResponse = {
+  providers?: AvailableProvider[];
+};
+
+type ConfiguredProviderResponse = {
+  count?: number;
+  providers?: ConfiguredProviderSummary[];
+};
+
+type ProviderEditorState = {
+  authType: string;
+  apiKey: string;
+  sessionJson: string;
+  defaultModel: string;
+  baseUrl: string;
+};
+
+
+type HostedCodexLoginStatus = {
+  isRunning: boolean;
+  authFileAvailable: boolean;
+  log: string;
+  message: string;
+};
 type DocumentSummary = {
   managedDocumentId: string;
   title?: string;
@@ -239,6 +317,26 @@ const viewDefinitions: Record<PortalView, ViewDefinition> = {
       'Tiptap comes after current behavior survives intact.'
     ]
   },
+  memories: {
+    id: 'memories',
+    title: 'Memories',
+    lead: 'Author and manage agent memory records as first-class Markdown documents under the reserved memories path.',
+    bullets: [
+      'Memory records use the same editor, save path, import/export flow, and version history as documents.',
+      'The view is scoped to memories/ inside the active managed-content brain.',
+      'Forget remains explicit so stale memories can be removed safely.'
+    ]
+  },
+  chat: {
+    id: 'chat',
+    title: 'Chat',
+    lead: 'Converse with AI models through intelligent routing and streaming responses.',
+    bullets: [
+      'Multi-model orchestration routes to the best provider.',
+      'Real-time streaming with activity indicators.',
+      'Conversation history persists across sessions.'
+    ]
+  },
   account: {
     id: 'account',
     title: 'Account',
@@ -271,7 +369,7 @@ const viewDefinitions: Record<PortalView, ViewDefinition> = {
   }
 };
 
-const orderedViews: PortalView[] = ['signin', 'documents', 'account', 'usage', 'tools'];
+const orderedViews: PortalView[] = ['signin', 'documents', 'memories', 'chat', 'account', 'usage', 'tools'];
 
 function App() {
   const [config, setConfig] = useState<PortalConfig | null>(null);
@@ -287,39 +385,23 @@ function App() {
   const [context, setContext] = useState<PortalContext | null>(null);
   const [billing, setBilling] = useState<PortalBilling | null>(null);
   const [brains, setBrains] = useState<BrainSummary[]>([]);
+  const [memoryBrainPreference, setMemoryBrainPreference] = useState<MemoryBrainPreference | null>(null);
   const [tokens, setTokens] = useState<TokenSummary[]>([]);
+  const [availableProviders, setAvailableProviders] = useState<AvailableProvider[]>([]);
+  const [configuredProviders, setConfiguredProviders] = useState<ConfiguredProviderSummary[]>([]);
   const [activeView, setActiveView] = useState<PortalView>(resolveViewFromHash(window.location.hash, loadStoredAuthSession()));
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [activeBrainId, setActiveBrainId] = useState('');
   const [documentFilter, setDocumentFilter] = useState('');
-  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
-  const [documentsLoading, setDocumentsLoading] = useState(false);
-  const [documentsError, setDocumentsError] = useState<string | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
-  const [selectedDocument, setSelectedDocument] = useState<DocumentDetail | null>(null);
-  const [documentLoading, setDocumentLoading] = useState(false);
-  const [documentError, setDocumentError] = useState<string | null>(null);
-  const [documentRefreshNonce, setDocumentRefreshNonce] = useState(0);
-  const [documentDetailNonce, setDocumentDetailNonce] = useState(0);
-  const [isCreatingDocument, setIsCreatingDocument] = useState(false);
-  const [documentDraft, setDocumentDraft] = useState<DocumentDraft>(buildEmptyDocumentDraft());
-  const [documentSaveState, setDocumentSaveState] = useState<DocumentSaveState>('idle');
-  const [documentSaveMessage, setDocumentSaveMessage] = useState('Make a change to enable save.');
-  const [documentVersions, setDocumentVersions] = useState<DocumentVersionSummary[]>([]);
-  const [versionsLoading, setVersionsLoading] = useState(false);
-  const [versionsError, setVersionsError] = useState<string | null>(null);
-  const [versionRefreshNonce, setVersionRefreshNonce] = useState(0);
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
-  const [selectedVersion, setSelectedVersion] = useState<DocumentVersionDetail | null>(null);
-  const [versionLoading, setVersionLoading] = useState(false);
-  const [versionError, setVersionError] = useState<string | null>(null);
-    const [tokenNameInput, setTokenNameInput] = useState('');
+  const [memoryFilter, setMemoryFilter] = useState('');
+  const [tokenNameInput, setTokenNameInput] = useState('');
   const [tokenExpiresAtInput, setTokenExpiresAtInput] = useState('');
   const [requestWriteScope, setRequestWriteScope] = useState(false);
   const [createdToken, setCreatedToken] = useState<CreatedTokenState | null>(null);
   const [accountActionMessage, setAccountActionMessage] = useState<string | null>(null);
+  const [hostedCodexLoginStatus, setHostedCodexLoginStatus] = useState<HostedCodexLoginStatus | null>(null);
   const [toolQueryBrainId, setToolQueryBrainId] = useState('');
   const [toolQuerySearch, setToolQuerySearch] = useState('identity');
   const [toolQueryRank, setToolQueryRank] = useState('hybrid');
@@ -454,17 +536,52 @@ function App() {
   }, [authSession]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const providerConnected = params.get('providerConnected');
+    const providerError = params.get('providerError');
+    const providerId = params.get('providerId');
+
+    if (!providerConnected && !providerError) {
+      return;
+    }
+
+    const providerLabel = providerId || providerConnected || 'provider';
+    setAccountActionMessage(providerConnected
+      ? `${providerLabel} connected successfully.`
+      : providerError || `Failed to connect ${providerLabel}.`);
+
+    if (authSession) {
+      navigateToView('account', authSession, setActiveView);
+      setRefreshNonce((value) => value + 1);
+    }
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete('providerConnected');
+    nextUrl.searchParams.delete('providerError');
+    nextUrl.searchParams.delete('providerId');
+    const search = nextUrl.searchParams.toString();
+    const hash = nextUrl.hash || '#account';
+    window.history.replaceState(null, '', `${nextUrl.pathname}${search ? `?${search}` : ''}${hash}`);
+  }, [authSession]);
+
+  useEffect(() => {
     if (!authSession) {
       setAuthError(null);
       setAuthPendingAction(null);
       setContext(null);
       setBilling(null);
       setBrains([]);
+      setMemoryBrainPreference(null);
       setTokens([]);
+      setAvailableProviders([]);
+      setConfiguredProviders([]);
       setWorkspaceError(null);
       setActiveBrainId('');
+      setDocumentFilter('');
+      setMemoryFilter('');
       setCreatedToken(null);
       setAccountActionMessage(null);
+      setHostedCodexLoginStatus(null);
       setToolQueryBrainId('');
       setToolQueryResults(null);
       setToolFetchedDocuments({});
@@ -491,11 +608,14 @@ function App() {
           setAuthSession(session);
         }
 
-        const [workspaceContext, workspaceBilling, workspaceBrains, workspaceTokens] = await Promise.all([
+        const [workspaceContext, workspaceBilling, workspaceBrains, workspaceMemoryBrain, workspaceTokens, providerCatalog, providerConfigs] = await Promise.all([
           portalFetch('/portal-api/tenant/me', session.idToken),
           portalFetch('/portal-api/tenant/billing/plan', session.idToken),
           portalFetch('/portal-api/tenant/brains', session.idToken),
-          portalFetch('/portal-api/tenant/tokens', session.idToken)
+          portalFetch('/portal-api/tenant/me/memory-brain', session.idToken),
+          portalFetch('/portal-api/tenant/tokens', session.idToken),
+          portalFetch('/portal-api/api/providers/config/available', session.idToken),
+          portalFetch('/portal-api/api/providers/config/', session.idToken)
         ]);
 
         if (cancelled) {
@@ -506,11 +626,16 @@ function App() {
           .filter((brain) => String(brain.mode || '').toLowerCase() === 'managed-content'
             && String(brain.status || '').toLowerCase() !== 'retired');
         const nextTokens = (((workspaceTokens as { tokens?: TokenSummary[] }).tokens) || []);
+        const nextAvailableProviders = (((providerCatalog as AvailableProviderResponse).providers) || []);
+        const nextConfiguredProviders = (((providerConfigs as ConfiguredProviderResponse).providers) || []);
 
         setContext(workspaceContext as PortalContext);
         setBilling(workspaceBilling as PortalBilling);
         setBrains(nextBrains);
+        setMemoryBrainPreference(workspaceMemoryBrain as MemoryBrainPreference);
         setTokens(nextTokens);
+        setAvailableProviders(nextAvailableProviders);
+        setConfiguredProviders(nextConfiguredProviders);
       } catch (error) {
         if (cancelled) {
           return;
@@ -522,7 +647,10 @@ function App() {
           setContext(null);
           setBilling(null);
           setBrains([]);
+          setMemoryBrainPreference(null);
           setTokens([]);
+          setAvailableProviders([]);
+          setConfiguredProviders([]);
         }
 
         setWorkspaceError(error instanceof Error ? error.message : 'Failed to load workspace.');
@@ -549,290 +677,118 @@ function App() {
     setActiveBrainId((current) => selectActiveBrainId(current, brains, context));
   }, [authSession, brains, context]);
 
-  useEffect(() => {
-    if (!authSession || !activeBrainId) {
-      setDocuments([]);
-      setDocumentsError(null);
-      setDocumentsLoading(false);
-      setSelectedDocumentId(null);
-      setSelectedDocument(null);
-      setDocumentError(null);
-      setDocumentLoading(false);
-      setIsCreatingDocument(false);
-      setDocumentDraft(buildEmptyDocumentDraft());
-      setDocumentSaveState('idle');
-      setDocumentSaveMessage('Make a change to enable save.');
-      setDocumentVersions([]);
-      setVersionsLoading(false);
-      setVersionsError(null);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-      setVersionLoading(false);
-      setVersionError(null);
-      return;
+  const getValidSession = useCallback(async () => {
+    if (!authSession) {
+      throw new Error('Sign in before using the portal.');
     }
 
-    let cancelled = false;
-
-    async function loadDocuments() {
-      setDocumentsLoading(true);
-      setDocumentsError(null);
-
-      try {
-        const session = await ensureValidSession(authSession);
-        if (cancelled) {
-          return;
-        }
-
-        if (session !== authSession) {
-          setAuthSession(session);
-        }
-
-        const response = (await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents?limit=200`,
-          session.idToken
-        )) as DocumentListResponse;
-
-        if (cancelled) {
-          return;
-        }
-
-        const nextDocuments = Array.isArray(response.documents) ? response.documents : [];
-        setDocuments(nextDocuments);
-
-        setSelectedDocumentId((currentSelectedId) => {
-          const preferredId = currentSelectedId && nextDocuments.some((document) => document.managedDocumentId === currentSelectedId)
-            ? currentSelectedId
-            : nextDocuments[0]?.managedDocumentId ?? null;
-
-          if (!preferredId) {
-            setSelectedDocument(null);
-            setDocumentError(null);
-          }
-
-          return preferredId;
-        });
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setDocuments([]);
-        setSelectedDocumentId(null);
-        setSelectedDocument(null);
-        setDocumentsError(error instanceof Error ? error.message : 'Failed to load documents.');
-      } finally {
-        if (!cancelled) {
-          setDocumentsLoading(false);
-        }
-      }
+    const session = await ensureValidSession(authSession);
+    if (session !== authSession) {
+      setAuthSession(session);
     }
 
-    void loadDocuments();
+    return session;
+  }, [authSession]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession, activeBrainId, documentRefreshNonce]);
+  const {
+    documentDraft,
+    documentError,
+    documentIsDirty,
+    documentLoading,
+    documentSaveMessage,
+    documentSaveState,
+    documentVersions,
+    documents,
+    documentsError,
+    documentsLoading,
+    isCreatingDocument,
+    selectedDocument,
+    selectedDocumentId,
+    selectedVersion,
+    selectedVersionId,
+    versionError,
+    versionLoading,
+    versionsError,
+    versionsLoading,
+    handleCreateDocument,
+    handleDeleteDocument,
+    handleDraftChange,
+    handleExportDocument,
+    handleImportDocument,
+    handleRefreshDocuments,
+    handleRefreshVersions,
+    handleRestoreVersion,
+    handleRevertDocument,
+    handleSaveDocument,
+    handleSelectDocument: selectDocumentById,
+    handleSelectVersion,
+    showDocumentStatus,
+  } = useManagedDocumentWorkspace({
+    activeBrainId,
+    enabled: Boolean(authSession && activeBrainId),
+    hasSession: Boolean(authSession),
+    singularLabel: 'document',
+    deleteActionLabel: 'Delete',
+    deletePastTense: 'deleted',
+    getValidSession,
+    portalFetch,
+    downloadTextFile,
+    formatDateTime,
+    listQuery: {
+      excludePathPrefix: 'memories/',
+    },
+  });
 
-  useEffect(() => {
-    if (!authSession || !activeBrainId || !selectedDocumentId) {
-      setSelectedDocument(null);
-      setDocumentError(null);
-      setDocumentLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadDocument() {
-      setDocumentLoading(true);
-      setDocumentError(null);
-
-      try {
-        const session = await ensureValidSession(authSession);
-        if (cancelled) {
-          return;
-        }
-
-        if (session !== authSession) {
-          setAuthSession(session);
-        }
-
-        const document = (await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocumentId)}`,
-          session.idToken
-        )) as DocumentDetail;
-
-        if (!cancelled) {
-          setSelectedDocument(document);
-          setIsCreatingDocument(false);
-        }
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setSelectedDocument(null);
-        setDocumentError(error instanceof Error ? error.message : 'Failed to load the selected document.');
-      } finally {
-        if (!cancelled) {
-          setDocumentLoading(false);
-        }
-      }
-    }
-
-    void loadDocument();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession, activeBrainId, selectedDocumentId, documentDetailNonce]);
-
-  useEffect(() => {
-    if (isCreatingDocument) {
-      setDocumentVersions([]);
-      setVersionsLoading(false);
-      setVersionsError(null);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-      setVersionLoading(false);
-      setVersionError(null);
-      return;
-    }
-
-    if (!selectedDocument) {
-      setDocumentDraft(buildEmptyDocumentDraft());
-      setDocumentSaveState('idle');
-      setDocumentSaveMessage('Make a change to enable save.');
-      return;
-    }
-
-    setDocumentDraft(buildDraftFromDocument(selectedDocument));
-    setDocumentSaveState('info');
-    setDocumentSaveMessage('All changes saved.');
-  }, [isCreatingDocument, selectedDocument]);
-
-  useEffect(() => {
-    if (!authSession || !activeBrainId || !selectedDocumentId || isCreatingDocument) {
-      setDocumentVersions([]);
-      setVersionsLoading(false);
-      setVersionsError(null);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-      setVersionLoading(false);
-      setVersionError(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadVersions() {
-      setVersionsLoading(true);
-      setVersionsError(null);
-
-      try {
-        const session = await ensureValidSession(authSession);
-        if (cancelled) {
-          return;
-        }
-
-        if (session !== authSession) {
-          setAuthSession(session);
-        }
-
-        const response = (await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocumentId)}/versions?limit=25`,
-          session.idToken
-        )) as DocumentVersionListResponse;
-
-        if (cancelled) {
-          return;
-        }
-
-        const nextVersions = Array.isArray(response.versions) ? response.versions : [];
-        setDocumentVersions(nextVersions);
-        setSelectedVersionId((currentSelectedVersionId) => (
-          currentSelectedVersionId && nextVersions.some((version) => version.managedDocumentVersionId === currentSelectedVersionId)
-            ? currentSelectedVersionId
-            : null
-        ));
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setDocumentVersions([]);
-        setSelectedVersionId(null);
-        setSelectedVersion(null);
-        setVersionsError(error instanceof Error ? error.message : 'Failed to load document versions.');
-      } finally {
-        if (!cancelled) {
-          setVersionsLoading(false);
-        }
-      }
-    }
-
-    void loadVersions();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession, activeBrainId, selectedDocumentId, isCreatingDocument, versionRefreshNonce]);
-
-  useEffect(() => {
-    if (!authSession || !activeBrainId || !selectedDocumentId || !selectedVersionId || isCreatingDocument) {
-      setSelectedVersion(null);
-      setVersionError(null);
-      setVersionLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadVersionDetail() {
-      setVersionLoading(true);
-      setVersionError(null);
-
-      try {
-        const session = await ensureValidSession(authSession);
-        if (cancelled) {
-          return;
-        }
-
-        if (session !== authSession) {
-          setAuthSession(session);
-        }
-
-        const version = (await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocumentId)}/versions/${encodeURIComponent(selectedVersionId)}`,
-          session.idToken
-        )) as DocumentVersionDetail;
-
-        if (!cancelled) {
-          setSelectedVersion(version);
-        }
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setSelectedVersion(null);
-        setVersionError(error instanceof Error ? error.message : 'Failed to load the selected version.');
-      } finally {
-        if (!cancelled) {
-          setVersionLoading(false);
-        }
-      }
-    }
-
-    void loadVersionDetail();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authSession, activeBrainId, selectedDocumentId, selectedVersionId, isCreatingDocument]);
-
+  const {
+    documentDraft: memoryDraft,
+    documentError: memoryError,
+    documentIsDirty: memoryIsDirty,
+    documentLoading: memoryLoading,
+    documentSaveMessage: memorySaveMessage,
+    documentSaveState: memorySaveState,
+    documentVersions: memoryVersions,
+    documents: memories,
+    documentsError: memoriesError,
+    documentsLoading: memoriesLoading,
+    isCreatingDocument: isCreatingMemory,
+    selectedDocument: selectedMemory,
+    selectedDocumentId: selectedMemoryId,
+    selectedVersion: selectedMemoryVersion,
+    selectedVersionId: selectedMemoryVersionId,
+    versionError: memoryVersionError,
+    versionLoading: memoryVersionLoading,
+    versionsError: memoryVersionsError,
+    versionsLoading: memoryVersionsLoading,
+    handleCreateDocument: handleCreateMemory,
+    handleDeleteDocument: handleDeleteMemory,
+    handleDraftChange: handleMemoryDraftChange,
+    handleExportDocument: handleExportMemory,
+    handleImportDocument: handleImportMemory,
+    handleRefreshDocuments: handleRefreshMemories,
+    handleRefreshVersions: handleRefreshMemoryVersions,
+    handleRestoreVersion: handleRestoreMemoryVersion,
+    handleRevertDocument: handleRevertMemory,
+    handleSaveDocument: handleSaveMemory,
+    handleSelectDocument: selectMemoryById,
+    handleSelectVersion: handleSelectMemoryVersion,
+    showDocumentStatus: showMemoryStatus,
+  } = useManagedDocumentWorkspace({
+    activeBrainId: memoryBrainPreference?.effectiveMemoryBrainId || '',
+    enabled: activeView === 'memories' && Boolean(authSession && memoryBrainPreference?.effectiveMemoryBrainId),
+    hasSession: Boolean(authSession),
+    singularLabel: 'memory',
+    deleteActionLabel: 'Forget',
+    deletePastTense: 'forgotten',
+    getValidSession,
+    portalFetch,
+    downloadTextFile,
+    formatDateTime,
+    listQuery: {
+      pathPrefix: 'memories/',
+    },
+    normalizeDraftForEdit: normalizeMemoryDraftForEdit,
+    normalizeDraftForSave: normalizeMemoryDraftForSave,
+  });
   useEffect(() => {
     if (!authSession || brains.length === 0) {
       setToolQueryBrainId('');
@@ -900,293 +856,105 @@ function App() {
       cancelled = true;
     };
   }, [authSession, activeBrainId, indexingRefreshNonce]);
-  async function getValidSession() {
-    if (!authSession) {
-      throw new Error('Sign in before using the portal.');
-    }
 
-    const session = await ensureValidSession(authSession);
-    if (session !== authSession) {
-      setAuthSession(session);
-    }
-
-    return session;
+function handleChangeBrain(nextBrainId: string) {
+  if (nextBrainId === activeBrainId) {
+    return;
   }
 
-  const documentIsDirty = useMemo(
-    () => hasUnsavedDocumentChanges(documentDraft, isCreatingDocument, selectedDocument),
-    [documentDraft, isCreatingDocument, selectedDocument]
+  if (!confirmDiscardDocumentChanges(documentIsDirty || memoryIsDirty, 'Switch brains and discard unsaved changes?')) {
+    return;
+  }
+
+  setActiveBrainId(nextBrainId);
+}
+
+function handleSelectDocument(nextDocumentId: string) {
+  void selectDocumentById(nextDocumentId);
+}
+
+function handleSelectMemory(nextMemoryId: string) {
+  void selectMemoryById(nextMemoryId);
+}
+
+async function handleOpenDocumentLink(rawPath: string) {
+  const canonicalPath = normalizeDocumentLinkPath(rawPath);
+  const isMemoryPath = canonicalPath.startsWith('memories/');
+  const showStatus = isMemoryPath ? showMemoryStatus : showDocumentStatus;
+  const targetBrainId = resolveDocumentLinkBrainId(
+    canonicalPath,
+    activeBrainId,
+    memoryBrainPreference?.effectiveMemoryBrainId,
   );
 
-  function handleDraftChange<K extends keyof DocumentDraft>(field: K, value: DocumentDraft[K]) {
-    setDocumentDraft((current) => ({
-      ...current,
-      [field]: value,
-    }));
-    setDocumentSaveState('idle');
-    setDocumentSaveMessage('Unsaved changes.');
+  if (!canonicalPath) {
+    showStatus('warn', 'Enter a valid managed document path like daily/notes.md.');
+    return;
   }
 
-  function handleChangeBrain(nextBrainId: string) {
-    if (nextBrainId === activeBrainId) {
-      return;
-    }
-
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Switch brains and discard unsaved document changes?')) {
-      return;
-    }
-
-    setActiveBrainId(nextBrainId);
-    setIsCreatingDocument(false);
-    setSelectedDocumentId(null);
-    setSelectedDocument(null);
-    setDocumentDraft(buildEmptyDocumentDraft());
-    setDocumentSaveState('idle');
-    setDocumentSaveMessage('Make a change to enable save.');
-    setDocumentVersions([]);
-    setSelectedVersionId(null);
-    setSelectedVersion(null);
+  if (!targetBrainId) {
+    showStatus(
+      'warn',
+      isMemoryPath
+        ? 'Select or configure a memory brain before opening memory links.'
+        : 'Select a managed-content brain before opening document links.',
+    );
+    return;
   }
 
-  function handleSelectDocument(nextDocumentId: string) {
-    if (!nextDocumentId) {
-      return;
-    }
+  const targetIsMemory = canonicalPath.startsWith('memories/');
+  const targetDocuments = targetIsMemory ? memories : documents;
+  const targetIsDirty = targetIsMemory ? memoryIsDirty : documentIsDirty;
+  const targetView = targetIsMemory ? 'memories' : 'documents';
+  const selectTargetDocument = targetIsMemory ? selectMemoryById : selectDocumentById;
+  const refreshTargetDocuments = targetIsMemory ? handleRefreshMemories : handleRefreshDocuments;
 
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Open another document and discard unsaved changes?')) {
-      return;
-    }
-
-    setIsCreatingDocument(false);
-    setSelectedDocumentId(nextDocumentId);
-    setSelectedVersionId(null);
-    setSelectedVersion(null);
-    setDocumentSaveState('info');
-    setDocumentSaveMessage('Loading document...');
+  if (!confirmDiscardDocumentChanges(targetIsDirty, `Open '${canonicalPath}' and discard unsaved changes?`)) {
+    return;
   }
 
-  function handleCreateDocument() {
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Create a new document and discard unsaved changes?')) {
-      return;
+  const existingDocument = targetDocuments.find((document) => {
+    const candidatePath = normalizeDocumentLinkPath(document.canonicalPath || document.slug || '');
+    return candidatePath === canonicalPath;
+  });
+
+  if (existingDocument?.managedDocumentId) {
+    const selected = selectTargetDocument(existingDocument.managedDocumentId, {
+      loadingMessage: `Loading '${existingDocument.title || existingDocument.canonicalPath || canonicalPath}'...`,
+      skipConfirm: true,
+    });
+
+    if (selected && authSession) {
+      navigateToView(targetView, authSession, setActiveView);
     }
 
-    setIsCreatingDocument(true);
-    setSelectedDocumentId(null);
-    setSelectedDocument(null);
-    setDocumentDraft(buildEmptyDocumentDraft());
-    setDocumentSaveState('idle');
-    setDocumentSaveMessage('Start typing, then create the document.');
-    setDocumentVersions([]);
-    setSelectedVersionId(null);
-    setSelectedVersion(null);
+    return;
   }
 
-  async function handleSaveDocument() {
-    if (!activeBrainId) {
-      setDocumentSaveState('warn');
-      setDocumentSaveMessage('Select a managed-content brain before saving.');
+  try {
+    const session = await getValidSession();
+    const resolvedDocument = await portalFetch(
+      `/portal-api/tenant/brains/${encodeURIComponent(targetBrainId)}/documents/by-path?canonicalPath=${encodeURIComponent(canonicalPath)}`,
+      session.idToken,
+    ) as DocumentDetail;
+
+    const selected = selectTargetDocument(resolvedDocument.managedDocumentId, {
+      loadingMessage: `Loading '${resolvedDocument.title || resolvedDocument.canonicalPath || canonicalPath}'...`,
+      skipConfirm: true,
+    });
+
+    if (!selected) {
       return;
     }
 
-    try {
-      setDocumentSaveState('saving');
-      setDocumentSaveMessage(isCreatingDocument ? 'Creating document...' : 'Saving document...');
-      const session = await getValidSession();
-      const draft = normalizeDocumentDraft(documentDraft);
-      const payload = buildDocumentPayload(draft);
-
-      if (isCreatingDocument) {
-        const created = await portalFetch(
-          `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents`,
-          session.idToken,
-          {
-            method: 'POST',
-            body: JSON.stringify(payload),
-          }
-        ) as DocumentDetail;
-
-        setIsCreatingDocument(false);
-        setSelectedDocumentId(created.managedDocumentId);
-        setDocumentSaveState('info');
-        setDocumentSaveMessage(`Created document '${created.title || created.slug || created.managedDocumentId}'.`);
-        setDocumentRefreshNonce((value) => value + 1);
-        setDocumentDetailNonce((value) => value + 1);
-        setVersionRefreshNonce((value) => value + 1);
-        return;
-      }
-
-      if (!selectedDocument?.managedDocumentId) {
-        setDocumentSaveState('warn');
-        setDocumentSaveMessage('Select a document or create a new one before saving.');
-        return;
-      }
-
-      const updated = await portalFetch(
-        `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocument.managedDocumentId)}`,
-        session.idToken,
-        {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        }
-      ) as DocumentDetail;
-
-      setDocumentSaveState('info');
-      setDocumentSaveMessage(`Saved document '${updated.title || updated.slug || updated.managedDocumentId}'.`);
-      setDocumentRefreshNonce((value) => value + 1);
-      setDocumentDetailNonce((value) => value + 1);
-      setVersionRefreshNonce((value) => value + 1);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : 'Failed to save the document.');
+    refreshTargetDocuments();
+    if (authSession) {
+      navigateToView(targetView, authSession, setActiveView);
     }
+  } catch (error) {
+    showStatus('error', error instanceof Error ? error.message : `Failed to open '${canonicalPath}'.`);
   }
-
-  function handleExportDocument() {
-    try {
-      const draft = normalizeDocumentDraft(documentDraft);
-      if (!draft.title && !draft.content.trim()) {
-        setDocumentSaveState('warn');
-        setDocumentSaveMessage('Create or select a document before exporting Markdown.');
-        return;
-      }
-
-      const markdown = buildMarkdownExport(draft, selectedDocument);
-      const fileName = buildDocumentExportFileName(draft, selectedDocument);
-      downloadTextFile(fileName, markdown, 'text/markdown;charset=utf-8');
-      setDocumentSaveState('info');
-      setDocumentSaveMessage(`Exported '${fileName}'.`);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : 'Failed to export the document.');
-    }
-  }
-
-  async function handleDeleteDocument() {
-    if (!selectedDocument?.managedDocumentId || isCreatingDocument) {
-      setDocumentSaveState('warn');
-      setDocumentSaveMessage('Select an existing document before deleting.');
-      return;
-    }
-
-    const label = selectedDocument.title || selectedDocument.managedDocumentId;
-    if (!window.confirm(`Delete document '${label}'?`)) {
-      return;
-    }
-
-    try {
-      const session = await getValidSession();
-      await portalFetch(
-        `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocument.managedDocumentId)}`,
-        session.idToken,
-        {
-          method: 'DELETE',
-        }
-      );
-
-      setSelectedDocumentId(null);
-      setSelectedDocument(null);
-      setDocumentDraft(buildEmptyDocumentDraft());
-      setDocumentSaveState('info');
-      setDocumentSaveMessage('Document deleted.');
-      setDocumentRefreshNonce((value) => value + 1);
-      setDocumentVersions([]);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : 'Failed to delete the document.');
-    }
-  }
-
-  function handleRevertDocument() {
-    if (isCreatingDocument) {
-      setDocumentDraft(buildEmptyDocumentDraft());
-      setDocumentSaveState('idle');
-      setDocumentSaveMessage('Start typing, then create the document.');
-      return;
-    }
-
-    if (selectedDocument) {
-      setDocumentDraft(buildDraftFromDocument(selectedDocument));
-      setDocumentSaveState('info');
-      setDocumentSaveMessage('Changes reverted to the last saved version.');
-      return;
-    }
-
-    setDocumentDraft(buildEmptyDocumentDraft());
-    setDocumentSaveState('idle');
-    setDocumentSaveMessage('Make a change to enable save.');
-  }
-
-
-  async function handleImportDocument(file: File | null) {
-    if (!file) {
-      return;
-    }
-
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Import Markdown and discard unsaved changes?')) {
-      return;
-    }
-
-    try {
-      const imported = parseImportedMarkdown(await file.text(), file.name);
-      setIsCreatingDocument(true);
-      setSelectedDocumentId(null);
-      setSelectedDocument(null);
-      setDocumentDraft(imported);
-      setDocumentSaveState('info');
-      setDocumentSaveMessage('Imported Markdown draft ready.');
-      setDocumentVersions([]);
-      setSelectedVersionId(null);
-      setSelectedVersion(null);
-    } catch (error) {
-      setDocumentSaveState('error');
-      setDocumentSaveMessage(error instanceof Error ? error.message : 'Failed to import Markdown.');
-    }
-  }
-
-  function handleRefreshVersions() {
-    if (!selectedDocument?.managedDocumentId || isCreatingDocument) {
-      setVersionsError('Select a saved document before loading version history.');
-      return;
-    }
-
-    setVersionRefreshNonce((value) => value + 1);
-  }
-
-  function handleSelectVersion(nextVersionId: string) {
-    setSelectedVersionId((current) => current === nextVersionId ? null : nextVersionId);
-  }
-
-  async function handleRestoreVersion() {
-    if (!selectedDocument?.managedDocumentId || !selectedVersion?.managedDocumentVersionId) {
-      setVersionError('Select a document version before restoring.');
-      return;
-    }
-
-    const restoreTimestamp = formatDateTime(selectedVersion.createdAt);
-    if (!window.confirm(`Restore the selected version from ${restoreTimestamp}? Current draft changes will be replaced.`)) {
-      return;
-    }
-
-    try {
-      const session = await getValidSession();
-      await portalFetch(
-        `/portal-api/tenant/brains/${encodeURIComponent(activeBrainId)}/documents/${encodeURIComponent(selectedDocument.managedDocumentId)}/versions/${encodeURIComponent(selectedVersion.managedDocumentVersionId)}/restore`,
-        session.idToken,
-        {
-          method: 'POST',
-        }
-      );
-
-      setDocumentSaveState('info');
-      setDocumentSaveMessage(`Restored version from ${restoreTimestamp}.`);
-      setDocumentDetailNonce((value) => value + 1);
-      setVersionRefreshNonce((value) => value + 1);
-    } catch (error) {
-      setVersionError(error instanceof Error ? error.message : 'Failed to restore the selected version.');
-    }
-  }
+}
   async function handleAuthenticate(endpoint: '/portal-auth/login' | '/portal-auth/register', action: Exclude<AuthPendingAction, null>) {
     const email = authEmailInput.trim();
     const password = authPasswordInput;
@@ -1270,7 +1038,7 @@ function App() {
   }
 
   async function handleSignOut() {
-    if (!confirmDiscardDocumentChanges(documentIsDirty, 'Sign out and discard unsaved document changes?')) {
+    if (!confirmDiscardDocumentChanges(documentIsDirty || memoryIsDirty, 'Sign out and discard unsaved changes?')) {
       return;
     }
 
@@ -1294,15 +1062,177 @@ function App() {
 
   async function handleRefreshSession() {
     try {
-      await getValidSession();
+      const session = await getValidSession();
       setRefreshNonce((value) => value + 1);
       setAccountActionMessage('Session refreshed.');
+      return session.idToken;
     } catch (error) {
       setAccountActionMessage(error instanceof Error ? error.message : 'Failed to refresh session.');
+      return null;
     }
   }
 
-  async function handleCreateToken() {
+  async function handleSaveProviderConfig(providerId: string, editor: ProviderEditorState) {
+    try {
+      const session = await getValidSession();
+      const request = buildProviderConfigRequest(providerId, editor, configuredProviders);
+      await portalFetch(`/portal-api/api/providers/config/${encodeURIComponent(providerId)}`, session.idToken, {
+        method: 'PUT',
+        body: JSON.stringify(request),
+      });
+      setAccountActionMessage(`${providerId} settings saved.`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to save ${providerId} settings.`);
+    }
+  }
+
+  async function handleSaveMemoryBrain(memoryBrainId: string) {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/tenant/me/memory-brain', session.idToken, {
+        method: 'PUT',
+        body: JSON.stringify({
+          memoryBrainId: memoryBrainId || null,
+        }),
+      }) as MemoryBrainPreference;
+
+      setMemoryBrainPreference(response);
+      setAccountActionMessage(memoryBrainId
+        ? 'Memory brain preference saved.'
+        : 'Memory brain preference cleared.');
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to save memory brain preference.');
+    }
+  }
+
+  async function handleToggleProvider(providerId: string) {
+    try {
+      const session = await getValidSession();
+      await portalFetch(`/portal-api/api/providers/config/${encodeURIComponent(providerId)}/toggle`, session.idToken, {
+        method: 'POST',
+      });
+      setAccountActionMessage(`${providerId} availability updated.`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to update ${providerId}.`);
+    }
+  }
+
+  async function handleDeleteProvider(providerId: string) {
+    if (!window.confirm(`Delete the stored ${providerId} configuration?`)) {
+      return;
+    }
+
+    try {
+      const session = await getValidSession();
+      await portalFetch(`/portal-api/api/providers/config/${encodeURIComponent(providerId)}`, session.idToken, {
+        method: 'DELETE',
+      });
+      setAccountActionMessage(`${providerId} configuration deleted.`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to delete ${providerId}.`);
+    }
+  }
+
+  async function handleStartProviderOAuth(providerId: string) {
+    try {
+      const session = await getValidSession();
+      const returnUrl = buildPortalOAuthReturnUrl();
+      const response = await portalFetch(
+        `/portal-api/api/providers/config/${encodeURIComponent(providerId)}/oauth/authorize?returnUrl=${encodeURIComponent(returnUrl)}`,
+        session.idToken) as { authorizationUrl?: string };
+
+      if (!response.authorizationUrl) {
+        throw new Error(`No OAuth authorization URL was returned for ${providerId}.`);
+      }
+
+      window.location.assign(response.authorizationUrl);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to start OAuth for ${providerId}.`);
+    }
+  }
+
+  async function handleDisconnectProviderOAuth(providerId: string) {
+    if (!window.confirm(`Disconnect ${providerId} and remove the stored OAuth token?`)) {
+      return;
+    }
+
+    try {
+      const session = await getValidSession();
+      await portalFetch(`/portal-api/api/providers/config/${encodeURIComponent(providerId)}/oauth/disconnect`, session.idToken, {
+        method: 'POST',
+      });
+      setAccountActionMessage(`${providerId} disconnected.`);
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : `Failed to disconnect ${providerId}.`);
+    }
+  }
+
+  async function handleStartHostedCodexLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/start', session.idToken, {
+        method: 'POST',
+      }) as HostedCodexLoginStatus;
+      setHostedCodexLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Codex sign-in started.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to start hosted Codex sign-in.');
+    }
+  }
+
+  async function handleRefreshHostedCodexLoginStatus() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/status', session.idToken) as HostedCodexLoginStatus;
+      setHostedCodexLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Codex sign-in status loaded.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to refresh hosted Codex sign-in status.');
+    }
+  }
+
+  async function handleCompleteHostedCodexLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/complete', session.idToken, {
+        method: 'POST',
+      }) as { message?: string };
+      setAccountActionMessage(response.message || 'Hosted Codex sign-in completed.');
+      setRefreshNonce((value) => value + 1);
+      const status = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/status', session.idToken) as HostedCodexLoginStatus;
+      setHostedCodexLoginStatus(status);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to complete hosted Codex sign-in.');
+    }
+  }
+
+  async function handleCancelHostedCodexLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/cancel', session.idToken, {
+        method: 'POST',
+      }) as HostedCodexLoginStatus;
+      setHostedCodexLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Codex sign-in cancelled.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to cancel hosted Codex sign-in.');
+    }
+  }
+
+  function handleOpenProviderSettings() {
+    if (!authSession) {
+      return;
+    }
+
+    navigateToView('account', authSession, setActiveView);
+  }
+
+async function handleCreateToken() {
     try {
       const session = await getValidSession();
       const name = tokenNameInput.trim();
@@ -1462,6 +1392,10 @@ function App() {
     () => tokens.filter((token) => !token.revokedAt).length,
     [tokens]
   );
+  const hasConfiguredProviders = useMemo(
+    () => configuredProviders.some((provider) => isProviderReady(provider)),
+    [configuredProviders]
+  );
   const activeToken = useMemo(
     () => tokens.find((token) => !token.revokedAt) ?? null,
     [tokens]
@@ -1479,14 +1413,29 @@ function App() {
     [config?.mcpBaseUrl, activeToken?.name]
   );
   const filteredDocuments = useMemo(
-    () => applyDocumentFilter(documents, documentFilter),
-    [documents, documentFilter]
-  );
-  const documentGroups = useMemo(
-    () => buildDocumentDirectoryGroups(filteredDocuments),
-    [filteredDocuments]
-  );
-  const activeBrain = brains.find((brain) => brain.brainId === activeBrainId) ?? null;
+  () => applyDocumentFilter(documents, documentFilter),
+  [documents, documentFilter]
+);
+const filteredMemories = useMemo(
+  () => applyDocumentFilter(memories, memoryFilter),
+  [memories, memoryFilter]
+);
+const documentGroups = useMemo(
+  () => buildDocumentDirectoryGroups(filteredDocuments),
+  [filteredDocuments]
+);
+const memoryDocumentGroups = useMemo(
+  () => buildDocumentDirectoryGroups(filteredMemories),
+  [filteredMemories]
+);
+const availableManagedDocumentLinks = useMemo(
+  () => [...documents, ...memories],
+  [documents, memories]
+);
+const activeBrain = brains.find((brain) => brain.brainId === activeBrainId) ?? null;
+const effectiveMemoryBrainId = memoryBrainPreference?.effectiveMemoryBrainId || '';
+const memoryActiveBrain = brains.find((brain) => brain.brainId === effectiveMemoryBrainId) ?? null;
+const memoryViewBrains = memoryActiveBrain ? [memoryActiveBrain] : [];
 
   return (
     <div className="app-shell">
@@ -1581,6 +1530,7 @@ function App() {
           <DocumentsView
             activeBrain={activeBrain}
             activeBrainId={activeBrainId}
+            availableDocumentLinks={availableManagedDocumentLinks}
             brains={brains}
             documentDraft={documentDraft}
             documentError={documentError}
@@ -1603,7 +1553,8 @@ function App() {
             onDraftChange={handleDraftChange}
             onExportDocument={handleExportDocument}
             onImportDocument={handleImportDocument}
-            onRefreshDocuments={() => setDocumentRefreshNonce((value) => value + 1)}
+            onOpenDocumentLink={handleOpenDocumentLink}
+            onRefreshDocuments={handleRefreshDocuments}
             onRefreshVersions={handleRefreshVersions}
             onRestoreVersion={handleRestoreVersion}
             onRevertDocument={handleRevertDocument}
@@ -1618,6 +1569,58 @@ function App() {
             versionLoading={versionLoading}
             versionsError={versionsError}
             versionsLoading={versionsLoading}
+          />
+        ) : activeView === 'memories' ? (
+          <MemoriesView
+            activeBrain={memoryActiveBrain}
+            activeBrainId={effectiveMemoryBrainId}
+            availableDocumentLinks={availableManagedDocumentLinks}
+            brains={memoryViewBrains}
+            documentDraft={memoryDraft}
+            documentError={memoryError}
+            documentFilter={memoryFilter}
+            documentGroups={memoryDocumentGroups}
+            documentIsDirty={memoryIsDirty}
+            documentLoading={memoryLoading}
+            documentSaveMessage={memorySaveMessage}
+            documentSaveState={memorySaveState}
+            documentVersions={memoryVersions}
+            documents={memories}
+            documentsError={memoriesError}
+            documentsLoading={memoriesLoading}
+            filteredDocuments={filteredMemories}
+            isCreatingDocument={isCreatingMemory}
+            onChangeBrain={handleChangeBrain}
+            onChangeDocumentFilter={setMemoryFilter}
+            onCreateDocument={handleCreateMemory}
+            onDeleteDocument={handleDeleteMemory}
+            onDraftChange={handleMemoryDraftChange}
+            onExportDocument={handleExportMemory}
+            onImportDocument={handleImportMemory}
+            onOpenDocumentLink={handleOpenDocumentLink}
+            onRefreshDocuments={handleRefreshMemories}
+            onRefreshVersions={handleRefreshMemoryVersions}
+            onRestoreVersion={handleRestoreMemoryVersion}
+            onRevertDocument={handleRevertMemory}
+            onSaveDocument={handleSaveMemory}
+            onSelectDocument={handleSelectMemory}
+            onSelectVersion={handleSelectMemoryVersion}
+            selectedDocument={selectedMemory}
+            selectedDocumentId={selectedMemoryId}
+            selectedVersion={selectedMemoryVersion}
+            selectedVersionId={selectedMemoryVersionId}
+            versionError={memoryVersionError}
+            versionLoading={memoryVersionLoading}
+            versionsError={memoryVersionsError}
+            versionsLoading={memoryVersionsLoading}
+          />
+        ) : activeView === 'chat' ? (
+          <ChatView
+            authSession={authSession}
+            activeBrainId={activeBrainId}
+            hasConfiguredProviders={hasConfiguredProviders}
+            onOpenProviderSettings={handleOpenProviderSettings}
+            onRefreshSession={handleRefreshSession}
           />
         ) : activeView === 'usage' ? (
           <UsageView
@@ -1663,16 +1666,31 @@ function App() {
           <AccountView
             accountActionMessage={accountActionMessage}
             authSession={authSession}
+            availableProviders={availableProviders}
             billing={billing}
+            brains={brains}
+            configuredProviders={configuredProviders}
             context={context}
             createdToken={createdToken}
+            codexHostedLoginStatus={hostedCodexLoginStatus}
+            memoryBrainPreference={memoryBrainPreference}
             onCopyCreatedToken={handleCopyCreatedToken}
             onCreateToken={handleCreateToken}
+            onCancelHostedCodexLogin={handleCancelHostedCodexLogin}
+            onCompleteHostedCodexLogin={handleCompleteHostedCodexLogin}
+            onDeleteProvider={handleDeleteProvider}
+            onDisconnectProviderOAuth={handleDisconnectProviderOAuth}
             onDismissCreatedToken={() => setCreatedToken(null)}
             onRefreshSession={handleRefreshSession}
-            onRevokeToken={handleRevokeToken}
-            onSignOut={handleSignOut}
+            onRefreshHostedCodexLoginStatus={handleRefreshHostedCodexLoginStatus}
             onRequestWriteScopeChange={setRequestWriteScope}
+            onRevokeToken={handleRevokeToken}
+            onSaveMemoryBrain={handleSaveMemoryBrain}
+            onSaveProviderConfig={handleSaveProviderConfig}
+            onSignOut={handleSignOut}
+            onStartHostedCodexLogin={handleStartHostedCodexLogin}
+            onStartProviderOAuth={handleStartProviderOAuth}
+            onToggleProvider={handleToggleProvider}
             onTokenExpiresAtInputChange={setTokenExpiresAtInput}
             onTokenNameInputChange={setTokenNameInput}
             requestWriteScope={requestWriteScope}
@@ -2158,91 +2176,34 @@ function ToolsView({
     </section>
   );
 }
-function buildMcpToolManifestUrl(baseUrl: string) {
-  if (!baseUrl) {
-    return '';
-  }
-
-  return baseUrl.endsWith('/mcp')
-    ? `${baseUrl.slice(0, -4)}/tool-manifest`
-    : `${baseUrl.replace(/\/$/, '')}/tool-manifest`;
-}
-
-function buildMcpConfigSnippet(url: string, tokenName: string) {
-  return JSON.stringify({
-    mcpServers: {
-      OpenCortex: {
-        url: url || 'https://your-mcp-host/mcp',
-        headers: {
-          Authorization: 'Bearer oct_replace_with_token',
-        },
-        notes: `Token label: ${tokenName}`,
-      },
-    },
-  }, null, 2);
-}
-
-function buildToolOql(brainId: string, search: string, rank: string, where: string, limit: string) {
-  if (!brainId) {
-    return '';
-  }
-
-  const lines = [`FROM brain("${brainId}")`];
-  if (search.trim()) {
-    lines.push(`SEARCH "${search.trim()}"`);
-  }
-  if (where.trim()) {
-    lines.push(`WHERE ${where.trim()}`);
-  }
-  lines.push(`RANK ${rank || 'hybrid'}`);
-  lines.push(`LIMIT ${limit || '5'}`);
-  return lines.join('\n');
-}
-
-function getToolResultKey(result: ToolQueryResultItem) {
-  return result.documentId || `${result.brainId || ''}::${result.canonicalPath || ''}`;
-}
-
-function renderToolFetchState(result: ToolQueryResultItem, fetchState: ToolFetchedDocumentState | null) {
-  if (!result.documentId && !result.canonicalPath) {
-    return <div className="empty-state">This result does not expose a retrievable document id or canonical path.</div>;
-  }
-
-  if (!fetchState) {
-    return <p className="tool-fetch-note">Fetch the stored document to inspect the full markdown behind this ranked snippet.</p>;
-  }
-
-  if (fetchState.status === 'loading') {
-    return <div className="empty-state">Fetching full document...</div>;
-  }
-
-  if (fetchState.status === 'error') {
-    return <div className="empty-state">{fetchState.message || 'Document fetch failed.'}</div>;
-  }
-
-  const document = fetchState.document;
-  return (
-    <>
-      <div className="tool-document-meta">
-        {document?.status || 'draft'} | {document?.canonicalPath || ''} | {String((document as { wordCount?: number } | undefined)?.wordCount ?? 0)} words | updated {formatDateTime(document?.updatedAt)}
-      </div>
-      <div className="tool-document-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(document?.content || '') }} />
-    </>
-  );
-}
 type AccountViewProps = {
   accountActionMessage: string | null;
   authSession: StoredAuthSession;
+  availableProviders: AvailableProvider[];
   billing: PortalBilling | null;
+  brains: BrainSummary[];
+  codexHostedLoginStatus: HostedCodexLoginStatus | null;
+  configuredProviders: ConfiguredProviderSummary[];
   context: PortalContext | null;
   createdToken: CreatedTokenState | null;
+  memoryBrainPreference: MemoryBrainPreference | null;
+  onCancelHostedCodexLogin: () => Promise<void>;
+  onCompleteHostedCodexLogin: () => Promise<void>;
   onCopyCreatedToken: () => void;
   onCreateToken: () => void;
+  onDeleteProvider: (providerId: string) => Promise<void>;
+  onDisconnectProviderOAuth: (providerId: string) => Promise<void>;
   onDismissCreatedToken: () => void;
-  onRefreshSession: () => void;
+  onRefreshHostedCodexLoginStatus: () => Promise<void>;
+  onRefreshSession: () => Promise<string | null>;
   onRequestWriteScopeChange: (value: boolean) => void;
   onRevokeToken: (apiTokenId: string) => void;
+  onSaveMemoryBrain: (memoryBrainId: string) => Promise<void>;
+  onSaveProviderConfig: (providerId: string, editor: ProviderEditorState) => Promise<void>;
   onSignOut: () => void;
+  onStartHostedCodexLogin: () => Promise<void>;
+  onStartProviderOAuth: (providerId: string) => Promise<void>;
+  onToggleProvider: (providerId: string) => Promise<void>;
   onTokenExpiresAtInputChange: (value: string) => void;
   onTokenNameInputChange: (value: string) => void;
   requestWriteScope: boolean;
@@ -2254,16 +2215,31 @@ type AccountViewProps = {
 function AccountView({
   accountActionMessage,
   authSession,
+  availableProviders,
   billing,
+  brains,
+  codexHostedLoginStatus,
+  configuredProviders,
   context,
   createdToken,
+  memoryBrainPreference,
+  onCancelHostedCodexLogin,
+  onCompleteHostedCodexLogin,
   onCopyCreatedToken,
   onCreateToken,
+  onDeleteProvider,
+  onDisconnectProviderOAuth,
   onDismissCreatedToken,
+  onRefreshHostedCodexLoginStatus,
   onRefreshSession,
   onRequestWriteScopeChange,
   onRevokeToken,
+  onSaveMemoryBrain,
+  onSaveProviderConfig,
   onSignOut,
+  onStartHostedCodexLogin,
+  onStartProviderOAuth,
+  onToggleProvider,
   onTokenExpiresAtInputChange,
   onTokenNameInputChange,
   requestWriteScope,
@@ -2272,14 +2248,54 @@ function AccountView({
   tokens
 }: AccountViewProps) {
   const activeTokenCount = tokens.filter((token) => !token.revokedAt).length;
+  const configuredProviderMap = useMemo(
+    () => new Map(configuredProviders.map((provider) => [provider.providerId, provider])),
+    [configuredProviders]
+  );
+  const [providerEditors, setProviderEditors] = useState<Record<string, ProviderEditorState>>(() =>
+    buildProviderEditors(availableProviders, configuredProviders)
+  );
+  const [selectedMemoryBrainId, setSelectedMemoryBrainId] = useState('');
+  const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
+  const [memoryBrainPending, setMemoryBrainPending] = useState(false);
+
+  useEffect(() => {
+    setProviderEditors(buildProviderEditors(availableProviders, configuredProviders));
+  }, [availableProviders, configuredProviders]);
+
+  useEffect(() => {
+    setSelectedMemoryBrainId(memoryBrainPreference?.configuredMemoryBrainId || '');
+  }, [memoryBrainPreference]);
+
+  function updateProviderEditor(providerId: string, patch: Partial<ProviderEditorState>) {
+    setProviderEditors((current) => ({
+      ...current,
+      [providerId]: {
+        ...(current[providerId] || buildProviderEditorState(
+          availableProviders.find((provider) => provider.providerId === providerId) || null,
+          configuredProviderMap.get(providerId) || null
+        )),
+        ...patch,
+      },
+    }));
+  }
+
+  async function runProviderAction(providerId: string, action: () => Promise<void>) {
+    setPendingProviderId(providerId);
+    try {
+      await action();
+    } finally {
+      setPendingProviderId((current) => (current === providerId ? null : current));
+    }
+  }
 
   return (
     <section className="portal-layout">
       <article className="panel portal-hero">
         <p className="eyebrow">Account</p>
-        <h2>Tenant settings and token access are now using live account data.</h2>
+        <h2>Session controls, provider access, and MCP tokens now live in one place.</h2>
         <p className="summary-detail">
-          Session controls, workspace posture, MCP token issuance, and token revocation now live in the main portal experience.
+          Chat uses your own provider settings now, so this page is where model access, browser session posture, and MCP token issuance meet.
         </p>
       </article>
 
@@ -2303,7 +2319,7 @@ function AccountView({
 
           <p className="summary-detail">{accountActionMessage || 'Session details appear after sign-in.'}</p>
           <div className="action-row">
-            <button type="button" className="button" onClick={onRefreshSession}>Refresh Session</button>
+            <button type="button" className="button" onClick={() => void onRefreshSession()}>Refresh Session</button>
             <button type="button" className="button button-danger" onClick={onSignOut}>Sign Out</button>
           </div>
         </section>
@@ -2336,7 +2352,7 @@ function AccountView({
                 <span>Request <code>mcp:write</code> when the effective plan allows it.</span>
               </label>
             </div>
-            <button type="button" className="button button-primary" onClick={onCreateToken}>Create Token</button>
+            <button type="button" className="button button-primary" onClick={() => void onCreateToken()}>Create Token</button>
           </div>
 
           {createdToken ? (
@@ -2350,11 +2366,333 @@ function AccountView({
               </div>
               <textarea readOnly rows={4} value={createdToken.token} className="document-content-editor" />
               <div className="action-row">
-                <button type="button" className="button button-primary" onClick={onCopyCreatedToken}>Copy Token</button>
+                <button type="button" className="button button-primary" onClick={() => void onCopyCreatedToken()}>Copy Token</button>
               </div>
             </section>
           ) : null}
         </section>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>Memory Brain</h3>
+            <p className="summary-detail">Select which managed-content brain stores agent memories under the reserved <code>memories/</code> path.</p>
+          </div>
+        </div>
+
+        <label className="field">
+          <span>Preferred Memory Brain</span>
+          <select value={selectedMemoryBrainId} onChange={(event) => setSelectedMemoryBrainId(event.target.value)} disabled={memoryBrainPending || brains.length === 0}>
+            <option value="">Auto-select the only active managed-content brain</option>
+            {brains.map((brain) => (
+              <option key={brain.brainId} value={brain.brainId}>{brain.name} ({brain.brainId})</option>
+            ))}
+          </select>
+        </label>
+
+        <dl className="facts-list compact-facts">
+          <div className="fact-row"><dt>Configured</dt><dd>{memoryBrainPreference?.configuredMemoryBrainId || 'Auto'}</dd></div>
+          <div className="fact-row"><dt>Effective</dt><dd>{memoryBrainPreference?.effectiveMemoryBrainId || 'Not resolved'}</dd></div>
+          <div className="fact-row"><dt>Status</dt><dd>{memoryBrainPreference?.needsConfiguration ? 'Needs configuration' : 'Ready'}</dd></div>
+        </dl>
+
+        <p className="summary-detail">
+          {memoryBrainPreference?.error
+            ? memoryBrainPreference.error
+            : memoryBrainPreference?.needsConfiguration
+              ? 'Multiple active managed-content brains exist. Choose one explicitly for memory tools.'
+              : 'Memory tools will use the effective brain shown above.'}
+        </p>
+
+        <div className="action-row">
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={async () => {
+              setMemoryBrainPending(true);
+              try {
+                await onSaveMemoryBrain(selectedMemoryBrainId);
+              } finally {
+                setMemoryBrainPending(false);
+              }
+            }}
+            disabled={memoryBrainPending}
+          >
+            Save Memory Brain
+          </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>Provider Settings</h3>
+            <p className="summary-detail">Connect API-backed providers, import a Codex session for subscription-backed access, or point Ollama at a remote endpoint.</p>
+          </div>
+        </div>
+
+        {availableProviders.length === 0 ? (
+          <div className="empty-state">Provider catalog is not available yet.</div>
+        ) : (
+          <div className="provider-card-list">
+            {availableProviders.map((provider) => {
+              const configured = configuredProviderMap.get(provider.providerId) || null;
+              const editor = providerEditors[provider.providerId] || buildProviderEditorState(provider, configured);
+              const pending = pendingProviderId === provider.providerId;
+              const supportsApiKey = provider.authTypes.includes('api_key');
+              const supportsOAuth = provider.authTypes.includes('oauth') && isProviderOAuthConfigured(provider);
+              const supportsSessionJson = provider.authTypes.includes('session_json');
+              const isOllama = provider.providerId === 'ollama';
+              const isOAuthMode = editor.authType === 'oauth';
+              const isSessionJsonMode = editor.authType === 'session_json';
+              const currentHostedCodexStatus = provider.providerId === 'openai-codex' ? codexHostedLoginStatus : null;
+              const statusClass = configured
+                ? (configured.isEnabled ? 'status-chip-active' : 'status-chip-expired')
+                : 'status-chip-revoked';
+              const statusLabel = configured
+                ? (configured.isEnabled ? 'Enabled' : 'Disabled')
+                : 'Not Configured';
+              const hasOAuthConnection = configured?.authType === 'oauth' && configured.hasCredentials;
+              const description = configured
+                ? (hasOAuthConnection
+                  ? 'OAuth token stored for this provider.'
+                  : configured.hasCredentials
+                    ? 'Stored credentials are available.'
+                    : isOllama && configured.settings?.baseUrl
+                      ? 'Remote endpoint is configured.'
+                      : 'Configuration exists but still needs credentials or endpoint details.')
+                : 'No saved configuration yet.';
+
+              return (
+                <article key={provider.providerId} className="provider-card">
+                  <div className="token-record-header">
+                    <div>
+                      <h3>{provider.name}</h3>
+                      <p className="summary-detail">{description}</p>
+                    </div>
+                    <span className={`status-chip ${statusClass}`}>{statusLabel}</span>
+                  </div>
+
+                  <div className="provider-card-meta">
+                    <span><code>{provider.providerId}</code></span>
+                    <span>Default {provider.defaultModel}</span>
+                    {configured?.updatedAt ? <span>Updated {formatDateTime(configured.updatedAt || undefined)}</span> : null}
+                    {configured?.tokenExpiresAt ? <span>Token Expires {formatDateTime(configured.tokenExpiresAt || undefined)}</span> : null}
+                    {provider.configUrl ? (
+                      <a href={provider.configUrl} target="_blank" rel="noreferrer">
+                        {provider.providerId === 'openai-codex' ? 'Open setup guide' : 'Get API Key'}
+                      </a>
+                    ) : null}
+                  </div>
+
+                  {provider.authTypes.length > 1 ? (
+                    <label className="field">
+                      <span>Authentication</span>
+                      <select
+                        value={editor.authType}
+                        onChange={(event) => updateProviderEditor(provider.providerId, { authType: event.target.value })}
+                        disabled={pending}
+                      >
+                        {provider.authTypes.map((authType) => (
+                          <option key={authType} value={authType}>{formatProviderAuthType(authType)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="summary-detail provider-auth-note">Authentication: {formatProviderAuthType(editor.authType)}</p>
+                  )}
+
+                  <div className="provider-form-grid">
+                    <label className="field">
+                      <span>Default Model</span>
+                      <input
+                        type="text"
+                        value={editor.defaultModel}
+                        onChange={(event) => updateProviderEditor(provider.providerId, { defaultModel: event.target.value })}
+                        placeholder={provider.defaultModel}
+                        disabled={pending}
+                      />
+                    </label>
+
+                    {isOllama ? (
+                      <label className="field">
+                        <span>Base URL</span>
+                        <input
+                          type="url"
+                          value={editor.baseUrl}
+                          onChange={(event) => updateProviderEditor(provider.providerId, { baseUrl: event.target.value })}
+                          placeholder="http://localhost:11434"
+                          disabled={pending}
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+
+                  {supportsApiKey && !isOAuthMode ? (
+                    <label className="field">
+                      <span>API Key</span>
+                      <input
+                        type="password"
+                        value={editor.apiKey}
+                        onChange={(event) => updateProviderEditor(provider.providerId, { apiKey: event.target.value })}
+                        placeholder={configured?.hasCredentials ? 'Leave blank to keep the stored key' : 'Paste API key'}
+                        disabled={pending}
+                      />
+                    </label>
+                  ) : null}
+
+
+                  {supportsSessionJson && isSessionJsonMode ? (
+                    <label className="field">
+                      <span>Codex Session JSON</span>
+                      <textarea
+                        rows={8}
+                        value={editor.sessionJson}
+                        onChange={(event) => updateProviderEditor(provider.providerId, { sessionJson: event.target.value })}
+                        placeholder={configured?.hasCredentials
+                          ? 'Leave blank to keep the stored Codex session JSON'
+                          : 'Paste the contents of ~/.codex/auth.json'}
+                        disabled={pending}
+                        className="document-content-editor"
+                        spellCheck={false}
+                      />
+                    </label>
+                  ) : null}
+                  {supportsOAuth && isOAuthMode ? (
+                    <p className="summary-detail provider-auth-note">
+                      OAuth uses a browser redirect. Save any default model changes, then connect the provider for this account.
+                    </p>
+                  ) : null}
+
+
+                  {supportsSessionJson && isSessionJsonMode ? (
+                    <p className="summary-detail provider-auth-note">
+                      The stored session JSON is encrypted, then materialized only inside the user&apos;s isolated workspace runtime so Codex runs under that user&apos;s own subscription.
+                    </p>
+                  ) : null}
+
+                  {provider.providerId === 'openai-codex' && supportsSessionJson && isSessionJsonMode ? (
+                    <section className="created-token-panel">
+                      <div className="panel-header compact-header">
+                        <div>
+                          <h3>Hosted Codex Sign-In</h3>
+                          <p className="summary-detail">Run device auth inside the user&apos;s isolated workspace or pod, finish the browser sign-in, then complete the connection to save the session for this account.</p>
+                        </div>
+                      </div>
+
+                      <dl className="facts-list compact-facts">
+                        <div className="fact-row"><dt>Status</dt><dd>{!currentHostedCodexStatus ? 'Not started' : currentHostedCodexStatus.authFileAvailable ? 'Ready to complete' : currentHostedCodexStatus.isRunning ? 'Waiting for authentication' : 'Idle'}</dd></div>
+                        <div className="fact-row"><dt>Runtime Auth</dt><dd>{currentHostedCodexStatus?.authFileAvailable ? 'Present' : 'Missing'}</dd></div>
+                      </dl>
+
+                      <div className="action-row">
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, onStartHostedCodexLogin)}
+                          disabled={pending}
+                        >
+                          Start Hosted Sign-In
+                        </button>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, onRefreshHostedCodexLoginStatus)}
+                          disabled={pending}
+                        >
+                          Refresh Status
+                        </button>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, onCompleteHostedCodexLogin)}
+                          disabled={pending}
+                        >
+                          Complete Sign-In
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-danger"
+                          onClick={() => void runProviderAction(provider.providerId, onCancelHostedCodexLogin)}
+                          disabled={pending}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      <textarea
+                        readOnly
+                        rows={8}
+                        value={currentHostedCodexStatus?.log || currentHostedCodexStatus?.message || 'No hosted sign-in activity yet.'}
+                        className="document-content-editor"
+                        spellCheck={false}
+                      />
+                    </section>
+                  ) : null}
+
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={() => void runProviderAction(provider.providerId, async () => {
+                        await onSaveProviderConfig(provider.providerId, editor);
+                        updateProviderEditor(provider.providerId, { apiKey: '', sessionJson: '' });
+                      })}
+                      disabled={pending}
+                    >
+                      Save Settings
+                    </button>
+                    {supportsOAuth && isOAuthMode ? (
+                      hasOAuthConnection ? (
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, () => onDisconnectProviderOAuth(provider.providerId))}
+                          disabled={pending}
+                        >
+                          Disconnect OAuth
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, async () => {
+                            await onSaveProviderConfig(provider.providerId, editor);
+                            await onStartProviderOAuth(provider.providerId);
+                          })}
+                          disabled={pending}
+                        >
+                          Connect OAuth
+                        </button>
+                      )
+                    ) : null}
+                    {configured ? (
+                      <button
+                        type="button"
+                        className="button"
+                        onClick={() => void runProviderAction(provider.providerId, () => onToggleProvider(provider.providerId))}
+                        disabled={pending}
+                      >
+                        {configured.isEnabled ? 'Disable' : 'Enable'}
+                      </button>
+                    ) : null}
+                    {configured ? (
+                      <button
+                        type="button"
+                        className="button button-danger"
+                        onClick={() => void runProviderAction(provider.providerId, () => onDeleteProvider(provider.providerId))}
+                        disabled={pending}
+                      >
+                        Delete
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="panel">
@@ -2401,6 +2739,7 @@ function AccountView({
     </section>
   );
 }
+
 type UsageViewProps = {
   activeBrainId: string;
   authSession: StoredAuthSession;
@@ -2458,411 +2797,7 @@ function UsageView({ activeBrainId, authSession, billing, context }: UsageViewPr
     </section>
   );
 }
-type DocumentsViewProps = {
-  activeBrain: BrainSummary | null;
-  activeBrainId: string;
-  brains: BrainSummary[];
-  documentDraft: DocumentDraft;
-  documentError: string | null;
-  documentFilter: string;
-  documentGroups: DocumentGroup[];
-  documentIsDirty: boolean;
-  documentLoading: boolean;
-  documentSaveMessage: string;
-  documentSaveState: DocumentSaveState;
-  documentVersions: DocumentVersionSummary[];
-  documents: DocumentSummary[];
-  documentsError: string | null;
-  documentsLoading: boolean;
-  filteredDocuments: DocumentSummary[];
-  isCreatingDocument: boolean;
-  onChangeBrain: (brainId: string) => void;
-  onChangeDocumentFilter: (filter: string) => void;
-  onCreateDocument: () => void;
-  onDeleteDocument: () => void;
-  onDraftChange: <K extends keyof DocumentDraft>(field: K, value: DocumentDraft[K]) => void;
-  onExportDocument: () => void;
-  onImportDocument: (file: File | null) => void;
-  onRefreshDocuments: () => void;
-  onRefreshVersions: () => void;
-  onRestoreVersion: () => void;
-  onRevertDocument: () => void;
-  onSaveDocument: () => void;
-  onSelectDocument: (documentId: string) => void;
-  onSelectVersion: (versionId: string) => void;
-  selectedDocument: DocumentDetail | null;
-  selectedDocumentId: string | null;
-  selectedVersion: DocumentVersionDetail | null;
-  selectedVersionId: string | null;
-  versionError: string | null;
-  versionLoading: boolean;
-  versionsError: string | null;
-  versionsLoading: boolean;
-};
 
-function DocumentsView({
-  activeBrain,
-  activeBrainId,
-  brains,
-  documentDraft,
-  documentError,
-  documentFilter,
-  documentGroups,
-  documentIsDirty,
-  documentLoading,
-  documentSaveMessage,
-  documentSaveState,
-  documentVersions,
-  documents,
-  documentsError,
-  documentsLoading,
-  filteredDocuments,
-  isCreatingDocument,
-  onChangeBrain,
-  onChangeDocumentFilter,
-  onCreateDocument,
-  onDeleteDocument,
-  onDraftChange,
-  onExportDocument,
-  onImportDocument,
-  onRefreshDocuments,
-  onRefreshVersions,
-  onRestoreVersion,
-  onRevertDocument,
-  onSaveDocument,
-  onSelectDocument,
-  onSelectVersion,
-  selectedDocument,
-  selectedDocumentId,
-  selectedVersion,
-  selectedVersionId,
-  versionError,
-  versionLoading,
-  versionsError,
-  versionsLoading
-}: DocumentsViewProps) {
-  const importInputRef = useRef<HTMLInputElement | null>(null);
-  const renderedDocumentMarkup = useMemo(
-    () => ({ __html: renderMarkdown(documentDraft.content || '') }),
-    [documentDraft.content]
-  );
-  const renderedVersionMarkup = useMemo(
-    () => ({ __html: renderMarkdown(selectedVersion?.content || '') }),
-    [selectedVersion]
-  );
-  const saveStatusClassName = [
-    'document-save-status',
-    documentSaveState === 'saving' || documentSaveState === 'info'
-      ? 'status-info'
-      : documentSaveState === 'error'
-        ? 'status-error'
-        : documentSaveState === 'warn'
-          ? 'status-warn'
-          : ''
-  ].filter(Boolean).join(' ');
-  const detailTitle = isCreatingDocument
-    ? 'New Document'
-    : (selectedDocument?.title || 'Document Editor');
-  const detailMeta = isCreatingDocument
-    ? (documentIsDirty ? 'Unsaved draft for the active managed-content brain.' : 'Ready to create a new managed-content document.')
-    : selectedDocument
-      ? `${selectedDocument.status || 'draft'} | ${selectedDocument.slug || '(no slug)'} | ${selectedDocument.canonicalPath || '(no canonical path)'} | updated ${formatDateTime(selectedDocument.updatedAt)}`
-      : 'Select a document to inspect or edit its content.';
-
-  return (
-    <section className="portal-layout">
-      <article className="panel portal-hero">
-        <p className="eyebrow">Documents</p>
-        <h2>Managed-content authoring is now part of the main portal experience.</h2>
-        <p className="summary-detail">
-          The document rail, editor draft, export flow, save path, delete path, and version history all use the tenant APIs directly.
-        </p>
-      </article>
-
-      <section className="panel workspace-toolbar">
-        <label className="field">
-          <span>Brain</span>
-          <select value={activeBrainId} onChange={(event) => onChangeBrain(event.target.value)} disabled={brains.length === 0}>
-            {brains.length === 0 ? <option value="">No brains available</option> : null}
-            {brains.map((brain) => (
-              <option key={brain.brainId} value={brain.brainId}>
-                {brain.name} | {brain.mode} | {brain.status}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Filter</span>
-          <input
-            type="search"
-            placeholder="Filter by title, slug, or path"
-            value={documentFilter}
-            onChange={(event) => onChangeDocumentFilter(event.target.value)}
-          />
-        </label>
-        <div className="action-row toolbar-actions">
-          <button type="button" className="button button-primary" onClick={onCreateDocument} disabled={!activeBrainId || documentsLoading}>
-            New Document
-          </button>
-          <button type="button" className="button" onClick={() => importInputRef.current?.click()} disabled={!activeBrainId || documentsLoading}>
-            Import Markdown
-          </button>
-          <button type="button" className="button" onClick={onRefreshDocuments} disabled={!activeBrainId || documentsLoading}>
-            Refresh Documents
-          </button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".md,text/markdown"
-            className="hidden-input"
-            onChange={(event) => {
-              const file = event.target.files?.[0] || null;
-              onImportDocument(file);
-              event.target.value = '';
-            }}
-          />
-        </div>
-      </section>
-
-      {documentsError ? <section className="banner error-banner" role="alert">{documentsError}</section> : null}
-      {documentError ? <section className="banner error-banner" role="alert">{documentError}</section> : null}
-      {versionsError ? <section className="banner error-banner" role="alert">{versionsError}</section> : null}
-      {versionError ? <section className="banner error-banner" role="alert">{versionError}</section> : null}
-      {documentsLoading ? <section className="banner info-banner">Refreshing document rail...</section> : null}
-
-      <section className="documents-layout">
-        <aside className="panel rail-panel">
-          <div className="panel-header compact-header">
-            <div>
-              <h3>Document List</h3>
-              <p className="summary-detail">
-                {activeBrain
-                  ? `${documents.length} document(s) loaded for ${activeBrain.name}.`
-                  : 'Select a managed-content brain to inspect its documents.'}
-              </p>
-            </div>
-          </div>
-
-          {!activeBrainId ? (
-            <div className="empty-state">No managed-content brain is available for this workspace yet.</div>
-          ) : filteredDocuments.length === 0 ? (
-            <div className="empty-state">
-              {documents.length === 0 ? 'No documents exist in this brain yet.' : 'No documents match the current filter.'}
-            </div>
-          ) : (
-            <div className="document-list" aria-label="Managed document list">
-              {documentGroups.map((group) => (
-                <section key={group.directoryPath || '__root'} className="document-folder-group">
-                  <div
-                    className={group.directoryPath ? 'document-folder-header' : 'document-folder-header root-folder'}
-                    style={group.directoryPath ? { paddingLeft: `${group.depth * 16}px` } : undefined}
-                  >
-                    <span className="document-folder-name">{group.directoryPath ? group.label : 'Root'}</span>
-                    <span className="document-folder-count">{group.documents.length}</span>
-                  </div>
-
-                  {group.documents.map((document) => {
-                    const fileName = getDocumentFileName(document);
-                    const pathDisplay = document.canonicalPath || `${document.slug || fileName}.md`;
-                    const selected = !isCreatingDocument && document.managedDocumentId === selectedDocumentId;
-
-                    return (
-                      <button
-                        key={document.managedDocumentId}
-                        type="button"
-                        className={selected ? 'document-list-item selected-row' : 'document-list-item'}
-                        style={{ marginLeft: `${group.depth * 16}px` }}
-                        onClick={() => onSelectDocument(document.managedDocumentId)}
-                      >
-                        <span className="document-list-title">{fileName}</span>
-                        <span className="document-list-subtitle">{document.title || '(untitled)'}</span>
-                        <span className="document-list-meta">
-                          <span>{document.status || 'draft'}</span>
-                          <span>{pathDisplay}</span>
-                          <span>{formatDateTime(document.updatedAt)}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </section>
-              ))}
-            </div>
-          )}
-        </aside>
-
-        <section className="panel editor-panel">
-          <div className="panel-header compact-header">
-            <div>
-              <h3>{detailTitle}</h3>
-              <p className="summary-detail">{detailMeta}</p>
-            </div>
-            <div className="action-row">
-              <button type="button" className="button button-primary" onClick={onSaveDocument} disabled={!activeBrainId || documentSaveState === 'saving'}>
-                Save Document
-              </button>
-              <button type="button" className="button" onClick={onExportDocument}>
-                Export Markdown
-              </button>
-              <button type="button" className="button" onClick={onRevertDocument}>
-                Revert
-              </button>
-              <button type="button" className="button button-danger" onClick={onDeleteDocument} disabled={isCreatingDocument || !selectedDocument}>
-                Delete
-              </button>
-            </div>
-          </div>
-
-          <p className={saveStatusClassName}>{documentSaveMessage}</p>
-          {documentLoading ? <p className="document-save-status">Loading selected document...</p> : null}
-
-          <div className="document-editor-grid">
-            <label className="field">
-              <span>Title</span>
-              <input
-                type="text"
-                placeholder="Untitled document"
-                value={documentDraft.title}
-                onChange={(event) => onDraftChange('title', event.target.value)}
-                disabled={!activeBrainId}
-              />
-            </label>
-            <label className="field">
-              <span>Filename / Path</span>
-              <input
-                type="text"
-                placeholder="folder/file-name"
-                value={documentDraft.slug}
-                onChange={(event) => onDraftChange('slug', event.target.value)}
-                disabled={!activeBrainId}
-              />
-            </label>
-            <label className="field">
-              <span>Status</span>
-              <select
-                value={documentDraft.status}
-                onChange={(event) => onDraftChange('status', event.target.value)}
-                disabled={!activeBrainId}
-              >
-                <option value="draft">draft</option>
-                <option value="published">published</option>
-                <option value="archived">archived</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="document-detail-stack">
-            <label className="field">
-              <span>Frontmatter</span>
-              <textarea
-                className="document-frontmatter-editor"
-                rows={6}
-                placeholder="category: reference&#10;owner: steph"
-                value={documentDraft.frontmatterText}
-                onChange={(event) => onDraftChange('frontmatterText', event.target.value)}
-                disabled={!activeBrainId}
-              />
-            </label>
-
-            <label className="field">
-              <span>Markdown Content</span>
-              <textarea
-                className="document-content-editor"
-                rows={16}
-                placeholder="Write Markdown content here."
-                value={documentDraft.content}
-                onChange={(event) => onDraftChange('content', event.target.value)}
-                disabled={!activeBrainId}
-              />
-            </label>
-
-            <section className="rendered-section">
-              <div className="panel-header compact-header">
-                <div>
-                  <h3>Rendered Document</h3>
-                  <p className="summary-detail">Live browser rendering of the current Markdown draft.</p>
-                </div>
-              </div>
-              <div className="markdown-preview" dangerouslySetInnerHTML={renderedDocumentMarkup} />
-            </section>
-
-            <section className="version-section">
-              <div className="panel-header compact-header">
-                <div>
-                  <h3>Version History</h3>
-                  <p className="summary-detail">Saved snapshots for the current document. Select one to expand it. Only one version stays open at a time.</p>
-                </div>
-                <div className="action-row">
-                  <button type="button" className="button" onClick={onRefreshVersions} disabled={!selectedDocument || isCreatingDocument || versionsLoading}>
-                    Refresh Versions
-                  </button>
-                </div>
-              </div>
-
-              {versionsLoading ? <p className="document-save-status">Loading version history...</p> : null}
-
-              {isCreatingDocument ? (
-                <div className="empty-state">Save the new document to start accumulating versions.</div>
-              ) : !selectedDocument ? (
-                <div className="empty-state">Select a document to load version history.</div>
-              ) : documentVersions.length === 0 ? (
-                <div className="empty-state">No saved versions exist for this document yet.</div>
-              ) : (
-                <div className="version-list" role="list" aria-label="Managed document version list">
-                  {documentVersions.map((version) => {
-                    const selected = version.managedDocumentVersionId === selectedVersionId;
-                    const showInlinePreview = selected && selectedVersion?.managedDocumentVersionId === version.managedDocumentVersionId;
-                    const isCurrentVersion = isCurrentDocumentVersion(selectedDocument, version);
-
-                    return (
-                      <article key={version.managedDocumentVersionId} className={selected ? 'version-card selected-row' : 'version-card'}>
-                        <button
-                          type="button"
-                          className="version-list-item"
-                          aria-expanded={selected}
-                          onClick={() => onSelectVersion(version.managedDocumentVersionId)}
-                        >
-                          <span className="version-list-title">{formatDateTime(version.createdAt)}</span>
-                          <span className="version-list-meta">
-                            <span>{version.snapshotKind || 'snapshot'}</span>
-                            <span>{version.status || 'draft'}</span>
-                            <span>{String(version.wordCount || 0)} words</span>
-                            <span>{version.snapshotBy || 'Unknown'}</span>
-                          </span>
-                        </button>
-
-                        {selected ? (
-                          <section className="version-card-body">
-                            <div className="panel-header compact-header">
-                              <div>
-                                <h3>Rendered Version</h3>
-                                <p className="summary-detail">
-                                  {selectedVersion
-                                    ? `${selectedVersion.snapshotKind || 'snapshot'} | ${selectedVersion.status || 'draft'} | ${formatDateTime(selectedVersion.createdAt)} | ${selectedVersion.snapshotBy || 'Unknown'}`
-                                    : 'Loading selected version...'}
-                                </p>
-                              </div>
-                              <div className="action-row">
-                                <button type="button" className="button" onClick={onRestoreVersion} disabled={isCurrentVersion || !showInlinePreview || versionLoading}>
-                                  {isCurrentVersion ? 'Current Version' : 'Restore This Version'}
-                                </button>
-                              </div>
-                            </div>
-                            {versionLoading && !showInlinePreview ? <p className="document-save-status">Loading selected version...</p> : null}
-                            <div className="markdown-preview version-preview" dangerouslySetInnerHTML={showInlinePreview ? renderedVersionMarkup : { __html: '<p>Loading selected version...</p>' }} />
-                          </section>
-                        ) : null}
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          </div>
-        </section>
-      </section>
-    </section>
-  );
-}
 function navigateToView(view: PortalView, authSession: StoredAuthSession | null, setActiveView: (view: PortalView) => void) {
   const resolved = canNavigateToView(view, authSession) ? view : resolveDefaultView(authSession);
   const nextHash = `#${resolved}`;
@@ -3047,6 +2982,108 @@ async function postJson(url: string, body: unknown) {
   return payload;
 }
 
+function buildProviderEditors(
+  availableProviders: AvailableProvider[],
+  configuredProviders: ConfiguredProviderSummary[]
+) {
+  return availableProviders.reduce<Record<string, ProviderEditorState>>((accumulator, provider) => {
+    const configured = configuredProviders.find((candidate) => candidate.providerId === provider.providerId) || null;
+    accumulator[provider.providerId] = buildProviderEditorState(provider, configured);
+    return accumulator;
+  }, {});
+}
+
+function buildProviderEditorState(
+  provider: AvailableProvider | null,
+  configured: ConfiguredProviderSummary | null
+): ProviderEditorState {
+  const defaultAuthType = configured?.authType
+    || (provider?.authTypes.includes('api_key') ? 'api_key' : provider?.authTypes[0] || 'api_key');
+
+  return {
+    authType: defaultAuthType,
+    apiKey: '',
+    sessionJson: '',
+    defaultModel: configured?.settings?.defaultModel || provider?.defaultModel || '',
+    baseUrl: configured?.settings?.baseUrl || '',
+  };
+}
+
+function buildProviderConfigRequest(
+  providerId: string,
+  editor: ProviderEditorState,
+  configuredProviders: ConfiguredProviderSummary[]
+) {
+  const configured = configuredProviders.find((candidate) => candidate.providerId === providerId) || null;
+  const settings: Record<string, unknown> = {};
+  const defaultModel = editor.defaultModel.trim();
+  const baseUrl = editor.baseUrl.trim();
+
+  if (defaultModel) {
+    settings.defaultModel = defaultModel;
+  }
+
+  if (baseUrl) {
+    settings.baseUrl = baseUrl;
+  }
+
+  const request: Record<string, unknown> = {
+    authType: editor.authType,
+    isEnabled: configured?.isEnabled ?? true,
+  };
+
+  if (Object.keys(settings).length > 0) {
+    request.settings = settings;
+  }
+
+  if (editor.authType === 'api_key' && editor.apiKey.trim()) {
+    request.apiKey = editor.apiKey.trim();
+  }
+
+  if (editor.authType === 'session_json' && editor.sessionJson.trim()) {
+    request.sessionJson = editor.sessionJson.trim();
+  }
+
+  return request;
+}
+
+function isProviderReady(provider: ConfiguredProviderSummary) {
+  if (!provider.isEnabled) {
+    return false;
+  }
+
+  const authType = String(provider.authType || '').toLowerCase();
+  if (provider.providerId === 'ollama' || authType === 'none') {
+    return Boolean(provider.settings?.baseUrl?.trim());
+  }
+
+  return provider.hasCredentials;
+}
+
+function isProviderOAuthConfigured(provider: AvailableProvider) {
+  return Boolean(provider.oauthConfigured ?? provider.OAuthConfigured);
+}
+
+function formatProviderAuthType(authType: string) {
+  switch (String(authType || '').toLowerCase()) {
+    case 'api_key':
+      return 'API Key';
+    case 'oauth':
+      return 'OAuth';
+    case 'session_json':
+      return 'Session JSON';
+    case 'none':
+      return 'None';
+    default:
+      return authType || 'Unknown';
+  }
+}
+
+function buildPortalOAuthReturnUrl() {
+  return new URL('/app#account', window.location.origin).toString();
+}
+
+
 function extractErrorMessage(payload: unknown, status: number) {
   if (typeof payload === 'string' && payload.trim()) {
     return payload;
@@ -3155,220 +3192,6 @@ function getDocumentFileName(document: DocumentSummary) {
   return baseName || 'document';
 }
 
-function buildEmptyDocumentDraft(): DocumentDraft {
-  return {
-    title: '',
-    slug: '',
-    status: 'draft',
-    frontmatterText: '',
-    content: '',
-  };
-}
-
-function buildDraftFromDocument(document: DocumentDetail): DocumentDraft {
-  return {
-    title: document.title || '',
-    slug: document.slug || '',
-    status: document.status || 'draft',
-    frontmatterText: serializeFrontmatter(document.frontmatter || {}),
-    content: document.content || '',
-  };
-}
-
-function normalizeDocumentDraft(draft: DocumentDraft): DocumentDraft {
-  return {
-    title: String(draft.title || '').trim(),
-    slug: String(draft.slug || '').trim(),
-    status: String(draft.status || 'draft').trim() || 'draft',
-    frontmatterText: String(draft.frontmatterText || '').replace(/\r\n/g, '\n').trim(),
-    content: String(draft.content || '').replace(/\r\n/g, '\n'),
-  };
-}
-
-function hasUnsavedDocumentChanges(draft: DocumentDraft, isCreatingDocument: boolean, selectedDocument: DocumentDetail | null) {
-  const currentDraft = normalizeDocumentDraft(draft);
-  if (isCreatingDocument) {
-    return JSON.stringify(currentDraft) !== JSON.stringify(normalizeDocumentDraft(buildEmptyDocumentDraft()));
-  }
-
-  if (!selectedDocument) {
-    return false;
-  }
-
-  return JSON.stringify(currentDraft) !== JSON.stringify(normalizeDocumentDraft(buildDraftFromDocument(selectedDocument)));
-}
-
-function confirmDiscardDocumentChanges(isDirty: boolean, message: string) {
-  if (!isDirty) {
-    return true;
-  }
-
-  return window.confirm(message);
-}
-
-function buildDocumentPayload(draft: DocumentDraft) {
-  if (!draft.title) {
-    throw new Error('Title is required.');
-  }
-
-  return {
-    title: draft.title,
-    slug: draft.slug || null,
-    status: draft.status || 'draft',
-    content: draft.content || '',
-    frontmatter: parseFrontmatterText(draft.frontmatterText),
-  };
-}
-
-function parseImportedMarkdown(markdown: string, fileName: string): DocumentDraft {
-  const normalized = String(markdown || '').replace(/\r\n/g, '\n');
-  let frontmatterText = '';
-  let content = normalized;
-
-  if (normalized.startsWith('---\n')) {
-    const endIndex = normalized.indexOf('\n---\n', 4);
-    const alternateEndIndex = normalized.indexOf('\n...\n', 4);
-    const closingIndex = endIndex >= 0 ? endIndex : alternateEndIndex;
-
-    if (closingIndex < 0) {
-      throw new Error('Imported Markdown frontmatter is missing a closing --- or ... line.');
-    }
-
-    frontmatterText = normalized.slice(4, closingIndex).trim();
-    content = normalized.slice(closingIndex + 5);
-  }
-
-  const parsedFrontmatter = parseFrontmatterText(frontmatterText);
-  const title = deriveImportedDocumentTitle(content, parsedFrontmatter, fileName);
-  const slug = deriveImportedDocumentSlug(parsedFrontmatter, title, fileName);
-
-  return {
-    title,
-    slug,
-    status: 'draft',
-    frontmatterText: serializeFrontmatter(parsedFrontmatter),
-    content: content.replace(/^\n+/, ''),
-  };
-}
-
-function deriveImportedDocumentTitle(content: string, frontmatter: Record<string, string>, fileName: string) {
-  const frontmatterTitle = String(frontmatter.title || '').trim();
-  if (frontmatterTitle) {
-    return frontmatterTitle;
-  }
-
-  const headingMatch = String(content || '').match(/^\s*#\s+(.+)$/m);
-  if (headingMatch?.[1]) {
-    return headingMatch[1].trim();
-  }
-
-  const fileStem = String(fileName || '').replace(/\.[^.]+$/, '').trim();
-  if (fileStem) {
-    return fileStem;
-  }
-
-  return 'Imported document';
-}
-
-function deriveImportedDocumentSlug(frontmatter: Record<string, string>, title: string, fileName: string) {
-  const explicitSlug = String(frontmatter.slug || '').trim();
-  if (explicitSlug) {
-    return normalizeDocumentPath(explicitSlug);
-  }
-
-  const titleSlug = normalizeDocumentPath(title);
-  if (titleSlug) {
-    return titleSlug;
-  }
-
-  return normalizeDocumentPath(String(fileName || '').replace(/\.[^.]+$/, ''));
-}
-
-function buildMarkdownExport(draft: DocumentDraft, selectedDocument: DocumentDetail | null) {
-  const frontmatter = parseFrontmatterText(draft.frontmatterText);
-  const parts: string[] = [];
-
-  if (Object.keys(frontmatter).length > 0) {
-    parts.push('---');
-    parts.push(serializeFrontmatter(frontmatter));
-    parts.push('---');
-    parts.push('');
-  }
-
-  parts.push(String(draft.content || '').replace(/\r\n/g, '\n').replace(/\s+$/, ''));
-  return parts.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
-}
-
-function buildDocumentExportFileName(draft: DocumentDraft, selectedDocument: DocumentDetail | null) {
-  const slug = normalizeDocumentPath(draft.slug || draft.title || selectedDocument?.slug || selectedDocument?.title || 'document');
-  return `${slug || 'document'}.md`;
-}
-
-function normalizeDocumentPath(value: string) {
-  const normalized = String(value || '')
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/\.md$/i, '');
-
-  if (!normalized) {
-    return '';
-  }
-
-  return normalized
-    .split('/')
-    .map((segment) => String(segment || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, ''))
-    .filter(Boolean)
-    .join('/');
-}
-
-function downloadTextFile(fileName: string, content: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function parseFrontmatterText(value: string) {
-  const result: Record<string, string> = {};
-  const lines = String(value || '').split(/\r?\n/);
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index].trim();
-    if (!line || line === '---' || line === '...' || line.startsWith('#')) {
-      continue;
-    }
-
-    const separatorIndex = line.indexOf(':');
-    if (separatorIndex <= 0) {
-      throw new Error(`Frontmatter line ${index + 1} must use 'key: value'.`);
-    }
-
-    const key = line.slice(0, separatorIndex).trim();
-    const lineValue = line.slice(separatorIndex + 1).trim();
-    if (!key) {
-      throw new Error(`Frontmatter line ${index + 1} is missing a key.`);
-    }
-
-    result[key] = lineValue;
-  }
-
-  return result;
-}
-
-function serializeFrontmatter(frontmatter: Record<string, unknown>) {
-  return Object.entries(frontmatter)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join('\n');
-}
 function isCurrentDocumentVersion(document: DocumentDetail | null, version: DocumentVersionSummary | DocumentVersionDetail) {
   if (!document?.updatedAt || !version.createdAt) {
     return false;
@@ -3382,6 +3205,44 @@ function isCurrentDocumentVersion(document: DocumentDetail | null, version: Docu
 
   return documentTimestamp === versionTimestamp;
 }
+function normalizeMemoryDraftForEdit(draft: DocumentDraft) {
+  const normalized = normalizeDocumentDraft(draft);
+  return normalized.slug
+    ? { ...normalized, slug: ensureMemoryPathPrefix(normalized.slug) }
+    : normalized;
+}
+
+function normalizeMemoryDraftForSave(draft: DocumentDraft) {
+  const normalized = normalizeDocumentDraft(draft);
+  const fallback = normalized.slug || normalized.title || 'memory';
+  return {
+    ...normalized,
+    slug: ensureMemoryPathPrefix(fallback),
+  };
+}
+
+function ensureMemoryPathPrefix(value: string) {
+  const normalized = normalizeDocumentPath(value);
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized.startsWith('memories/') ? normalized : `memories/${normalized}`;
+}
+function confirmDiscardDocumentChanges(isDirty: boolean, message: string) {
+  return !isDirty || window.confirm(message);
+}
+
+function downloadTextFile(fileName: string, content: string, contentType: string) {
+  const blob = new Blob([content], { type: contentType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
 function getTokenStatus(token: TokenSummary) {
   if (token.revokedAt) {
     return { label: 'Revoked', className: 'status-chip-revoked' };
@@ -3513,6 +3374,79 @@ function escapeHtml(value: unknown) {
     .replace(/"/g, '&quot;');
 }
 
+function buildMcpToolManifestUrl(baseUrl: string) {
+  if (!baseUrl) {
+    return '';
+  }
+
+  return baseUrl.endsWith('/mcp')
+    ? `${baseUrl.slice(0, -4)}/tool-manifest`
+    : `${baseUrl.replace(/\/$/, '')}/tool-manifest`;
+}
+
+function buildMcpConfigSnippet(url: string, tokenName: string) {
+  return JSON.stringify({
+    mcpServers: {
+      OpenCortex: {
+        url: url || 'https://your-mcp-host/mcp',
+        headers: {
+          Authorization: 'Bearer oct_replace_with_token',
+        },
+        notes: `Token label: ${tokenName}`,
+      },
+    },
+  }, null, 2);
+}
+
+function buildToolOql(brainId: string, search: string, rank: string, where: string, limit: string) {
+  if (!brainId) {
+    return '';
+  }
+
+  const lines = [`FROM brain("${brainId}")`];
+  if (search.trim()) {
+    lines.push(`SEARCH "${search.trim()}"`);
+  }
+  if (where.trim()) {
+    lines.push(`WHERE ${where.trim()}`);
+  }
+  lines.push(`RANK ${rank || 'hybrid'}`);
+  lines.push(`LIMIT ${limit || '5'}`);
+  return lines.join('\n');
+}
+
+function getToolResultKey(result: ToolQueryResultItem) {
+  return result.documentId || `${result.brainId || ''}::${result.canonicalPath || ''}`;
+}
+
+function renderToolFetchState(result: ToolQueryResultItem, fetchState: ToolFetchedDocumentState | null) {
+  if (!result.documentId && !result.canonicalPath) {
+    return <div className="empty-state">This result does not expose a retrievable document id or canonical path.</div>;
+  }
+
+  if (!fetchState) {
+    return <p className="tool-fetch-note">Fetch the stored document to inspect the full markdown behind this ranked snippet.</p>;
+  }
+
+  if (fetchState.status === 'loading') {
+    return <div className="empty-state">Fetching full document...</div>;
+  }
+
+  if (fetchState.status === 'error') {
+    return <div className="empty-state">{fetchState.message || 'Document fetch failed.'}</div>;
+  }
+
+  const document = fetchState.document;
+  return (
+    <>
+      <div className="tool-document-meta">
+        {document?.status || 'draft'} | {document?.canonicalPath || ''} | {String((document as { wordCount?: number } | undefined)?.wordCount ?? 0)} words | updated {formatDateTime(document?.updatedAt)}
+      </div>
+      <div className="tool-document-preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(document?.content || '') }} />
+    </>
+  );
+}
+
 function formatDateTime(value?: string) {
   if (!value) {
     return 'Unknown';
@@ -3542,49 +3476,4 @@ function handleClearSession() {
 }
 
 export default App;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
