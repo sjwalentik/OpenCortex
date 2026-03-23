@@ -767,9 +767,8 @@ if (!string.IsNullOrEmpty(encryptionKey))
 }
 else
 {
-    // Fallback for development - generate a key warning
-    validationErrors.Add("OpenCortex:Security:EncryptionKey is not set. User provider configs will not be encrypted properly.");
-    builder.Services.AddSingleton<ICredentialEncryption>(new AesCredentialEncryption("DEVELOPMENT_KEY_DO_NOT_USE_IN_PRODUCTION"));
+    throw new InvalidOperationException(
+        "OpenCortex:Security:EncryptionKey is not set. Startup is blocked because user provider credentials cannot be encrypted securely.");
 }
 
 // Register user provider configuration repository
