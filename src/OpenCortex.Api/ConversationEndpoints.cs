@@ -177,6 +177,7 @@ public static class ConversationEndpoints
             if (!string.IsNullOrWhiteSpace(request.Title))
             {
                 await conversationService.UpdateTitleAsync(conversationId, request.Title, cancellationToken);
+                conversation!.Title = request.Title;
             }
 
             if (request.UpdateRouting)
