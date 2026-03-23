@@ -114,6 +114,23 @@ type MemoryBrainPreference = {
   error?: string | null;
 };
 
+type WorkspaceRuntimeProfile = {
+  profileId: string;
+  name: string;
+  description: string;
+  isAvailable: boolean;
+};
+
+type WorkspaceRuntimePreference = {
+  scope?: string;
+  supportsManagedProfiles?: boolean;
+  configuredProfileId?: string | null;
+  effectiveProfileId?: string | null;
+  restartRequested?: boolean;
+  message?: string | null;
+  availableProfiles?: WorkspaceRuntimeProfile[];
+};
+
 export function resolveDocumentLinkBrainId(
   canonicalPath: string,
   activeBrainId: string,
@@ -386,6 +403,7 @@ function App() {
   const [billing, setBilling] = useState<PortalBilling | null>(null);
   const [brains, setBrains] = useState<BrainSummary[]>([]);
   const [memoryBrainPreference, setMemoryBrainPreference] = useState<MemoryBrainPreference | null>(null);
+  const [workspaceRuntimePreference, setWorkspaceRuntimePreference] = useState<WorkspaceRuntimePreference | null>(null);
   const [tokens, setTokens] = useState<TokenSummary[]>([]);
   const [availableProviders, setAvailableProviders] = useState<AvailableProvider[]>([]);
   const [configuredProviders, setConfiguredProviders] = useState<ConfiguredProviderSummary[]>([]);
@@ -572,6 +590,7 @@ function App() {
       setBilling(null);
       setBrains([]);
       setMemoryBrainPreference(null);
+      setWorkspaceRuntimePreference(null);
       setTokens([]);
       setAvailableProviders([]);
       setConfiguredProviders([]);
@@ -608,11 +627,12 @@ function App() {
           setAuthSession(session);
         }
 
-        const [workspaceContext, workspaceBilling, workspaceBrains, workspaceMemoryBrain, workspaceTokens, providerCatalog, providerConfigs] = await Promise.all([
+        const [workspaceContext, workspaceBilling, workspaceBrains, workspaceMemoryBrain, workspaceRuntime, workspaceTokens, providerCatalog, providerConfigs] = await Promise.all([
           portalFetch('/portal-api/tenant/me', session.idToken),
           portalFetch('/portal-api/tenant/billing/plan', session.idToken),
           portalFetch('/portal-api/tenant/brains', session.idToken),
           portalFetch('/portal-api/tenant/me/memory-brain', session.idToken),
+          portalFetch('/portal-api/tenant/me/workspace-runtime', session.idToken),
           portalFetch('/portal-api/tenant/tokens', session.idToken),
           portalFetch('/portal-api/api/providers/config/available', session.idToken),
           portalFetch('/portal-api/api/providers/config/', session.idToken)
@@ -633,6 +653,7 @@ function App() {
         setBilling(workspaceBilling as PortalBilling);
         setBrains(nextBrains);
         setMemoryBrainPreference(workspaceMemoryBrain as MemoryBrainPreference);
+        setWorkspaceRuntimePreference(workspaceRuntime as WorkspaceRuntimePreference);
         setTokens(nextTokens);
         setAvailableProviders(nextAvailableProviders);
         setConfiguredProviders(nextConfiguredProviders);
@@ -648,6 +669,7 @@ function App() {
           setBilling(null);
           setBrains([]);
           setMemoryBrainPreference(null);
+          setWorkspaceRuntimePreference(null);
           setTokens([]);
           setAvailableProviders([]);
           setConfiguredProviders([]);
@@ -1107,6 +1129,26 @@ async function handleOpenDocumentLink(rawPath: string) {
     }
   }
 
+
+  async function handleSaveWorkspaceRuntime(profileId: string) {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/tenant/me/workspace-runtime', session.idToken, {
+        method: 'PUT',
+        body: JSON.stringify({
+          profileId: profileId || null,
+        }),
+      }) as WorkspaceRuntimePreference;
+
+      setWorkspaceRuntimePreference(response);
+      setAccountActionMessage(response.restartRequested
+        ? 'Workspace runtime updated. Your isolated workspace will restart on the next request.'
+        : 'Workspace runtime preference saved.');
+      setRefreshNonce((value) => value + 1);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to save workspace runtime preference.');
+    }
+  }
   async function handleToggleProvider(providerId: string) {
     try {
       const session = await getValidSession();
@@ -1674,6 +1716,7 @@ const memoryViewBrains = memoryActiveBrain ? [memoryActiveBrain] : [];
             createdToken={createdToken}
             codexHostedLoginStatus={hostedCodexLoginStatus}
             memoryBrainPreference={memoryBrainPreference}
+            workspaceRuntimePreference={workspaceRuntimePreference}
             onCopyCreatedToken={handleCopyCreatedToken}
             onCreateToken={handleCreateToken}
             onCancelHostedCodexLogin={handleCancelHostedCodexLogin}
@@ -1686,6 +1729,7 @@ const memoryViewBrains = memoryActiveBrain ? [memoryActiveBrain] : [];
             onRequestWriteScopeChange={setRequestWriteScope}
             onRevokeToken={handleRevokeToken}
             onSaveMemoryBrain={handleSaveMemoryBrain}
+            onSaveWorkspaceRuntime={handleSaveWorkspaceRuntime}
             onSaveProviderConfig={handleSaveProviderConfig}
             onSignOut={handleSignOut}
             onStartHostedCodexLogin={handleStartHostedCodexLogin}
@@ -2187,6 +2231,7 @@ type AccountViewProps = {
   context: PortalContext | null;
   createdToken: CreatedTokenState | null;
   memoryBrainPreference: MemoryBrainPreference | null;
+  workspaceRuntimePreference: WorkspaceRuntimePreference | null;
   onCancelHostedCodexLogin: () => Promise<void>;
   onCompleteHostedCodexLogin: () => Promise<void>;
   onCopyCreatedToken: () => void;
@@ -2199,6 +2244,7 @@ type AccountViewProps = {
   onRequestWriteScopeChange: (value: boolean) => void;
   onRevokeToken: (apiTokenId: string) => void;
   onSaveMemoryBrain: (memoryBrainId: string) => Promise<void>;
+  onSaveWorkspaceRuntime: (profileId: string) => Promise<void>;
   onSaveProviderConfig: (providerId: string, editor: ProviderEditorState) => Promise<void>;
   onSignOut: () => void;
   onStartHostedCodexLogin: () => Promise<void>;
@@ -2223,6 +2269,7 @@ function AccountView({
   context,
   createdToken,
   memoryBrainPreference,
+  workspaceRuntimePreference,
   onCancelHostedCodexLogin,
   onCompleteHostedCodexLogin,
   onCopyCreatedToken,
@@ -2235,6 +2282,7 @@ function AccountView({
   onRequestWriteScopeChange,
   onRevokeToken,
   onSaveMemoryBrain,
+  onSaveWorkspaceRuntime,
   onSaveProviderConfig,
   onSignOut,
   onStartHostedCodexLogin,
@@ -2256,8 +2304,10 @@ function AccountView({
     buildProviderEditors(availableProviders, configuredProviders)
   );
   const [selectedMemoryBrainId, setSelectedMemoryBrainId] = useState('');
+  const [selectedWorkspaceRuntimeProfileId, setSelectedWorkspaceRuntimeProfileId] = useState('');
   const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
   const [memoryBrainPending, setMemoryBrainPending] = useState(false);
+  const [workspaceRuntimePending, setWorkspaceRuntimePending] = useState(false);
 
   useEffect(() => {
     setProviderEditors(buildProviderEditors(availableProviders, configuredProviders));
@@ -2266,6 +2316,13 @@ function AccountView({
   useEffect(() => {
     setSelectedMemoryBrainId(memoryBrainPreference?.configuredMemoryBrainId || '');
   }, [memoryBrainPreference]);
+
+  useEffect(() => {
+    setSelectedWorkspaceRuntimeProfileId(workspaceRuntimePreference?.configuredProfileId || '');
+  }, [workspaceRuntimePreference]);
+
+  const workspaceRuntimeSupportsManagedProfiles = workspaceRuntimePreference?.supportsManagedProfiles ?? false;
+  const hasWorkspaceRuntimeProfiles = (workspaceRuntimePreference?.availableProfiles?.length || 0) > 0;
 
   function updateProviderEditor(providerId: string, patch: Partial<ProviderEditorState>) {
     setProviderEditors((current) => ({
@@ -2420,6 +2477,74 @@ function AccountView({
             disabled={memoryBrainPending}
           >
             Save Memory Brain
+          </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>Workspace Runtime</h3>
+            <p className="summary-detail">Choose which managed runtime image backs your isolated workspace when container-based workspaces are enabled.</p>
+          </div>
+        </div>
+
+        <label className="field">
+          <span>Runtime Profile</span>
+          <select
+            value={selectedWorkspaceRuntimeProfileId}
+            onChange={(event) => setSelectedWorkspaceRuntimeProfileId(event.target.value)}
+            disabled={workspaceRuntimePending || !workspaceRuntimeSupportsManagedProfiles || !hasWorkspaceRuntimeProfiles}
+          >
+            <option value="">Default</option>
+            {(workspaceRuntimePreference?.availableProfiles || []).filter((profile) => profile.profileId !== 'default').map((profile) => (
+              <option key={profile.profileId} value={profile.profileId}>{profile.name}</option>
+            ))}
+          </select>
+        </label>
+
+        <dl className="facts-list compact-facts">
+          <div className="fact-row"><dt>Scope</dt><dd>{workspaceRuntimePreference?.scope || 'user'}</dd></div>
+          <div className="fact-row"><dt>Configured</dt><dd>{workspaceRuntimePreference?.configuredProfileId || 'Default'}</dd></div>
+          <div className="fact-row"><dt>Effective</dt><dd>{workspaceRuntimePreference?.effectiveProfileId || 'Default'}</dd></div>
+        </dl>
+
+        <p className="summary-detail">
+          {workspaceRuntimePreference?.message
+            || 'This preference applies to your isolated workspace runtime for this signed-in account. Changing it restarts the workspace so the next request uses the new image.'}
+        </p>
+
+        {!workspaceRuntimeSupportsManagedProfiles ? (
+          <div className="provider-inline-note">
+            Managed runtime profiles are disabled in local workspace mode. Switch to Docker or Kubernetes workspaces to use alternate runtime images.
+          </div>
+        ) : null}
+
+        {hasWorkspaceRuntimeProfiles ? (
+          <div className="stacked-list">
+            {(workspaceRuntimePreference?.availableProfiles || []).filter((profile) => profile.profileId !== 'default').map((profile) => (
+              <div key={profile.profileId} className="provider-inline-note">
+                <strong>{profile.name}</strong>: {profile.description}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="action-row">
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={async () => {
+              setWorkspaceRuntimePending(true);
+              try {
+                await onSaveWorkspaceRuntime(selectedWorkspaceRuntimeProfileId);
+              } finally {
+                setWorkspaceRuntimePending(false);
+              }
+            }}
+            disabled={workspaceRuntimePending || !workspaceRuntimeSupportsManagedProfiles}
+          >
+            Save Workspace Runtime
           </button>
         </div>
       </section>
@@ -3476,4 +3601,6 @@ function handleClearSession() {
 }
 
 export default App;
+
+
 

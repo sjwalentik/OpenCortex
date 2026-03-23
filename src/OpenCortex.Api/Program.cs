@@ -795,6 +795,8 @@ builder.Services.AddSingleton<IManagedContentBrainIndexingService>(_ =>
         embeddingProvider));
 builder.Services.AddSingleton<IUserMemoryPreferenceStore>(sp =>
     new PostgresUserMemoryPreferenceStore(connectionFactory));
+builder.Services.AddSingleton<IUserWorkspaceRuntimeProfileStore>(sp =>
+    new PostgresUserWorkspaceRuntimeProfileStore(connectionFactory));
 
 // Register OAuth service for provider authentication
 builder.Services.Configure<ProviderOAuthConfig>(builder.Configuration.GetSection(ProviderOAuthConfig.SectionName));
@@ -1231,6 +1233,8 @@ if (hostedAuthConfigured)
 
     tenantRoutes.MapGet("/me/memory-brain", MemoryBrainEndpoints.GetMemoryBrainAsync);
     tenantRoutes.MapPut("/me/memory-brain", MemoryBrainEndpoints.UpdateMemoryBrainAsync);
+    tenantRoutes.MapGet("/me/workspace-runtime", WorkspaceRuntimeEndpoints.GetWorkspaceRuntimeAsync);
+    tenantRoutes.MapPut("/me/workspace-runtime", WorkspaceRuntimeEndpoints.UpdateWorkspaceRuntimeAsync);
 
     tenantRoutes.MapGet("/brains", async (
         System.Security.Claims.ClaimsPrincipal user,

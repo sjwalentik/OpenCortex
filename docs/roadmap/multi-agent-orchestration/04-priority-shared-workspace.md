@@ -12,7 +12,7 @@ Enable multiple agents to safely read and write shared documents and workspace f
 
 This priority adds document locking, change tracking, and workspace coordination for multi-agent collaboration.
 
-Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` is now part of the real sequence. Planned shared-workspace migrations in this document should therefore use `0014_document_locks.sql` and `0015_document_changes.sql`.
+Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` and `0011_user_workspace_runtime_profiles.sql` are now part of the real sequence. Planned shared-workspace migrations in this document should therefore use `0015_document_locks.sql` and `0016_document_changes.sql`.
 
 ### Files to Create
 
@@ -31,8 +31,8 @@ src/OpenCortex.Domain/Workspace/
 
 src/OpenCortex.Persistence.Postgres/
 â”œâ”€â”€ Migrations/
-â”‚   â”œâ”€â”€ 0014_document_locks.sql           # Document locks table
-â”‚   â””â”€â”€ 0015_document_changes.sql         # Change tracking table
+â”‚   â”œâ”€â”€ 0015_document_locks.sql           # Document locks table
+â”‚   â””â”€â”€ 0016_document_changes.sql         # Change tracking table
 â”œâ”€â”€ Repositories/
 â”‚   â”œâ”€â”€ PostgresDocumentLockRepository.cs
 â”‚   â””â”€â”€ PostgresDocumentChangeRepository.cs
@@ -265,7 +265,7 @@ Advisory locking system for managed documents to prevent concurrent edit conflic
 
 ##### T-033-01: Database migration
 ```sql
--- Migration: 0014_document_locks.sql
+-- Migration: 0015_document_locks.sql
 CREATE TABLE IF NOT EXISTS opencortex.document_locks (
     lock_id text PRIMARY KEY,
     document_id text NOT NULL,
@@ -645,7 +645,7 @@ Real-time awareness of workspace changes for coordinated multi-agent work.
 
 ##### T-037-01: Database migration
 ```sql
--- Migration: 0015_document_changes.sql
+-- Migration: 0016_document_changes.sql
 CREATE TABLE IF NOT EXISTS opencortex.document_changes (
     change_id text PRIMARY KEY,
     document_id text NOT NULL,

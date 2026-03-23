@@ -12,7 +12,7 @@ Enable lead agents to spawn and coordinate with specialist sub-agents, creating 
 
 This priority adds agent profiles, delegation tools, and a sub-agent orchestration engine.
 
-Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` now occupies the old placeholder slot. Planned delegation work in this document should therefore use `0013_agent_profiles.sql`.
+Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` and `0011_user_workspace_runtime_profiles.sql` now occupy previously planned slots. Planned delegation work in this document should therefore use `0014_agent_profiles.sql`.
 
 ### Files to Create
 
@@ -25,7 +25,7 @@ src/OpenCortex.Domain/Agents/
 
 src/OpenCortex.Persistence.Postgres/
 â”œâ”€â”€ Migrations/
-â”‚   â””â”€â”€ 0013_agent_profiles.sql           # Agent profiles table
+â”‚   â””â”€â”€ 0014_agent_profiles.sql           # Agent profiles table
 â”œâ”€â”€ Repositories/
 â”‚   â””â”€â”€ PostgresAgentProfileRepository.cs # IAgentProfileRepository implementation
 â””â”€â”€ ServiceCollectionExtensions.cs        # ADD: Repository registration
@@ -225,7 +225,7 @@ Define and manage agent profiles with specializations.
 
 ##### T-016-01: Database migration
 ```sql
--- Migration: 0013_agent_profiles.sql
+-- Migration: 0014_agent_profiles.sql
 CREATE TABLE IF NOT EXISTS opencortex.agent_profiles (
     agent_profile_id text PRIMARY KEY,
     customer_id text REFERENCES opencortex.customers(customer_id),  -- NULL = system agent

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OpenCortex.Core.Persistence;
 
 namespace OpenCortex.Tools;
 
@@ -15,6 +16,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
 {
     private readonly ToolsOptions _options;
     private readonly ILogger<DockerWorkspaceManager> _logger;
+    private readonly IUserWorkspaceRuntimeProfileStore _runtimeProfileStore;
     private readonly ConcurrentDictionary<Guid, ContainerInfo> _containers = new();
     private readonly Timer _cleanupTimer;
     private readonly SemaphoreSlim _containerLock = new(1, 1);
@@ -27,9 +29,11 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
 
     public DockerWorkspaceManager(
         IOptions<ToolsOptions> options,
+        IUserWorkspaceRuntimeProfileStore runtimeProfileStore,
         ILogger<DockerWorkspaceManager> logger)
     {
         _options = options.Value;
+        _runtimeProfileStore = runtimeProfileStore;
         _logger = logger;
 
         // Start cleanup timer (runs every minute)
@@ -253,6 +257,10 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         // Ensure volume exists
         await RunDockerCommandAsync($"volume create {volumeName}", cancellationToken);
 
+        var containerImage = WorkspaceRuntimeProfiles.ResolveContainerImage(
+            _options,
+            await _runtimeProfileStore.GetProfileIdAsync(userId, cancellationToken));
+
         // Build run command
         var runCommand = new StringBuilder();
         runCommand.Append($"run -d --name {containerName} ");
@@ -263,7 +271,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         runCommand.Append("--security-opt=no-new-privileges:true ");
         runCommand.Append("--cap-drop=ALL ");
         runCommand.Append("--user=1000:1000 ");
-        runCommand.Append(_options.ContainerImage);
+        runCommand.Append(containerImage);
 
         var result = await RunDockerCommandAsync(runCommand.ToString(), cancellationToken);
 

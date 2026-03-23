@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OpenCortex.Core.Persistence;
 
 namespace OpenCortex.Tools;
 
@@ -16,6 +17,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
 {
     private readonly ToolsOptions _options;
     private readonly ILogger<KubernetesWorkspaceManager> _logger;
+    private readonly IUserWorkspaceRuntimeProfileStore _runtimeProfileStore;
     private readonly ConcurrentDictionary<Guid, PodInfo> _pods = new();
     private readonly Timer _cleanupTimer;
     private readonly SemaphoreSlim _podLock = new(1, 1);
@@ -30,9 +32,11 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
 
     public KubernetesWorkspaceManager(
         IOptions<ToolsOptions> options,
+        IUserWorkspaceRuntimeProfileStore runtimeProfileStore,
         ILogger<KubernetesWorkspaceManager> logger)
     {
         _options = options.Value;
+        _runtimeProfileStore = runtimeProfileStore;
         _logger = logger;
 
         // Start cleanup timer (runs every minute)
@@ -252,7 +256,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
         await EnsurePvcExistsAsync(userId, pvcName, ns, cancellationToken);
 
         // Build pod manifest
-        var podYaml = BuildPodManifest(userId, podName, pvcName);
+        var podYaml = await BuildPodManifestAsync(userId, podName, pvcName, cancellationToken);
 
         // Apply pod
         var result = await RunKubectlWithStdinAsync("apply -f -", podYaml, cancellationToken);
@@ -464,11 +468,15 @@ spec:
         }
     }
 
-    private string BuildPodManifest(
+    private async Task<string> BuildPodManifestAsync(
         Guid userId,
         string podName,
-        string pvcName)
+        string pvcName,
+        CancellationToken cancellationToken)
     {
+        var containerImage = WorkspaceRuntimeProfiles.ResolveContainerImage(
+            _options,
+            await _runtimeProfileStore.GetProfileIdAsync(userId, cancellationToken));
         var imagePullSecrets = !string.IsNullOrEmpty(_options.ImagePullSecretName)
             ? $@"
   imagePullSecrets:
@@ -495,7 +503,7 @@ spec:
       type: RuntimeDefault
   containers:
     - name: agent
-      image: {_options.ContainerImage}
+      image: {containerImage}
       imagePullPolicy: Always
       workingDir: {WorkspacePathInPod}
       resources:

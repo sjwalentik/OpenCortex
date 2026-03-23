@@ -68,6 +68,7 @@ Current migration set:
 - `0009_user_memory_brain.sql`
 - `0009a_customer_membership_memory_brain.sql`
 - `0010_tenant_scoped_user_provider_configs.sql`
+- `0011_user_workspace_runtime_profiles.sql`
 
 ## Step 3: Initialize User Secrets
 
@@ -272,7 +273,7 @@ Check:
 
 - connection string on API/MCP/workers
 - local Postgres container is running
-- all migrations through `0010` were applied
+- all migrations through `0011` were applied
 
 ### Billing routes fail
 

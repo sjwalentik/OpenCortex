@@ -193,15 +193,16 @@ Strategy for incrementally upgrading existing deployments.
 |-----------|----------|-------------|
 | `0009_user_memory_brain.sql` | P1 | Adds memory_brain_id to users table |
 | `0010_tenant_scoped_user_provider_configs.sql` | Current | Corrective migration that scopes provider configs by customer + user |
-| `0011_work_items.sql` | P2 | Work items table + sequences |
-| `0012_sprints.sql` | P2 | Sprints table for sprint planning |
-| `0013_agent_profiles.sql` | P3 | Agent profiles + default seeding |
-| `0014_document_locks.sql` | P4 | Advisory locking table |
-| `0015_document_changes.sql` | P4 | Change tracking table |
+| `0011_user_workspace_runtime_profiles.sql` | Current | Stores user-selected managed workspace runtime profiles |
+| `0012_work_items.sql` | P2 | Work items table + sequences |
+| `0013_sprints.sql` | P2 | Sprints table for sprint planning |
+| `0014_agent_profiles.sql` | P3 | Agent profiles + default seeding |
+| `0015_document_locks.sql` | P4 | Advisory locking table |
+| `0016_document_changes.sql` | P4 | Change tracking table |
 
 ### Upgrade Sequence
 
-Numbering note: `0010_tenant_scoped_user_provider_configs.sql` is now a real migration in the main repo. Planned roadmap migrations therefore start at `0011_work_items.sql`, then continue with `0012_sprints.sql`, `0013_agent_profiles.sql`, `0014_document_locks.sql`, and `0015_document_changes.sql`.
+Numbering note: `0010_tenant_scoped_user_provider_configs.sql` and `0011_user_workspace_runtime_profiles.sql` are now real migrations in the main repo. Planned roadmap migrations therefore start at `0012_work_items.sql`, then continue with `0013_sprints.sql`, `0014_agent_profiles.sql`, `0015_document_locks.sql`, and `0016_document_changes.sql`.
 
 ```
 â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
@@ -215,21 +216,21 @@ Numbering note: `0010_tenant_scoped_user_provider_configs.sql` is now a real mig
 â”‚  â””â”€â”€ Existing brains used for memories                  â”‚
 â”‚                                                          â”‚
 â”‚  Phase 2: P2 (Work Items) - Additive                    â”‚
-â”‚  â”œâ”€â”€ Run 0011_work_items.sql migration                  â”‚
-â”‚  â”œâ”€â”€ Run 0012_sprints.sql migration                     â”‚
+â”‚  â”œâ”€â”€ Run 0012_work_items.sql migration                  â”‚
+â”‚  â”œâ”€â”€ Run 0013_sprints.sql migration                     â”‚
 â”‚  â”œâ”€â”€ Deploy work item API + tools                       â”‚
 â”‚  â”œâ”€â”€ Deploy Portal board UI                             â”‚
 â”‚  â””â”€â”€ Existing conversations unaffected                  â”‚
 â”‚                                                          â”‚
 â”‚  Phase 3: P3 (Delegation) - Additive                    â”‚
-â”‚  â”œâ”€â”€ Run 0013_agent_profiles.sql migration              â”‚
+â”‚  â”œâ”€â”€ Run 0014_agent_profiles.sql migration              â”‚
 â”‚  â”œâ”€â”€ Default agents seeded automatically                â”‚
 â”‚  â”œâ”€â”€ Deploy delegation tools                            â”‚
 â”‚  â”œâ”€â”€ Deploy agent configuration UI                      â”‚
 â”‚  â””â”€â”€ Existing agents continue working                   â”‚
 â”‚                                                          â”‚
 â”‚  Phase 4: P4 (Workspace) - Additive                     â”‚
-â”‚  â”œâ”€â”€ Run 0014 + 0015 migrations                         â”‚
+â”‚  â”œâ”€â”€ Run 0015 + 0016 migrations                         â”‚
 â”‚  â”œâ”€â”€ Deploy locking + change tracking                   â”‚
 â”‚  â””â”€â”€ Enables multi-agent collaboration                  â”‚
 â”‚                                                          â”‚

@@ -91,3 +91,15 @@ jobs:
             ${{ env.IMAGE_PREFIX }}/agent-runtime:develop
           cache-from: type=gha,scope=build-develop-agent-runtime
           cache-to: type=gha,mode=max,scope=build-develop-agent-runtime
+
+      - name: Build and push Agent Runtime .NET 10 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/docker/agent-runtime-dotnet10.Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/agent-runtime-dotnet10:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_PREFIX }}/agent-runtime-dotnet10:develop
+          cache-from: type=gha,scope=build-develop-agent-runtime-dotnet10
+          cache-to: type=gha,mode=max,scope=build-develop-agent-runtime-dotnet10

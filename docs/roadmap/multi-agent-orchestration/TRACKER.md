@@ -63,6 +63,7 @@ This document tracks the implementation status of all user stories across the mu
 |--------|-----------|-------------|
 | `[~]` | `0009_user_memory_brain.sql` + `0009a_customer_membership_memory_brain.sql` | Adds and then scopes memory_brain_id to customer memberships |
 | `[x]` | `0010_tenant_scoped_user_provider_configs.sql` | Scopes provider configs by `(customer_id, user_id, provider_id)` |
+| `[x]` | `0011_user_workspace_runtime_profiles.sql` | Stores user-selected managed workspace runtime profiles |
 
 ### P1 Implementation Notes
 
@@ -136,8 +137,8 @@ This document tracks the implementation status of all user stories across the mu
 
 | Status | Migration | Description |
 |--------|-----------|-------------|
-| `[ ]` | `0011_work_items.sql` | Work items table + sequences |
-| `[ ]` | `0012_sprints.sql` | Sprints table |
+| `[ ]` | `0012_work_items.sql` | Work items table + sequences |
+| `[ ]` | `0013_sprints.sql` | Sprints table |
 
 ---
 
@@ -193,7 +194,7 @@ This document tracks the implementation status of all user stories across the mu
 
 | Status | Migration | Description |
 |--------|-----------|-------------|
-| `[ ]` | `0013_agent_profiles.sql` | Agent profiles + default seeding |
+| `[ ]` | `0014_agent_profiles.sql` | Agent profiles + default seeding |
 
 ---
 
@@ -238,8 +239,8 @@ This document tracks the implementation status of all user stories across the mu
 
 | Status | Migration | Description |
 |--------|-----------|-------------|
-| `[ ]` | `0014_document_locks.sql` | Advisory locking table |
-| `[ ]` | `0015_document_changes.sql` | Change tracking table |
+| `[ ]` | `0015_document_locks.sql` | Advisory locking table |
+| `[ ]` | `0016_document_changes.sql` | Change tracking table |
 
 ---
 

@@ -12,7 +12,7 @@ Enable agents and users to plan, track, and execute work using a full hierarchy:
 
 This priority adds a new work items system using existing database and API infrastructure patterns.
 
-Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` now exists in the real migration chain. Planned task-persistence migrations in this document should therefore be treated as `0011_work_items.sql` and `0012_sprints.sql`.
+Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` and `0011_user_workspace_runtime_profiles.sql` now exist in the real migration chain. Planned task-persistence migrations in this document should therefore be treated as `0012_work_items.sql` and `0013_sprints.sql`.
 
 ### Files to Create
 
@@ -30,8 +30,8 @@ src/OpenCortex.Domain/WorkItems/
 
 src/OpenCortex.Persistence.Postgres/
 â”œâ”€â”€ Migrations/
-â”‚   â”œâ”€â”€ 0011_work_items.sql               # Work items table + sequences
-â”‚   â””â”€â”€ 0012_sprints.sql                  # Sprints table
+â”‚   â”œâ”€â”€ 0012_work_items.sql               # Work items table + sequences
+â”‚   â””â”€â”€ 0013_sprints.sql                  # Sprints table
 â”œâ”€â”€ Repositories/
 â”‚   â”œâ”€â”€ PostgresWorkItemRepository.cs     # IWorkItemRepository implementation
 â”‚   â””â”€â”€ PostgresSprintRepository.cs       # ISprintRepository implementation
@@ -202,7 +202,7 @@ Create the foundational data model and persistence layer for the complete work i
 
 ##### T-001-01: Create `work_items` table migration
 ```sql
--- Migration: 0011_work_items.sql
+-- Migration: 0012_work_items.sql
 CREATE TABLE IF NOT EXISTS opencortex.work_items (
     work_item_id text PRIMARY KEY,
 
@@ -1928,7 +1928,7 @@ export function BacklogView() {
 
 ##### T-014-01: Sprint table migration
 ```sql
--- Migration: 0012_sprints.sql
+-- Migration: 0013_sprints.sql
 CREATE TABLE IF NOT EXISTS opencortex.sprints (
     sprint_id text PRIMARY KEY,
     customer_id text NOT NULL REFERENCES opencortex.customers(customer_id),
@@ -1952,7 +1952,7 @@ CREATE TABLE IF NOT EXISTS opencortex.sprints (
 
 CREATE INDEX ix_sprints_customer ON opencortex.sprints(customer_id, status);
 
--- Add sprint reference to work_items (already in 0011_work_items.sql, shown here for reference)
+-- Add sprint reference to work_items (already in 0012_work_items.sql, shown here for reference)
 -- ALTER TABLE opencortex.work_items ADD COLUMN sprint_id text REFERENCES opencortex.sprints(sprint_id);
 ```
 

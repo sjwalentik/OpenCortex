@@ -373,3 +373,20 @@ See `docs/architecture/auth-and-identity.md`, `docs/architecture/billing-and-quo
 - Enables BYOK (Bring Your Own Key) pattern for enterprise customers
 
 **Current repo status:** The base provider-config table shipped in `0008_user_provider_configs.sql`. Tenant scoping was corrected in `0010_tenant_scoped_user_provider_configs.sql`, so provider configs are now stored and resolved by `(customer_id, user_id, provider_id)` instead of only `(user_id, provider_id)`.
+
+### `user_workspace_runtime_profiles`
+
+Stores user-selected managed workspace runtime profiles for hosted container-based workspaces.
+
+**Migration:** `0011_user_workspace_runtime_profiles.sql`
+
+**Columns:**
+- `user_id` (text, PK)
+- `profile_id` (text, NOT NULL)
+- `created_at` (timestamptz, NOT NULL, default now())
+- `updated_at` (timestamptz, NOT NULL, default now())
+
+**Design notes:**
+- This is intentionally user-global because current workspace runtime identity is keyed by the hosted runtime user GUID, not by tenant membership.
+- `default` means the standard shared runtime image.
+- Additional managed profiles, such as `dotnet10`, can map to alternate agent runtime images without inflating the default image for every user.

@@ -18,6 +18,8 @@ spec:
               value: "agent-workspaces"
             - name: OpenCortex__Tools__ContainerImage
               value: "ghcr.io/sjwalentik/opencortex/agent-runtime:develop"
+            - name: OpenCortex__Tools__DotNet10ContainerImage
+              value: "ghcr.io/sjwalentik/opencortex/agent-runtime-dotnet10:develop"
             - name: OpenCortex__Tools__StorageClassName
               value: "openebs-hostpath"
             - name: OpenCortex__Tools__PvcSize

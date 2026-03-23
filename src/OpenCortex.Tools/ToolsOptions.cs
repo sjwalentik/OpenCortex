@@ -23,6 +23,11 @@ public sealed class ToolsOptions
     public string ContainerImage { get; set; } = "opencortex/agent-runtime:latest";
 
     /// <summary>
+    /// Optional container image for the managed .NET 10 workspace runtime profile.
+    /// </summary>
+    public string? DotNet10ContainerImage { get; set; }
+
+    /// <summary>
     /// Session timeout in minutes before workspace cleanup (idle timeout).
     /// </summary>
     public int SessionTimeoutMinutes { get; set; } = 15;
