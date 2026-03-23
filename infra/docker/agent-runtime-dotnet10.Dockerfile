@@ -22,8 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -g 1000 agent && \
-    useradd -u 1000 -g agent -m -s /bin/bash agent
+RUN if ! getent group agent >/dev/null; then groupadd agent; fi && \
+    if ! id -u agent >/dev/null 2>&1; then useradd -g agent -m -s /bin/bash agent; fi
 
 RUN git config --system init.defaultBranch main && \
     git config --system user.email "agent@opencortex.local" && \
