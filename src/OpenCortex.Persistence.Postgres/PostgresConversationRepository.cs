@@ -271,7 +271,10 @@ public sealed class PostgresConversationRepository : IConversationRepository
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
 
-        command.CommandText = $"""
+        var orderClause = limit.HasValue
+            ? "ORDER BY created_at DESC"
+            : "ORDER BY created_at ASC";
+        var selectSql = $"""
             SELECT
                 message_id,
                 conversation_id,
@@ -287,9 +290,19 @@ public sealed class PostgresConversationRepository : IConversationRepository
                 created_at
             FROM {_connectionFactory.Schema}.messages
             WHERE conversation_id = @conversation_id
-            ORDER BY created_at ASC
-            LIMIT @limit OFFSET @offset;
+            {orderClause}
+            LIMIT @limit OFFSET @offset
             """;
+
+        command.CommandText = limit.HasValue
+            ? $"""
+                SELECT *
+                FROM (
+                    {selectSql}
+                ) recent_messages
+                ORDER BY created_at ASC;
+                """
+            : selectSql + ";";
 
         command.Parameters.AddWithValue("conversation_id", conversationId);
         command.Parameters.AddWithValue("limit", limit ?? 1000);
