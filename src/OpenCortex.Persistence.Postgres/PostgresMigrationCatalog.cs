@@ -14,5 +14,6 @@ public static class PostgresMigrationCatalog
         new("0008", "User provider configuration schema", "infra/postgres/migrations/0008_user_provider_configs.sql"),
         new("0009", "User memory brain preference schema", "infra/postgres/migrations/0009_user_memory_brain.sql"),
         new("0009a", "Customer membership memory brain preference schema", "infra/postgres/migrations/0009a_customer_membership_memory_brain.sql"),
+        new("0010", "Tenant-scoped user provider configuration schema", "infra/postgres/migrations/0010_tenant_scoped_user_provider_configs.sql"),
     ];
 }

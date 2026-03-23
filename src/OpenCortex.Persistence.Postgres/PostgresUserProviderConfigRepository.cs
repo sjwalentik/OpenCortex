@@ -6,7 +6,7 @@ namespace OpenCortex.Persistence.Postgres;
 public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRepository
 {
     private const string MissingProviderConfigStorageMessage =
-        "Provider configuration storage is not available yet. Apply migration 'infra/postgres/migrations/0008_user_provider_configs.sql' and restart the API.";
+        "Provider configuration storage is not available yet. Apply provider-config migrations through 'infra/postgres/migrations/0010_tenant_scoped_user_provider_configs.sql' and restart the API.";
 
     private readonly PostgresConnectionFactory _connectionFactory;
 
