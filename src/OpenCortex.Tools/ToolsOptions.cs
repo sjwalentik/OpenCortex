@@ -62,6 +62,11 @@ public sealed class ToolsOptions
     public int PodStartupTimeoutSeconds { get; set; } = 60;
 
     /// <summary>
+    /// Timeout for commands executed inside Docker containers or Kubernetes pods.
+    /// </summary>
+    public int CommandExecutionTimeoutSeconds { get; set; } = 600;
+
+    /// <summary>
     /// Image pull secret name for pulling container images (optional).
     /// </summary>
     public string? ImagePullSecretName { get; set; }

@@ -174,7 +174,13 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
         var shellScript = $"cd -- {ShellEscaping.SingleQuote(workDir)} && {fullCommand}";
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await RunKubectlExecAsync(ns, podName, shellScript, standardInput, cancellationToken);
+        var result = await RunKubectlExecAsync(
+            ns,
+            podName,
+            shellScript,
+            standardInput,
+            cancellationToken,
+            _options.CommandExecutionTimeoutSeconds);
         stopwatch.Stop();
 
         return new CommandResult
