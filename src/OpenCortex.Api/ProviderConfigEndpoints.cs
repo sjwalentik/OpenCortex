@@ -640,7 +640,10 @@ public static class ProviderConfigEndpoints
 
     private static Guid? GetUserId(ClaimsPrincipal user)
     {
-        var sub = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        var sub =
+            user.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? user.FindFirstValue("user_id")
+            ?? user.FindFirstValue("sub");
         if (sub is not null && Guid.TryParse(sub, out var userId))
         {
             return userId;
