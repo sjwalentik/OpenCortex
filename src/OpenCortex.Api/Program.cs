@@ -765,6 +765,11 @@ if (!string.IsNullOrEmpty(encryptionKey))
 {
     builder.Services.AddSingleton<ICredentialEncryption>(new AesCredentialEncryption(encryptionKey));
 }
+else if (builder.Environment.IsEnvironment("Testing"))
+{
+    var ephemeralTestKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+    builder.Services.AddSingleton<ICredentialEncryption>(new AesCredentialEncryption(ephemeralTestKey));
+}
 else
 {
     throw new InvalidOperationException(
