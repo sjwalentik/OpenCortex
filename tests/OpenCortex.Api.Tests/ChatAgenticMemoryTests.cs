@@ -215,10 +215,10 @@ public sealed class ChatAgenticMemoryTests : IClassFixture<ChatAgenticMemoryTest
 
     private sealed class StubUserCredentialService : IUserCredentialService
     {
-        public Task<IReadOnlyDictionary<string, string>> GetDecryptedCredentialsAsync(Guid userId, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyDictionary<string, string>> GetDecryptedCredentialsAsync(Guid customerId, Guid userId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
 
-        public Task<string?> GetDecryptedCredentialAsync(Guid userId, string providerId, CancellationToken cancellationToken = default)
+        public Task<string?> GetDecryptedCredentialAsync(Guid customerId, Guid userId, string providerId, CancellationToken cancellationToken = default)
             => Task.FromResult<string?>(null);
     }
 

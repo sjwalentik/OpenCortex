@@ -76,6 +76,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 // Execute LLM call
                 var llmStopwatch = Stopwatch.StartNew();
                 var result = await _orchestration.ExecuteAsync(
+                    request.CustomerId,
                     request.UserId, orchRequest, cancellationToken);
                 llmStopwatch.Stop();
 
@@ -326,6 +327,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             TokenUsage iterationUsage = TokenUsage.Empty;
 
             await foreach (var chunk in _orchestration.StreamAsync(
+                request.CustomerId,
                 request.UserId, orchRequest, cancellationToken))
             {
                 if (isFirstChunk)

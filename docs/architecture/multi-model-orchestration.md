@@ -494,7 +494,7 @@ CREATE TABLE user_provider_configs (
     is_enabled BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ,
-    CONSTRAINT uq_user_provider UNIQUE (user_id, provider_id)
+    CONSTRAINT uq_user_provider UNIQUE (customer_id, user_id, provider_id)
 );
 ```
 
@@ -545,9 +545,9 @@ The `IUserProviderFactory` creates provider instances with user-specific credent
 ```csharp
 public interface IUserProviderFactory
 {
-    Task<IModelProvider?> GetProviderForUserAsync(Guid userId, string providerId, CancellationToken ct = default);
-    Task<IReadOnlyList<IModelProvider>> GetProvidersForUserAsync(Guid userId, CancellationToken ct = default);
-    Task<bool> HasConfiguredProvidersAsync(Guid userId, CancellationToken ct = default);
+    Task<IModelProvider?> GetProviderForUserAsync(Guid customerId, Guid userId, string providerId, CancellationToken ct = default);
+    Task<IReadOnlyList<IModelProvider>> GetProvidersForUserAsync(Guid customerId, Guid userId, CancellationToken ct = default);
+    Task<bool> HasConfiguredProvidersAsync(Guid customerId, Guid userId, CancellationToken ct = default);
 }
 ```
 

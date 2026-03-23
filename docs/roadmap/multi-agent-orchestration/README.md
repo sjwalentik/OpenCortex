@@ -18,20 +18,20 @@ This directory contains the detailed planning documentation for transforming Ope
 **Important**: The memory, task, and workspace features build on the **existing MCP infrastructure**. We don't need new brain modes or storage mechanisms. The MCP server already provides:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    MCP Server                            │
-├─────────────────────────────────────────────────────────┤
-│  Tools:                                                  │
-│  • save_document   → Write to managed-content brain     │
-│  • query_brain     → Semantic/keyword search            │
-│  • get_document    → Read full document                 │
-│  • delete_document → Remove document                    │
-│  • reindex_brain   → Force reindex                      │
-├─────────────────────────────────────────────────────────┤
-│  Brain Modes:                                            │
-│  • filesystem      → Index git repos, folders           │
-│  • managed-content → User-editable documents            │
-└─────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                    MCP Server                            â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚  Tools:                                                  â”‚
+â”‚  â€¢ save_document   â†’ Write to managed-content brain     â”‚
+â”‚  â€¢ query_brain     â†’ Semantic/keyword search            â”‚
+â”‚  â€¢ get_document    â†’ Read full document                 â”‚
+â”‚  â€¢ delete_document â†’ Remove document                    â”‚
+â”‚  â€¢ reindex_brain   â†’ Force reindex                      â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚  Brain Modes:                                            â”‚
+â”‚  â€¢ filesystem      â†’ Index git repos, folders           â”‚
+â”‚  â€¢ managed-content â†’ User-editable documents            â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ### How Features Use MCP
@@ -71,19 +71,19 @@ var results = await mcpClient.QueryBrainAsync(
 
 ```
 P1: Agent Memory Layer          [Foundation]
- │   └── Convenience tools over existing MCP
- │
- ▼
+ â”‚   â””â”€â”€ Convenience tools over existing MCP
+ â”‚
+ â–¼
 P2: Task/Goal Persistence       [Tracking]
- │   └── New tasks table + API (structured data)
- │
- ▼
+ â”‚   â””â”€â”€ New tasks table + API (structured data)
+ â”‚
+ â–¼
 P3: Agent Delegation            [Multi-Agent Core]
- │   └── Spawn sub-agents, share workspace access
- │
- ▼
+ â”‚   â””â”€â”€ Spawn sub-agents, share workspace access
+ â”‚
+ â–¼
 P4: Shared Workspace            [Collaboration]
-     └── Locking & change notifications (new features)
+     â””â”€â”€ Locking & change notifications (new features)
 ```
 
 ## Effort Overview
@@ -114,10 +114,10 @@ P4: Shared Workspace            [Collaboration]
 
 ```
 Epic (e.g., "Task & Goal Management System")
-  └── Feature (e.g., "Task Data Model & Storage")
-        └── User Story (e.g., "As an agent, I want to create a task...")
-              └── Task (e.g., "Create tasks table migration")
-                    └── Slice (e.g., specific SQL, code snippets)
+  â””â”€â”€ Feature (e.g., "Task Data Model & Storage")
+        â””â”€â”€ User Story (e.g., "As an agent, I want to create a task...")
+              â””â”€â”€ Task (e.g., "Create tasks table migration")
+                    â””â”€â”€ Slice (e.g., specific SQL, code snippets)
 ```
 
 ## Key Decisions
@@ -157,7 +157,7 @@ End-to-end scenarios validating all priorities work together seamlessly.
 | **Epic Planning Flow** | P1, P2 | User creates epic, AI breaks it down, items tracked |
 | **Delegated Research** | P1, P2, P3 | Lead agent delegates to researcher, results saved as memory |
 | **Multi-Agent Document Collab** | P1-P4 | Two agents edit shared doc with locking |
-| **Full Workflow** | P1-P4 | Epic → delegate tasks → agents collaborate → complete |
+| **Full Workflow** | P1-P4 | Epic â†’ delegate tasks â†’ agents collaborate â†’ complete |
 
 ### Test Infrastructure
 
@@ -172,7 +172,7 @@ End-to-end scenarios validating all priorities work together seamlessly.
 
 ```
 IT-001: Memory persistence across sessions
-IT-002: Work item hierarchy CRUD (Epic→Feature→Story→Task)
+IT-002: Work item hierarchy CRUD (Epicâ†’Featureâ†’Storyâ†’Task)
 IT-003: AI epic breakdown creates correct hierarchy
 IT-004: Agent delegation executes and returns results
 IT-005: Document locking prevents concurrent edits
@@ -192,45 +192,48 @@ Strategy for incrementally upgrading existing deployments.
 | Migration | Priority | Description |
 |-----------|----------|-------------|
 | `0009_user_memory_brain.sql` | P1 | Adds memory_brain_id to users table |
-| `0010_work_items.sql` | P2 | Work items table + sequences |
-| `0011_sprints.sql` | P2 | Sprints table for sprint planning |
-| `0012_agent_profiles.sql` | P3 | Agent profiles + default seeding |
-| `0013_document_locks.sql` | P4 | Advisory locking table |
-| `0014_document_changes.sql` | P4 | Change tracking table |
+| `0010_tenant_scoped_user_provider_configs.sql` | Current | Corrective migration that scopes provider configs by customer + user |
+| `0011_work_items.sql` | P2 | Work items table + sequences |
+| `0012_sprints.sql` | P2 | Sprints table for sprint planning |
+| `0013_agent_profiles.sql` | P3 | Agent profiles + default seeding |
+| `0014_document_locks.sql` | P4 | Advisory locking table |
+| `0015_document_changes.sql` | P4 | Change tracking table |
 
 ### Upgrade Sequence
 
+Numbering note: `0010_tenant_scoped_user_provider_configs.sql` is now a real migration in the main repo. Planned roadmap migrations therefore start at `0011_work_items.sql`, then continue with `0012_sprints.sql`, `0013_agent_profiles.sql`, `0014_document_locks.sql`, and `0015_document_changes.sql`.
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   Upgrade Strategy                        │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  Phase 1: P1 (Memory) - Additive                        │
-│  ├── Run 0009_user_memory_brain.sql migration           │
-│  ├── Deploy new memory tools                            │
-│  ├── Deploy Portal Memories page                        │
-│  └── Existing brains used for memories                  │
-│                                                          │
-│  Phase 2: P2 (Work Items) - Additive                    │
-│  ├── Run 0010_work_items.sql migration                  │
-│  ├── Run 0011_sprints.sql migration                     │
-│  ├── Deploy work item API + tools                       │
-│  ├── Deploy Portal board UI                             │
-│  └── Existing conversations unaffected                  │
-│                                                          │
-│  Phase 3: P3 (Delegation) - Additive                    │
-│  ├── Run 0012_agent_profiles.sql migration              │
-│  ├── Default agents seeded automatically                │
-│  ├── Deploy delegation tools                            │
-│  ├── Deploy agent configuration UI                      │
-│  └── Existing agents continue working                   │
-│                                                          │
-│  Phase 4: P4 (Workspace) - Additive                     │
-│  ├── Run 0013 + 0014 migrations                         │
-│  ├── Deploy locking + change tracking                   │
-│  └── Enables multi-agent collaboration                  │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                   Upgrade Strategy                        â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚                                                          â”‚
+â”‚  Phase 1: P1 (Memory) - Additive                        â”‚
+â”‚  â”œâ”€â”€ Run 0009_user_memory_brain.sql migration           â”‚
+â”‚  â”œâ”€â”€ Deploy new memory tools                            â”‚
+â”‚  â”œâ”€â”€ Deploy Portal Memories page                        â”‚
+â”‚  â””â”€â”€ Existing brains used for memories                  â”‚
+â”‚                                                          â”‚
+â”‚  Phase 2: P2 (Work Items) - Additive                    â”‚
+â”‚  â”œâ”€â”€ Run 0011_work_items.sql migration                  â”‚
+â”‚  â”œâ”€â”€ Run 0012_sprints.sql migration                     â”‚
+â”‚  â”œâ”€â”€ Deploy work item API + tools                       â”‚
+â”‚  â”œâ”€â”€ Deploy Portal board UI                             â”‚
+â”‚  â””â”€â”€ Existing conversations unaffected                  â”‚
+â”‚                                                          â”‚
+â”‚  Phase 3: P3 (Delegation) - Additive                    â”‚
+â”‚  â”œâ”€â”€ Run 0013_agent_profiles.sql migration              â”‚
+â”‚  â”œâ”€â”€ Default agents seeded automatically                â”‚
+â”‚  â”œâ”€â”€ Deploy delegation tools                            â”‚
+â”‚  â”œâ”€â”€ Deploy agent configuration UI                      â”‚
+â”‚  â””â”€â”€ Existing agents continue working                   â”‚
+â”‚                                                          â”‚
+â”‚  Phase 4: P4 (Workspace) - Additive                     â”‚
+â”‚  â”œâ”€â”€ Run 0014 + 0015 migrations                         â”‚
+â”‚  â”œâ”€â”€ Deploy locking + change tracking                   â”‚
+â”‚  â””â”€â”€ Enables multi-agent collaboration                  â”‚
+â”‚                                                          â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ### Rollback Strategy

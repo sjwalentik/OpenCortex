@@ -372,4 +372,4 @@ See `docs/architecture/auth-and-identity.md`, `docs/architecture/billing-and-quo
 - Platform can still fall back to platform-managed providers when user provides none
 - Enables BYOK (Bring Your Own Key) pattern for enterprise customers
 
-**Current repo status:** Migration exists.
+**Current repo status:** The base provider-config table shipped in `0008_user_provider_configs.sql`. Tenant scoping was corrected in `0010_tenant_scoped_user_provider_configs.sql`, so provider configs are now stored and resolved by `(customer_id, user_id, provider_id)` instead of only `(user_id, provider_id)`.

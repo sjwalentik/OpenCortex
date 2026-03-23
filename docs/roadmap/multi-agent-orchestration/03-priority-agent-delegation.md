@@ -12,63 +12,65 @@ Enable lead agents to spawn and coordinate with specialist sub-agents, creating 
 
 This priority adds agent profiles, delegation tools, and a sub-agent orchestration engine.
 
+Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` now occupies the old placeholder slot. Planned delegation work in this document should therefore use `0013_agent_profiles.sql`.
+
 ### Files to Create
 
 ```
 src/OpenCortex.Domain/Agents/
-├── AgentProfile.cs                       # Domain entity
-├── AgentSpecialization.cs                # Enum or string constants
-├── IAgentProfileRepository.cs            # Repository interface
-└── DefaultAgents.cs                      # System agent definitions
+â”œâ”€â”€ AgentProfile.cs                       # Domain entity
+â”œâ”€â”€ AgentSpecialization.cs                # Enum or string constants
+â”œâ”€â”€ IAgentProfileRepository.cs            # Repository interface
+â””â”€â”€ DefaultAgents.cs                      # System agent definitions
 
 src/OpenCortex.Persistence.Postgres/
-├── Migrations/
-│   └── 0012_agent_profiles.sql           # Agent profiles table
-├── Repositories/
-│   └── PostgresAgentProfileRepository.cs # IAgentProfileRepository implementation
-└── ServiceCollectionExtensions.cs        # ADD: Repository registration
+â”œâ”€â”€ Migrations/
+â”‚   â””â”€â”€ 0013_agent_profiles.sql           # Agent profiles table
+â”œâ”€â”€ Repositories/
+â”‚   â””â”€â”€ PostgresAgentProfileRepository.cs # IAgentProfileRepository implementation
+â””â”€â”€ ServiceCollectionExtensions.cs        # ADD: Repository registration
 
 src/OpenCortex.Tools.Delegation/
-├── OpenCortex.Tools.Delegation.csproj    # New project
-├── ServiceCollectionExtensions.cs        # DI registration
-├── DelegationToolDefinitions.cs          # Tool JSON schemas
-├── DelegationToolDefinitionProvider.cs   # IToolDefinitionProvider implementation
-└── Handlers/
-    ├── DelegateToAgentHandler.cs
-    └── ListAvailableAgentsHandler.cs
+â”œâ”€â”€ OpenCortex.Tools.Delegation.csproj    # New project
+â”œâ”€â”€ ServiceCollectionExtensions.cs        # DI registration
+â”œâ”€â”€ DelegationToolDefinitions.cs          # Tool JSON schemas
+â”œâ”€â”€ DelegationToolDefinitionProvider.cs   # IToolDefinitionProvider implementation
+â””â”€â”€ Handlers/
+    â”œâ”€â”€ DelegateToAgentHandler.cs
+    â””â”€â”€ ListAvailableAgentsHandler.cs
 
 src/OpenCortex.Orchestration/Delegation/
-├── ISubAgentOrchestrator.cs              # Interface
-├── SubAgentOrchestrator.cs               # Implementation
-├── SubAgentRequest.cs                    # Request model
-├── SubAgentResult.cs                     # Result model
-└── IDelegationQuotaChecker.cs            # Quota checking interface
+â”œâ”€â”€ ISubAgentOrchestrator.cs              # Interface
+â”œâ”€â”€ SubAgentOrchestrator.cs               # Implementation
+â”œâ”€â”€ SubAgentRequest.cs                    # Request model
+â”œâ”€â”€ SubAgentResult.cs                     # Result model
+â””â”€â”€ IDelegationQuotaChecker.cs            # Quota checking interface
 
 src/OpenCortex.Orchestration/Startup/
-└── DefaultAgentSeeder.cs                 # Seeds system agents on startup
+â””â”€â”€ DefaultAgentSeeder.cs                 # Seeds system agents on startup
 
 src/OpenCortex.Api/
-├── AgentEndpoints.cs                     # NEW: REST API for agents
-└── Program.cs                            # ADD: .MapAgentEndpoints()
+â”œâ”€â”€ AgentEndpoints.cs                     # NEW: REST API for agents
+â””â”€â”€ Program.cs                            # ADD: .MapAgentEndpoints()
 
 src/OpenCortex.Portal/Frontend/src/
-├── pages/Agents/
-│   ├── AgentListView.tsx                 # Agent list page
-│   └── AgentEditorPage.tsx               # Create/edit agent page
-├── components/Agents/
-│   ├── AgentCard.tsx                     # Agent card for grid display
-│   ├── AgentIdentityTab.tsx              # Identity configuration
-│   ├── AgentSoulTab.tsx                  # System prompt editor
-│   ├── AgentToolsTab.tsx                 # Tool configuration
-│   ├── AgentProvidersTab.tsx             # Provider access config
-│   └── AgentLimitsTab.tsx                # Limits configuration
-├── hooks/
-│   ├── useAgents.ts                      # Query hook for agents
-│   ├── useAgent.ts                       # Single agent query
-│   ├── useCreateAgent.ts                 # Create mutation
-│   ├── useUpdateAgent.ts                 # Update mutation
-│   └── useToolCatalog.ts                 # Available tools list
-└── App.tsx                               # ADD: Agents to viewDefinitions
+â”œâ”€â”€ pages/Agents/
+â”‚   â”œâ”€â”€ AgentListView.tsx                 # Agent list page
+â”‚   â””â”€â”€ AgentEditorPage.tsx               # Create/edit agent page
+â”œâ”€â”€ components/Agents/
+â”‚   â”œâ”€â”€ AgentCard.tsx                     # Agent card for grid display
+â”‚   â”œâ”€â”€ AgentIdentityTab.tsx              # Identity configuration
+â”‚   â”œâ”€â”€ AgentSoulTab.tsx                  # System prompt editor
+â”‚   â”œâ”€â”€ AgentToolsTab.tsx                 # Tool configuration
+â”‚   â”œâ”€â”€ AgentProvidersTab.tsx             # Provider access config
+â”‚   â””â”€â”€ AgentLimitsTab.tsx                # Limits configuration
+â”œâ”€â”€ hooks/
+â”‚   â”œâ”€â”€ useAgents.ts                      # Query hook for agents
+â”‚   â”œâ”€â”€ useAgent.ts                       # Single agent query
+â”‚   â”œâ”€â”€ useCreateAgent.ts                 # Create mutation
+â”‚   â”œâ”€â”€ useUpdateAgent.ts                 # Update mutation
+â”‚   â””â”€â”€ useToolCatalog.ts                 # Available tools list
+â””â”€â”€ App.tsx                               # ADD: Agents to viewDefinitions
 ```
 
 ### Existing Services to Use
@@ -223,7 +225,7 @@ Define and manage agent profiles with specializations.
 
 ##### T-016-01: Database migration
 ```sql
--- Migration: 0012_agent_profiles.sql
+-- Migration: 0013_agent_profiles.sql
 CREATE TABLE IF NOT EXISTS opencortex.agent_profiles (
     agent_profile_id text PRIMARY KEY,
     customer_id text REFERENCES opencortex.customers(customer_id),  -- NULL = system agent
@@ -544,38 +546,38 @@ Comprehensive UI for creating, configuring, and managing custom agents.
 ### UI Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Portal → Agents Section                       │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌──────────────────┐  ┌────────────────────────────────────┐   │
-│  │   Agent List     │  │      Agent Configuration Panel      │   │
-│  │                  │  │                                      │   │
-│  │  [+ New Agent]   │  │  Identity Tab                       │   │
-│  │                  │  │  ├── Name, Avatar                   │   │
-│  │  System Agents   │  │  ├── Specialization                 │   │
-│  │  ├── Researcher  │  │  └── Description                    │   │
-│  │  ├── Code Review │  │                                      │   │
-│  │  ├── Planner     │  │  Soul Tab (System Prompt)           │   │
-│  │  ├── Writer      │  │  ├── Rich text editor               │   │
-│  │  └── Debugger    │  │  ├── Template variables             │   │
-│  │                  │  │  └── Personality guidelines         │   │
-│  │  My Agents       │  │                                      │   │
-│  │  ├── PR Wizard   │  │  Tools Tab                          │   │
-│  │  └── Doc Writer  │  │  ├── Available tools list           │   │
-│  │                  │  │  ├── Enabled/disabled toggles       │   │
-│  │                  │  │  └── Tool configuration             │   │
-│  │                  │  │                                      │   │
-│  │                  │  │  Providers Tab                       │   │
-│  │                  │  │  ├── GitHub access                  │   │
-│  │                  │  │  ├── Other integrations             │   │
-│  │                  │  │  └── Credentials scope              │   │
-│  │                  │  │                                      │   │
-│  │                  │  │  Limits Tab                          │   │
-│  │                  │  │  ├── Max iterations                 │   │
-│  │                  │  │  ├── Timeout                        │   │
-│  │                  │  │  └── Model preference               │   │
-│  └──────────────────┘  └────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                     Portal â†’ Agents Section                       â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
+â”‚  â”‚   Agent List     â”‚  â”‚      Agent Configuration Panel      â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚                                      â”‚   â”‚
+â”‚  â”‚  [+ New Agent]   â”‚  â”‚  Identity Tab                       â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â”œâ”€â”€ Name, Avatar                   â”‚   â”‚
+â”‚  â”‚  System Agents   â”‚  â”‚  â”œâ”€â”€ Specialization                 â”‚   â”‚
+â”‚  â”‚  â”œâ”€â”€ Researcher  â”‚  â”‚  â””â”€â”€ Description                    â”‚   â”‚
+â”‚  â”‚  â”œâ”€â”€ Code Review â”‚  â”‚                                      â”‚   â”‚
+â”‚  â”‚  â”œâ”€â”€ Planner     â”‚  â”‚  Soul Tab (System Prompt)           â”‚   â”‚
+â”‚  â”‚  â”œâ”€â”€ Writer      â”‚  â”‚  â”œâ”€â”€ Rich text editor               â”‚   â”‚
+â”‚  â”‚  â””â”€â”€ Debugger    â”‚  â”‚  â”œâ”€â”€ Template variables             â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â””â”€â”€ Personality guidelines         â”‚   â”‚
+â”‚  â”‚  My Agents       â”‚  â”‚                                      â”‚   â”‚
+â”‚  â”‚  â”œâ”€â”€ PR Wizard   â”‚  â”‚  Tools Tab                          â”‚   â”‚
+â”‚  â”‚  â””â”€â”€ Doc Writer  â”‚  â”‚  â”œâ”€â”€ Available tools list           â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â”œâ”€â”€ Enabled/disabled toggles       â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â””â”€â”€ Tool configuration             â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚                                      â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  Providers Tab                       â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â”œâ”€â”€ GitHub access                  â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â”œâ”€â”€ Other integrations             â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â””â”€â”€ Credentials scope              â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚                                      â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  Limits Tab                          â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â”œâ”€â”€ Max iterations                 â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â”œâ”€â”€ Timeout                        â”‚   â”‚
+â”‚  â”‚                  â”‚  â”‚  â””â”€â”€ Model preference               â”‚   â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ### User Stories
@@ -639,7 +641,7 @@ export function AgentListView() {
       <Section title="My Agents" description="Custom agents you've created">
         {customAgents.length === 0 ? (
           <EmptyState
-            icon="🤖"
+            icon="ðŸ¤–"
             title="No custom agents yet"
             description="Create your first agent to automate specialized tasks"
             action={<Button onClick={() => navigate('/agents/new')}>Create Agent</Button>}
@@ -732,15 +734,15 @@ export function AgentIdentityTab({ agent, onChange, errors }: AgentIdentityTabPr
 }
 
 const SPECIALIZATION_OPTIONS = [
-  { value: 'code-review', label: 'Code Review', icon: '🔍' },
-  { value: 'research', label: 'Research', icon: '📚' },
-  { value: 'planning', label: 'Planning', icon: '📋' },
-  { value: 'writing', label: 'Writing', icon: '✍️' },
-  { value: 'debugging', label: 'Debugging', icon: '🐛' },
-  { value: 'testing', label: 'Testing', icon: '🧪' },
-  { value: 'devops', label: 'DevOps', icon: '🚀' },
-  { value: 'security', label: 'Security', icon: '🔒' },
-  { value: 'custom', label: 'Custom...', icon: '⚙️' }
+  { value: 'code-review', label: 'Code Review', icon: 'ðŸ”' },
+  { value: 'research', label: 'Research', icon: 'ðŸ“š' },
+  { value: 'planning', label: 'Planning', icon: 'ðŸ“‹' },
+  { value: 'writing', label: 'Writing', icon: 'âœï¸' },
+  { value: 'debugging', label: 'Debugging', icon: 'ðŸ›' },
+  { value: 'testing', label: 'Testing', icon: 'ðŸ§ª' },
+  { value: 'devops', label: 'DevOps', icon: 'ðŸš€' },
+  { value: 'security', label: 'Security', icon: 'ðŸ”’' },
+  { value: 'custom', label: 'Custom...', icon: 'âš™ï¸' }
 ];
 ```
 
@@ -1274,11 +1276,11 @@ export function AgentEditorPage() {
       </PageHeader>
 
       <Tabs value={activeTab} onChange={setActiveTab}>
-        <Tab value="identity" label="Identity" icon="👤" />
-        <Tab value="soul" label="Soul" icon="✨" />
-        <Tab value="tools" label="Tools" icon="🔧" badge={agent.enabledTools.length} />
-        <Tab value="providers" label="Providers" icon="🔗" />
-        <Tab value="limits" label="Limits" icon="⚙️" />
+        <Tab value="identity" label="Identity" icon="ðŸ‘¤" />
+        <Tab value="soul" label="Soul" icon="âœ¨" />
+        <Tab value="tools" label="Tools" icon="ðŸ”§" badge={agent.enabledTools.length} />
+        <Tab value="providers" label="Providers" icon="ðŸ”—" />
+        <Tab value="limits" label="Limits" icon="âš™ï¸" />
       </Tabs>
 
       <div className="tab-content">

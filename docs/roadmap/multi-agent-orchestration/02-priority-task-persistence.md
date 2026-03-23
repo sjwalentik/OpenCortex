@@ -4,7 +4,7 @@
 
 **Epic**: Work Item Management System
 
-Enable agents and users to plan, track, and execute work using a full hierarchy: Epic → Feature → User Story → Task. Support both agentic task tracking and human-driven project planning.
+Enable agents and users to plan, track, and execute work using a full hierarchy: Epic â†’ Feature â†’ User Story â†’ Task. Support both agentic task tracking and human-driven project planning.
 
 ---
 
@@ -12,70 +12,72 @@ Enable agents and users to plan, track, and execute work using a full hierarchy:
 
 This priority adds a new work items system using existing database and API infrastructure patterns.
 
+Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` now exists in the real migration chain. Planned task-persistence migrations in this document should therefore be treated as `0011_work_items.sql` and `0012_sprints.sql`.
+
 ### Files to Create
 
 ```
 src/OpenCortex.Domain/WorkItems/
-├── WorkItem.cs                           # Domain entity
-├── WorkItemType.cs                       # Enum: Epic, Feature, UserStory, Task
-├── WorkItemStatus.cs                     # Enum: Backlog, Planned, InProgress, etc.
-├── WorkItemPriority.cs                   # Enum: Critical, High, Medium, Low
-├── WorkItemStatusTransitions.cs          # Valid status transitions
-├── WorkItemHierarchy.cs                  # Parent-child validation
-├── Sprint.cs                             # Sprint entity
-├── IWorkItemRepository.cs                # Repository interface
-└── ISprintRepository.cs                  # Sprint repository interface
+â”œâ”€â”€ WorkItem.cs                           # Domain entity
+â”œâ”€â”€ WorkItemType.cs                       # Enum: Epic, Feature, UserStory, Task
+â”œâ”€â”€ WorkItemStatus.cs                     # Enum: Backlog, Planned, InProgress, etc.
+â”œâ”€â”€ WorkItemPriority.cs                   # Enum: Critical, High, Medium, Low
+â”œâ”€â”€ WorkItemStatusTransitions.cs          # Valid status transitions
+â”œâ”€â”€ WorkItemHierarchy.cs                  # Parent-child validation
+â”œâ”€â”€ Sprint.cs                             # Sprint entity
+â”œâ”€â”€ IWorkItemRepository.cs                # Repository interface
+â””â”€â”€ ISprintRepository.cs                  # Sprint repository interface
 
 src/OpenCortex.Persistence.Postgres/
-├── Migrations/
-│   ├── 0010_work_items.sql               # Work items table + sequences
-│   └── 0011_sprints.sql                  # Sprints table
-├── Repositories/
-│   ├── PostgresWorkItemRepository.cs     # IWorkItemRepository implementation
-│   └── PostgresSprintRepository.cs       # ISprintRepository implementation
-└── ServiceCollectionExtensions.cs        # ADD: Repository registration
+â”œâ”€â”€ Migrations/
+â”‚   â”œâ”€â”€ 0011_work_items.sql               # Work items table + sequences
+â”‚   â””â”€â”€ 0012_sprints.sql                  # Sprints table
+â”œâ”€â”€ Repositories/
+â”‚   â”œâ”€â”€ PostgresWorkItemRepository.cs     # IWorkItemRepository implementation
+â”‚   â””â”€â”€ PostgresSprintRepository.cs       # ISprintRepository implementation
+â””â”€â”€ ServiceCollectionExtensions.cs        # ADD: Repository registration
 
 src/OpenCortex.Tools.WorkItems/
-├── OpenCortex.Tools.WorkItems.csproj     # New project
-├── ServiceCollectionExtensions.cs        # DI registration
-├── WorkItemToolDefinitions.cs            # Tool JSON schemas
-├── PlanningPrompts.cs                    # LLM prompts for AI planning
-└── Handlers/
-    ├── CreateWorkItemHandler.cs
-    ├── ListWorkItemsHandler.cs
-    ├── GetWorkItemHandler.cs
-    ├── UpdateWorkItemHandler.cs
-    └── PlanEpicHandler.cs
+â”œâ”€â”€ OpenCortex.Tools.WorkItems.csproj     # New project
+â”œâ”€â”€ ServiceCollectionExtensions.cs        # DI registration
+â”œâ”€â”€ WorkItemToolDefinitions.cs            # Tool JSON schemas
+â”œâ”€â”€ PlanningPrompts.cs                    # LLM prompts for AI planning
+â””â”€â”€ Handlers/
+    â”œâ”€â”€ CreateWorkItemHandler.cs
+    â”œâ”€â”€ ListWorkItemsHandler.cs
+    â”œâ”€â”€ GetWorkItemHandler.cs
+    â”œâ”€â”€ UpdateWorkItemHandler.cs
+    â””â”€â”€ PlanEpicHandler.cs
 
 src/OpenCortex.Orchestration/WorkItems/
-├── IWorkItemContextBuilder.cs            # Interface
-└── WorkItemContextBuilder.cs             # Injects work item context into agent prompts
+â”œâ”€â”€ IWorkItemContextBuilder.cs            # Interface
+â””â”€â”€ WorkItemContextBuilder.cs             # Injects work item context into agent prompts
 
 src/OpenCortex.Api/
-├── WorkItemEndpoints.cs                  # NEW: REST API for work items
-├── SprintEndpoints.cs                    # NEW: REST API for sprints
-└── Program.cs                            # ADD: .MapWorkItemEndpoints(), .MapSprintEndpoints()
+â”œâ”€â”€ WorkItemEndpoints.cs                  # NEW: REST API for work items
+â”œâ”€â”€ SprintEndpoints.cs                    # NEW: REST API for sprints
+â””â”€â”€ Program.cs                            # ADD: .MapWorkItemEndpoints(), .MapSprintEndpoints()
 
 src/OpenCortex.Portal/Frontend/src/
-├── components/WorkItems/
-│   ├── WorkItemBoard.tsx                 # Kanban board view
-│   ├── WorkItemCard.tsx                  # Card component for board
-│   ├── BacklogView.tsx                   # Prioritized backlog list
-│   ├── SprintPlanningView.tsx            # Sprint planning
-│   ├── WorkItemTree.tsx                  # Hierarchy tree view
-│   ├── WorkItemDetailPanel.tsx           # Detail slide-out panel
-│   ├── AIPlanningModal.tsx               # AI breakdown assistant
-│   ├── TypeBadge.tsx                     # Type indicator (Epic/Feature/Story/Task)
-│   ├── StatusBadge.tsx                   # Status indicator
-│   └── PriorityIndicator.tsx             # Priority indicator
-├── hooks/
-│   ├── useWorkItems.ts                   # Query hook for work items
-│   ├── useWorkItem.ts                    # Single item query
-│   ├── useCreateWorkItem.ts              # Create mutation
-│   ├── useUpdateWorkItem.ts              # Update mutation
-│   ├── useSprints.ts                     # Sprint queries
-│   └── usePlanEpic.ts                    # AI planning mutation
-└── App.tsx                               # ADD: Work Items to viewDefinitions
+â”œâ”€â”€ components/WorkItems/
+â”‚   â”œâ”€â”€ WorkItemBoard.tsx                 # Kanban board view
+â”‚   â”œâ”€â”€ WorkItemCard.tsx                  # Card component for board
+â”‚   â”œâ”€â”€ BacklogView.tsx                   # Prioritized backlog list
+â”‚   â”œâ”€â”€ SprintPlanningView.tsx            # Sprint planning
+â”‚   â”œâ”€â”€ WorkItemTree.tsx                  # Hierarchy tree view
+â”‚   â”œâ”€â”€ WorkItemDetailPanel.tsx           # Detail slide-out panel
+â”‚   â”œâ”€â”€ AIPlanningModal.tsx               # AI breakdown assistant
+â”‚   â”œâ”€â”€ TypeBadge.tsx                     # Type indicator (Epic/Feature/Story/Task)
+â”‚   â”œâ”€â”€ StatusBadge.tsx                   # Status indicator
+â”‚   â””â”€â”€ PriorityIndicator.tsx             # Priority indicator
+â”œâ”€â”€ hooks/
+â”‚   â”œâ”€â”€ useWorkItems.ts                   # Query hook for work items
+â”‚   â”œâ”€â”€ useWorkItem.ts                    # Single item query
+â”‚   â”œâ”€â”€ useCreateWorkItem.ts              # Create mutation
+â”‚   â”œâ”€â”€ useUpdateWorkItem.ts              # Update mutation
+â”‚   â”œâ”€â”€ useSprints.ts                     # Sprint queries
+â”‚   â””â”€â”€ usePlanEpic.ts                    # AI planning mutation
+â””â”€â”€ App.tsx                               # ADD: Work Items to viewDefinitions
 ```
 
 ### Existing Services to Use
@@ -156,7 +158,7 @@ Agents and users cannot currently:
 
 ### Success Criteria
 
-- Full work item hierarchy persisted (Epic → Feature → User Story → Task)
+- Full work item hierarchy persisted (Epic â†’ Feature â†’ User Story â†’ Task)
 - Agents can create and manage work items via tools
 - Users can view and manage work items in Portal UI
 - AI can help break down epics into features/stories/tasks
@@ -200,7 +202,7 @@ Create the foundational data model and persistence layer for the complete work i
 
 ##### T-001-01: Create `work_items` table migration
 ```sql
--- Migration: 0010_work_items.sql
+-- Migration: 0011_work_items.sql
 CREATE TABLE IF NOT EXISTS opencortex.work_items (
     work_item_id text PRIMARY KEY,
 
@@ -683,7 +685,7 @@ public static class WorkItemStatusTransitions
 #### US-003: Work Item Hierarchy Navigation
 **As a** user
 **I want** to navigate the work item hierarchy
-**So that** I can see epics → features → stories → tasks
+**So that** I can see epics â†’ features â†’ stories â†’ tasks
 
 **Acceptance Criteria**:
 - Can load item with full hierarchy (up to N levels)
@@ -697,7 +699,7 @@ public static class WorkItemStatusTransitions
 |---------|-------------|--------|-------|
 | T-003-01 | Implement `GetWithHierarchyAsync` recursive query | 3h | Persistence |
 | T-003-02 | Add parent chain loading | 1h | Persistence |
-| T-003-03 | Enforce hierarchy rules (epic→feature→story→task) | 1h | Domain |
+| T-003-03 | Enforce hierarchy rules (epicâ†’featureâ†’storyâ†’task) | 1h | Domain |
 | T-003-04 | Write hierarchy navigation tests | 2h | Testing |
 
 **Slice Details**:
@@ -1696,16 +1698,16 @@ Comprehensive work item management UI in the Portal, inspired by Azure DevOps bo
 ### UI Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Portal Navigation                          │
-├─────────────────────────────────────────────────────────────────┤
-│  [Dashboard] [Chat] [Brains] [Work Items ▼] [Agents] [Settings] │
-│                              │                                    │
-│                              ├── Board View                      │
-│                              ├── Backlog View                    │
-│                              ├── Sprints                         │
-│                              └── Hierarchy View                  │
-└─────────────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                        Portal Navigation                          â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚  [Dashboard] [Chat] [Brains] [Work Items â–¼] [Agents] [Settings] â”‚
+â”‚                              â”‚                                    â”‚
+â”‚                              â”œâ”€â”€ Board View                      â”‚
+â”‚                              â”œâ”€â”€ Backlog View                    â”‚
+â”‚                              â”œâ”€â”€ Sprints                         â”‚
+â”‚                              â””â”€â”€ Hierarchy View                  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ### User Stories
@@ -1825,10 +1827,10 @@ function TypeBadge({ type }: { type: WorkItemType }) {
     task: 'gray'
   };
   const icons = {
-    epic: '⚡',
-    feature: '✨',
-    user_story: '📖',
-    task: '✓'
+    epic: 'âš¡',
+    feature: 'âœ¨',
+    user_story: 'ðŸ“–',
+    task: 'âœ“'
   };
   return (
     <span className={`type-badge type-${type}`} style={{ backgroundColor: colors[type] }}>
@@ -1926,7 +1928,7 @@ export function BacklogView() {
 
 ##### T-014-01: Sprint table migration
 ```sql
--- Migration: 0011_sprints.sql
+-- Migration: 0012_sprints.sql
 CREATE TABLE IF NOT EXISTS opencortex.sprints (
     sprint_id text PRIMARY KEY,
     customer_id text NOT NULL REFERENCES opencortex.customers(customer_id),
@@ -1950,7 +1952,7 @@ CREATE TABLE IF NOT EXISTS opencortex.sprints (
 
 CREATE INDEX ix_sprints_customer ON opencortex.sprints(customer_id, status);
 
--- Add sprint reference to work_items (already in 0010_work_items.sql, shown here for reference)
+-- Add sprint reference to work_items (already in 0011_work_items.sql, shown here for reference)
 -- ALTER TABLE opencortex.work_items ADD COLUMN sprint_id text REFERENCES opencortex.sprints(sprint_id);
 ```
 
@@ -2113,7 +2115,7 @@ public static class SprintEndpoints
 #### US-015: Work Item Hierarchy View
 **As a** user
 **I want** a tree view of my work items
-**So that** I can see the full Epic → Feature → Story → Task structure
+**So that** I can see the full Epic â†’ Feature â†’ Story â†’ Task structure
 
 **Acceptance Criteria**:
 - Tree view with expand/collapse
@@ -2155,7 +2157,7 @@ function TreeNode({ item, depth, expanded, onToggle, onSelect }: TreeNodeProps) 
       <div className="tree-row" onClick={onSelect} onContextMenu={handleContextMenu}>
         {item.children?.length > 0 && (
           <button className="expand-btn" onClick={onToggle}>
-            {expanded ? '▼' : '▶'}
+            {expanded ? 'â–¼' : 'â–¶'}
           </button>
         )}
         <TypeIcon type={item.itemType} />
@@ -2749,33 +2751,33 @@ export function useSprintBurndown(sprintId: string) {
 # Work Item Hierarchy Rules
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   Work Item Hierarchy                    │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  EPIC-001: Multi-Agent Orchestration                    │
-│  ├── FEAT-001: Agent Memory Layer                       │
-│  │   ├── US-001: Memory Brain Provisioning              │
-│  │   │   ├── T-001: Create brain mode enum              │
-│  │   │   ├── T-002: Implement provider                  │
-│  │   │   └── T-003: Write tests                         │
-│  │   └── US-002: Save Memory Tool                       │
-│  │       ├── T-004: Create tool definition              │
-│  │       └── T-005: Implement handler                   │
-│  └── FEAT-002: Task Persistence                         │
-│      └── ...                                             │
-│                                                          │
-│  Allowed Relationships:                                  │
-│  • Epic → Feature                                        │
-│  • Feature → User Story                                  │
-│  • User Story → Task                                     │
-│                                                          │
-│  Not Allowed:                                            │
-│  • Epic → User Story (skip Feature)                     │
-│  • Feature → Task (skip User Story)                     │
-│  • Task → anything (leaf nodes)                         │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                   Work Item Hierarchy                    â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚                                                          â”‚
+â”‚  EPIC-001: Multi-Agent Orchestration                    â”‚
+â”‚  â”œâ”€â”€ FEAT-001: Agent Memory Layer                       â”‚
+â”‚  â”‚   â”œâ”€â”€ US-001: Memory Brain Provisioning              â”‚
+â”‚  â”‚   â”‚   â”œâ”€â”€ T-001: Create brain mode enum              â”‚
+â”‚  â”‚   â”‚   â”œâ”€â”€ T-002: Implement provider                  â”‚
+â”‚  â”‚   â”‚   â””â”€â”€ T-003: Write tests                         â”‚
+â”‚  â”‚   â””â”€â”€ US-002: Save Memory Tool                       â”‚
+â”‚  â”‚       â”œâ”€â”€ T-004: Create tool definition              â”‚
+â”‚  â”‚       â””â”€â”€ T-005: Implement handler                   â”‚
+â”‚  â””â”€â”€ FEAT-002: Task Persistence                         â”‚
+â”‚      â””â”€â”€ ...                                             â”‚
+â”‚                                                          â”‚
+â”‚  Allowed Relationships:                                  â”‚
+â”‚  â€¢ Epic â†’ Feature                                        â”‚
+â”‚  â€¢ Feature â†’ User Story                                  â”‚
+â”‚  â€¢ User Story â†’ Task                                     â”‚
+â”‚                                                          â”‚
+â”‚  Not Allowed:                                            â”‚
+â”‚  â€¢ Epic â†’ User Story (skip Feature)                     â”‚
+â”‚  â€¢ Feature â†’ Task (skip User Story)                     â”‚
+â”‚  â€¢ Task â†’ anything (leaf nodes)                         â”‚
+â”‚                                                          â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ---

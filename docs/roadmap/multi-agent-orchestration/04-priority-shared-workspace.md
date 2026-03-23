@@ -12,55 +12,57 @@ Enable multiple agents to safely read and write shared documents and workspace f
 
 This priority adds document locking, change tracking, and workspace coordination for multi-agent collaboration.
 
+Migration numbering note: `0010_tenant_scoped_user_provider_configs.sql` is now part of the real sequence. Planned shared-workspace migrations in this document should therefore use `0014_document_locks.sql` and `0015_document_changes.sql`.
+
 ### Files to Create
 
 ```
 src/OpenCortex.Domain/Workspace/
-├── DocumentLock.cs                       # Lock entity
-├── LockHolderType.cs                     # Enum: Agent, User
-├── IDocumentLockService.cs               # Lock service interface
-├── DocumentChange.cs                     # Change tracking entity
-├── DocumentChangeType.cs                 # Enum: Created, Updated, Deleted
-├── IDocumentChangePublisher.cs           # Change event publisher interface
-├── IDocumentChangeRepository.cs          # Change repository interface
-├── ITaskWorkspaceService.cs              # Task workspace interface
-├── ConflictInfo.cs                       # Conflict details
-└── MergeResult.cs                        # Merge operation result
+â”œâ”€â”€ DocumentLock.cs                       # Lock entity
+â”œâ”€â”€ LockHolderType.cs                     # Enum: Agent, User
+â”œâ”€â”€ IDocumentLockService.cs               # Lock service interface
+â”œâ”€â”€ DocumentChange.cs                     # Change tracking entity
+â”œâ”€â”€ DocumentChangeType.cs                 # Enum: Created, Updated, Deleted
+â”œâ”€â”€ IDocumentChangePublisher.cs           # Change event publisher interface
+â”œâ”€â”€ IDocumentChangeRepository.cs          # Change repository interface
+â”œâ”€â”€ ITaskWorkspaceService.cs              # Task workspace interface
+â”œâ”€â”€ ConflictInfo.cs                       # Conflict details
+â””â”€â”€ MergeResult.cs                        # Merge operation result
 
 src/OpenCortex.Persistence.Postgres/
-├── Migrations/
-│   ├── 0013_document_locks.sql           # Document locks table
-│   └── 0014_document_changes.sql         # Change tracking table
-├── Repositories/
-│   ├── PostgresDocumentLockRepository.cs
-│   └── PostgresDocumentChangeRepository.cs
-└── ServiceCollectionExtensions.cs        # ADD: Repository registration
+â”œâ”€â”€ Migrations/
+â”‚   â”œâ”€â”€ 0014_document_locks.sql           # Document locks table
+â”‚   â””â”€â”€ 0015_document_changes.sql         # Change tracking table
+â”œâ”€â”€ Repositories/
+â”‚   â”œâ”€â”€ PostgresDocumentLockRepository.cs
+â”‚   â””â”€â”€ PostgresDocumentChangeRepository.cs
+â””â”€â”€ ServiceCollectionExtensions.cs        # ADD: Repository registration
 
 src/OpenCortex.Orchestration/Workspace/
-├── DocumentLockService.cs                # IDocumentLockService implementation
-├── DocumentChangePublisher.cs            # IDocumentChangePublisher implementation
-├── TaskWorkspaceService.cs               # ITaskWorkspaceService implementation
-├── TextMerger.cs                         # 3-way merge utility
-└── LockCleanupBackgroundService.cs       # Background lock expiry cleanup
+â”œâ”€â”€ DocumentLockService.cs                # IDocumentLockService implementation
+â”œâ”€â”€ DocumentChangePublisher.cs            # IDocumentChangePublisher implementation
+â”œâ”€â”€ TaskWorkspaceService.cs               # ITaskWorkspaceService implementation
+â”œâ”€â”€ TextMerger.cs                         # 3-way merge utility
+â””â”€â”€ LockCleanupBackgroundService.cs       # Background lock expiry cleanup
 
 src/OpenCortex.Tools.Workspace/
-├── OpenCortex.Tools.Workspace.csproj     # New project
-├── ServiceCollectionExtensions.cs        # DI registration
-├── WorkspaceToolDefinitions.cs           # Tool JSON schemas
-├── WorkspaceToolDefinitionProvider.cs    # IToolDefinitionProvider implementation
-└── Handlers/
-    ├── LockDocumentHandler.cs
-    ├── UnlockDocumentHandler.cs
-    ├── CheckLockHandler.cs
-    ├── ExtendLockHandler.cs
-    ├── WorkspaceReadHandler.cs
-    ├── WorkspaceWriteHandler.cs
-    ├── ListRecentChangesHandler.cs
-    └── ResolveConflictHandler.cs
+â”œâ”€â”€ OpenCortex.Tools.Workspace.csproj     # New project
+â”œâ”€â”€ ServiceCollectionExtensions.cs        # DI registration
+â”œâ”€â”€ WorkspaceToolDefinitions.cs           # Tool JSON schemas
+â”œâ”€â”€ WorkspaceToolDefinitionProvider.cs    # IToolDefinitionProvider implementation
+â””â”€â”€ Handlers/
+    â”œâ”€â”€ LockDocumentHandler.cs
+    â”œâ”€â”€ UnlockDocumentHandler.cs
+    â”œâ”€â”€ CheckLockHandler.cs
+    â”œâ”€â”€ ExtendLockHandler.cs
+    â”œâ”€â”€ WorkspaceReadHandler.cs
+    â”œâ”€â”€ WorkspaceWriteHandler.cs
+    â”œâ”€â”€ ListRecentChangesHandler.cs
+    â””â”€â”€ ResolveConflictHandler.cs
 
 src/OpenCortex.Api/
-├── WorkspaceEndpoints.cs                 # NEW: REST API for workspace
-└── Program.cs                            # ADD: Background service, endpoints
+â”œâ”€â”€ WorkspaceEndpoints.cs                 # NEW: REST API for workspace
+â””â”€â”€ Program.cs                            # ADD: Background service, endpoints
 ```
 
 ### Existing Services to Use
@@ -263,7 +265,7 @@ Advisory locking system for managed documents to prevent concurrent edit conflic
 
 ##### T-033-01: Database migration
 ```sql
--- Migration: 0013_document_locks.sql
+-- Migration: 0014_document_locks.sql
 CREATE TABLE IF NOT EXISTS opencortex.document_locks (
     lock_id text PRIMARY KEY,
     document_id text NOT NULL,
@@ -643,7 +645,7 @@ Real-time awareness of workspace changes for coordinated multi-agent work.
 
 ##### T-037-01: Database migration
 ```sql
--- Migration: 0014_document_changes.sql
+-- Migration: 0015_document_changes.sql
 CREATE TABLE IF NOT EXISTS opencortex.document_changes (
     change_id text PRIMARY KEY,
     document_id text NOT NULL,
@@ -1141,30 +1143,30 @@ public sealed class MergeResult
 # Locking Protocol
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Locking Flow                          │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  1. Agent wants to edit document                         │
-│         │                                                │
-│         ▼                                                │
-│  2. Call lock_document(path, timeout=60s)               │
-│         │                                                │
-│         ├── Lock acquired → Continue to edit            │
-│         │                                                │
-│         └── Lock held by other →                        │
-│                 │                                        │
-│                 ├── Wait and retry (with backoff)       │
-│                 │                                        │
-│                 └── Or proceed read-only                │
-│                                                          │
-│  3. Make edits with workspace_write()                   │
-│         │                                                │
-│  4. Call unlock_document(path)                          │
-│         │                                                │
-│  5. On timeout: auto-release lock                       │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                    Locking Flow                          â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚                                                          â”‚
+â”‚  1. Agent wants to edit document                         â”‚
+â”‚         â”‚                                                â”‚
+â”‚         â–¼                                                â”‚
+â”‚  2. Call lock_document(path, timeout=60s)               â”‚
+â”‚         â”‚                                                â”‚
+â”‚         â”œâ”€â”€ Lock acquired â†’ Continue to edit            â”‚
+â”‚         â”‚                                                â”‚
+â”‚         â””â”€â”€ Lock held by other â†’                        â”‚
+â”‚                 â”‚                                        â”‚
+â”‚                 â”œâ”€â”€ Wait and retry (with backoff)       â”‚
+â”‚                 â”‚                                        â”‚
+â”‚                 â””â”€â”€ Or proceed read-only                â”‚
+â”‚                                                          â”‚
+â”‚  3. Make edits with workspace_write()                   â”‚
+â”‚         â”‚                                                â”‚
+â”‚  4. Call unlock_document(path)                          â”‚
+â”‚         â”‚                                                â”‚
+â”‚  5. On timeout: auto-release lock                       â”‚
+â”‚                                                          â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ---
@@ -1172,30 +1174,30 @@ public sealed class MergeResult
 # Conflict Resolution Flow
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│              Conflict Resolution Flow                    │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  1. Agent A reads document (hash: abc123)               │
-│  2. Agent B reads document (hash: abc123)               │
-│  3. Agent A writes changes (expected: abc123) → Success │
-│     Document now has hash: def456                        │
-│  4. Agent B writes changes (expected: abc123) → CONFLICT│
-│         │                                                │
-│         ▼                                                │
-│  5. Conflict detected:                                   │
-│     - Expected: abc123                                   │
-│     - Actual: def456                                     │
-│     - Changed by: Agent A                                │
-│         │                                                │
-│         ▼                                                │
-│  6. Resolution options:                                  │
-│     a) Force write (overwrite Agent A's changes)        │
-│     b) Refresh and re-apply changes                     │
-│     c) Merge (if changes are compatible)                │
-│     d) Abort and notify user                            │
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚              Conflict Resolution Flow                    â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚                                                          â”‚
+â”‚  1. Agent A reads document (hash: abc123)               â”‚
+â”‚  2. Agent B reads document (hash: abc123)               â”‚
+â”‚  3. Agent A writes changes (expected: abc123) â†’ Success â”‚
+â”‚     Document now has hash: def456                        â”‚
+â”‚  4. Agent B writes changes (expected: abc123) â†’ CONFLICTâ”‚
+â”‚         â”‚                                                â”‚
+â”‚         â–¼                                                â”‚
+â”‚  5. Conflict detected:                                   â”‚
+â”‚     - Expected: abc123                                   â”‚
+â”‚     - Actual: def456                                     â”‚
+â”‚     - Changed by: Agent A                                â”‚
+â”‚         â”‚                                                â”‚
+â”‚         â–¼                                                â”‚
+â”‚  6. Resolution options:                                  â”‚
+â”‚     a) Force write (overwrite Agent A's changes)        â”‚
+â”‚     b) Refresh and re-apply changes                     â”‚
+â”‚     c) Merge (if changes are compatible)                â”‚
+â”‚     d) Abort and notify user                            â”‚
+â”‚                                                          â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ---

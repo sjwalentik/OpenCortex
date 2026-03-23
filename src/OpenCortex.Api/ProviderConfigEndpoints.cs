@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using OpenCortex.Core;
 using OpenCortex.Core.OAuth;
+using OpenCortex.Core.Persistence;
+using OpenCortex.Core.Tenancy;
 using OpenCortex.Tools;
 
 namespace OpenCortex.Api;
@@ -21,13 +23,17 @@ public static class ProviderConfigEndpoints
         // List user's configured providers
         routes.MapGet("/", async (
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IUserProviderConfigRepository repository,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            if (userId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
-            var configs = await repository.ListByUserAsync(userId.Value, cancellationToken);
+            var configs = await repository.ListByUserAsync(
+                resolved.CustomerId!.Value,
+                resolved.UserId!.Value,
+                cancellationToken);
 
             return Results.Ok(new
             {
@@ -50,13 +56,18 @@ public static class ProviderConfigEndpoints
         routes.MapGet("/{providerId}", async (
             string providerId,
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IUserProviderConfigRepository repository,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            if (userId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
-            var config = await repository.GetAsync(userId.Value, providerId, cancellationToken);
+            var config = await repository.GetAsync(
+                resolved.CustomerId!.Value,
+                resolved.UserId!.Value,
+                providerId,
+                cancellationToken);
             if (config is null)
             {
                 return Results.NotFound(new { message = $"No configuration found for provider '{providerId}'." });
@@ -80,20 +91,24 @@ public static class ProviderConfigEndpoints
             string providerId,
             ProviderConfigRequest request,
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IUserProviderConfigRepository repository,
             ICredentialEncryption encryption,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            var customerId = GetCustomerId(user);
-            if (userId is null || customerId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
-            var existing = await repository.GetAsync(userId.Value, providerId, cancellationToken);
+            var existing = await repository.GetAsync(
+                resolved.CustomerId!.Value,
+                resolved.UserId!.Value,
+                providerId,
+                cancellationToken);
             var config = MergeProviderConfig(
                 existing,
                 request,
-                customerId.Value,
-                userId.Value,
+                resolved.CustomerId.Value,
+                resolved.UserId.Value,
                 providerId,
                 encryption);
 
@@ -121,15 +136,20 @@ public static class ProviderConfigEndpoints
         routes.MapDelete("/{providerId}", async (
             string providerId,
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IUserProviderConfigRepository repository,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            if (userId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
             try
             {
-                await repository.DeleteAsync(userId.Value, providerId, cancellationToken);
+                await repository.DeleteAsync(
+                    resolved.CustomerId!.Value,
+                    resolved.UserId!.Value,
+                    providerId,
+                    cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -143,14 +163,18 @@ public static class ProviderConfigEndpoints
         routes.MapPost("/{providerId}/toggle", async (
             string providerId,
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IUserProviderConfigRepository repository,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            var customerId = GetCustomerId(user);
-            if (userId is null || customerId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
-            var existing = await repository.GetAsync(userId.Value, providerId, cancellationToken);
+            var existing = await repository.GetAsync(
+                resolved.CustomerId!.Value,
+                resolved.UserId!.Value,
+                providerId,
+                cancellationToken);
             if (existing is null)
             {
                 return Results.NotFound(new { message = $"No configuration found for provider '{providerId}'." });
@@ -232,11 +256,12 @@ public static class ProviderConfigEndpoints
 
         routes.MapPost("/openai-codex/hosted-login/start", async (
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IWorkspaceManager workspaceManager,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            if (userId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
             if (!workspaceManager.SupportsContainerIsolation)
             {
@@ -246,9 +271,9 @@ public static class ProviderConfigEndpoints
                 });
             }
 
-            var workspaceStatus = await workspaceManager.EnsureRunningAsync(userId.Value, null, cancellationToken);
+            var workspaceStatus = await workspaceManager.EnsureRunningAsync(resolved.UserId!.Value, null, cancellationToken);
             var workspacePath = workspaceStatus.WorkspacePath
-                ?? await workspaceManager.GetWorkspacePathAsync(userId.Value, cancellationToken);
+                ?? await workspaceManager.GetWorkspacePathAsync(resolved.UserId.Value, cancellationToken);
             var environment = BuildCodexRuntimeEnvironment(workspaceManager, workspacePath);
             var authFilePath = WorkspaceRuntimePaths.GetCodexAuthFilePath(
                 workspaceManager.SupportsContainerIsolation,
@@ -272,7 +297,7 @@ public static class ProviderConfigEndpoints
                 $"&& nohup codex login --device-auth -c cli_auth_credentials_store='file' > {ShellEscaping.SingleQuote(logPath)} 2>&1 < /dev/null & echo $! > {ShellEscaping.SingleQuote(pidPath)}";
 
             var result = await workspaceManager.ExecuteCommandAsync(
-                userId.Value,
+                resolved.UserId.Value,
                 "/bin/sh",
                 argumentList:
                 [
@@ -292,7 +317,7 @@ public static class ProviderConfigEndpoints
 
             var status = await ReadHostedCodexLoginStatusAsync(
                 workspaceManager,
-                userId.Value,
+                resolved.UserId.Value,
                 cancellationToken);
 
             return Results.Ok(status with
@@ -303,11 +328,12 @@ public static class ProviderConfigEndpoints
 
         routes.MapGet("/openai-codex/hosted-login/status", async (
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IWorkspaceManager workspaceManager,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            if (userId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
             if (!workspaceManager.SupportsContainerIsolation)
             {
@@ -319,7 +345,7 @@ public static class ProviderConfigEndpoints
 
             var status = await ReadHostedCodexLoginStatusAsync(
                 workspaceManager,
-                userId.Value,
+                resolved.UserId!.Value,
                 cancellationToken);
 
             return Results.Ok(status);
@@ -327,14 +353,14 @@ public static class ProviderConfigEndpoints
 
         routes.MapPost("/openai-codex/hosted-login/complete", async (
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IUserProviderConfigRepository repository,
             ICredentialEncryption encryption,
             IWorkspaceManager workspaceManager,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            var customerId = GetCustomerId(user);
-            if (userId is null || customerId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
             if (!workspaceManager.SupportsContainerIsolation)
             {
@@ -344,13 +370,13 @@ public static class ProviderConfigEndpoints
                 });
             }
 
-            var workspacePath = await workspaceManager.GetWorkspacePathAsync(userId.Value, cancellationToken);
+            var workspacePath = await workspaceManager.GetWorkspacePathAsync(resolved.UserId!.Value, cancellationToken);
             var authFilePath = WorkspaceRuntimePaths.GetCodexAuthFilePath(
                 workspaceManager.SupportsContainerIsolation,
                 workspacePath).Replace('\\', '/');
 
             var authReadResult = await workspaceManager.ExecuteCommandAsync(
-                userId.Value,
+                resolved.UserId.Value,
                 "/bin/sh",
                 argumentList:
                 [
@@ -368,15 +394,19 @@ public static class ProviderConfigEndpoints
                 });
             }
 
-            var existing = await repository.GetAsync(userId.Value, WorkspaceRuntimePaths.CodexProviderId, cancellationToken);
+            var existing = await repository.GetAsync(
+                resolved.CustomerId!.Value,
+                resolved.UserId.Value,
+                WorkspaceRuntimePaths.CodexProviderId,
+                cancellationToken);
             var config = MergeProviderConfig(
                 existing,
                 new ProviderConfigRequest(
                     AuthType: "session_json",
                     SessionJson: authReadResult.StandardOutput.Trim(),
                     IsEnabled: true),
-                customerId.Value,
-                userId.Value,
+                resolved.CustomerId.Value,
+                resolved.UserId.Value,
                 WorkspaceRuntimePaths.CodexProviderId,
                 encryption);
 
@@ -398,11 +428,12 @@ public static class ProviderConfigEndpoints
 
         routes.MapPost("/openai-codex/hosted-login/cancel", async (
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IWorkspaceManager workspaceManager,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            if (userId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
             if (!workspaceManager.SupportsContainerIsolation)
             {
@@ -412,11 +443,11 @@ public static class ProviderConfigEndpoints
                 });
             }
 
-            var workspacePath = await workspaceManager.GetWorkspacePathAsync(userId.Value, cancellationToken);
+            var workspacePath = await workspaceManager.GetWorkspacePathAsync(resolved.UserId!.Value, cancellationToken);
             var pidPath = WorkspaceRuntimePaths.GetCodexDeviceAuthPidPath(workspacePath).Replace('\\', '/');
 
             await workspaceManager.ExecuteCommandAsync(
-                userId.Value,
+                resolved.UserId.Value,
                 "/bin/sh",
                 argumentList:
                 [
@@ -427,7 +458,7 @@ public static class ProviderConfigEndpoints
 
             var status = await ReadHostedCodexLoginStatusAsync(
                 workspaceManager,
-                userId.Value,
+                resolved.UserId.Value,
                 cancellationToken);
 
             return Results.Ok(status with { Message = "Hosted Codex sign-in was cancelled." });
@@ -436,15 +467,16 @@ public static class ProviderConfigEndpoints
         // --- OAuth Flow Endpoints ---
 
         // Start OAuth flow - returns authorization URL
-        routes.MapGet("/{providerId}/oauth/authorize", (
+        routes.MapGet("/{providerId}/oauth/authorize", async (
             string providerId,
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IProviderOAuthService oauthService,
-            string? returnUrl = null) =>
+            string? returnUrl = null,
+            CancellationToken cancellationToken = default) =>
         {
-            var userId = GetUserId(user);
-            var customerId = GetCustomerId(user);
-            if (userId is null || customerId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
             if (!oauthService.IsOAuthConfigured(providerId))
             {
@@ -453,8 +485,8 @@ public static class ProviderConfigEndpoints
 
             var authUrl = oauthService.GetAuthorizationUrl(
                 providerId,
-                customerId.Value,
-                userId.Value,
+                resolved.CustomerId!.Value,
+                resolved.UserId!.Value,
                 NormalizeOAuthReturnUrl(returnUrl ?? string.Empty));
             return Results.Ok(new { authorizationUrl = authUrl });
         });
@@ -497,7 +529,7 @@ public static class ProviderConfigEndpoints
             }
 
             var normalizedProviderId = providerId.ToLowerInvariant();
-            var existing = await repository.GetAsync(stateUserId, normalizedProviderId, cancellationToken);
+            var existing = await repository.GetAsync(stateCustomerId, stateUserId, normalizedProviderId, cancellationToken);
 
             // Save the OAuth tokens
             var config = new UserProviderConfig
@@ -553,15 +585,20 @@ public static class ProviderConfigEndpoints
         routes.MapPost("/{providerId}/oauth/disconnect", async (
             string providerId,
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IProviderOAuthService oauthService,
             IUserProviderConfigRepository repository,
             ICredentialEncryption encryption,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            if (userId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
-            var config = await repository.GetAsync(userId.Value, providerId, cancellationToken);
+            var config = await repository.GetAsync(
+                resolved.CustomerId!.Value,
+                resolved.UserId!.Value,
+                providerId,
+                cancellationToken);
             if (config is null || config.AuthType != "oauth")
             {
                 return Results.NotFound(new { message = $"No OAuth connection found for provider '{providerId}'." });
@@ -577,7 +614,11 @@ public static class ProviderConfigEndpoints
             // Delete the config
             try
             {
-                await repository.DeleteAsync(userId.Value, providerId, cancellationToken);
+                await repository.DeleteAsync(
+                    resolved.CustomerId.Value,
+                    resolved.UserId.Value,
+                    providerId,
+                    cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -591,16 +632,20 @@ public static class ProviderConfigEndpoints
         routes.MapPost("/{providerId}/oauth/refresh", async (
             string providerId,
             ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
             IProviderOAuthService oauthService,
             IUserProviderConfigRepository repository,
             ICredentialEncryption encryption,
             CancellationToken cancellationToken) =>
         {
-            var userId = GetUserId(user);
-            var customerId = GetCustomerId(user);
-            if (userId is null || customerId is null) return Results.Unauthorized();
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
 
-            var config = await repository.GetAsync(userId.Value, providerId, cancellationToken);
+            var config = await repository.GetAsync(
+                resolved.CustomerId!.Value,
+                resolved.UserId!.Value,
+                providerId,
+                cancellationToken);
             if (config is null || config.AuthType != "oauth" || string.IsNullOrEmpty(config.EncryptedRefreshToken))
             {
                 return Results.BadRequest(new { message = "No refresh token available." });
@@ -643,33 +688,26 @@ public static class ProviderConfigEndpoints
         });
     }
 
-    private static Guid? GetUserId(ClaimsPrincipal user)
+    private static async Task<(Guid? CustomerId, Guid? UserId, TenantContext? TenantContext, IResult? ErrorResult)> ResolveProviderConfigContextAsync(
+        ClaimsPrincipal user,
+        ITenantCatalogStore catalogStore,
+        CancellationToken cancellationToken)
     {
-        var sub =
-            user.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? user.FindFirstValue("user_id")
-            ?? user.FindFirstValue("sub");
-        if (sub is not null && Guid.TryParse(sub, out var userId))
+        var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
+        if (errorResult is not null)
         {
-            return userId;
+            return (null, null, null, errorResult);
         }
-        // For Firebase, the sub is a string ID - hash it to a GUID
-        if (sub is not null)
-        {
-            return GuidFromString(sub);
-        }
-        return null;
-    }
 
-    private static Guid? GetCustomerId(ClaimsPrincipal user)
-    {
-        // Customer ID could come from a custom claim or default to user ID for individual users
-        var customerId = user.FindFirstValue("customer_id");
-        if (customerId is not null && Guid.TryParse(customerId, out var cid))
+        if (context is null || string.IsNullOrWhiteSpace(context.ExternalId) || string.IsNullOrWhiteSpace(context.CustomerId))
         {
-            return cid;
+            return (null, null, null, Results.Problem(
+                title: "Invalid authenticated user profile",
+                detail: "Authenticated token is missing a stable user or customer identifier.",
+                statusCode: StatusCodes.Status401Unauthorized));
         }
-        return GetUserId(user);
+
+        return (GuidFromString(context.CustomerId), GuidFromString(context.ExternalId), context, null);
     }
 
     private static Guid GuidFromString(string input)
@@ -699,7 +737,7 @@ public static class ProviderConfigEndpoints
             ProviderId = normalizedProviderId
         };
 
-        config.CustomerId = existing?.CustomerId ?? customerId;
+        config.CustomerId = customerId;
         config.UserId = userId;
         config.ProviderId = normalizedProviderId;
         config.AuthType = authType;

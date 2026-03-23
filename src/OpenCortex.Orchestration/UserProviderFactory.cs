@@ -36,13 +36,13 @@ public sealed class UserProviderFactory : IUserProviderFactory
         _logger = logger;
     }
 
-    public async Task<IModelProvider?> GetProviderForUserAsync(Guid userId, string providerId, CancellationToken cancellationToken = default)
+    public async Task<IModelProvider?> GetProviderForUserAsync(Guid customerId, Guid userId, string providerId, CancellationToken cancellationToken = default)
     {
         var normalizedProviderId = NormalizeProviderId(providerId);
-        var config = await _configRepository.GetAsync(userId, normalizedProviderId, cancellationToken);
+        var config = await _configRepository.GetAsync(customerId, userId, normalizedProviderId, cancellationToken);
         if (config is null || !config.IsEnabled)
         {
-            _logger.LogDebug("No enabled config found for user {UserId} provider {ProviderId}", userId, normalizedProviderId);
+            _logger.LogDebug("No enabled config found for customer {CustomerId} user {UserId} provider {ProviderId}", customerId, userId, normalizedProviderId);
             return null;
         }
 
@@ -59,9 +59,9 @@ public sealed class UserProviderFactory : IUserProviderFactory
         return CreateProvider(config);
     }
 
-    public async Task<IReadOnlyList<IModelProvider>> GetProvidersForUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<IModelProvider>> GetProvidersForUserAsync(Guid customerId, Guid userId, CancellationToken cancellationToken = default)
     {
-        var configs = await _configRepository.ListByUserAsync(userId, cancellationToken);
+        var configs = await _configRepository.ListByUserAsync(customerId, userId, cancellationToken);
         var providers = new List<IModelProvider>();
 
         foreach (var config in configs.Where(c => c.IsEnabled))
@@ -88,9 +88,9 @@ public sealed class UserProviderFactory : IUserProviderFactory
         return providers;
     }
 
-    public async Task<bool> HasConfiguredProvidersAsync(Guid userId, CancellationToken cancellationToken = default)
+    public async Task<bool> HasConfiguredProvidersAsync(Guid customerId, Guid userId, CancellationToken cancellationToken = default)
     {
-        return await _configRepository.HasAnyConfiguredAsync(userId, cancellationToken);
+        return await _configRepository.HasAnyConfiguredAsync(customerId, userId, cancellationToken);
     }
 
     private Task<bool> NeedsTokenRefreshAsync(UserProviderConfig config, CancellationToken cancellationToken)

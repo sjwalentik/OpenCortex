@@ -22,10 +22,11 @@ public sealed class UserCredentialService : IUserCredentialService
     }
 
     public async Task<IReadOnlyDictionary<string, string>> GetDecryptedCredentialsAsync(
+        Guid customerId,
         Guid userId,
         CancellationToken cancellationToken = default)
     {
-        var configs = await _configRepository.ListByUserAsync(userId, cancellationToken);
+        var configs = await _configRepository.ListByUserAsync(customerId, userId, cancellationToken);
         var credentials = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var config in configs.Where(c => c.IsEnabled))
@@ -37,18 +38,19 @@ public sealed class UserCredentialService : IUserCredentialService
             }
         }
 
-        _logger.LogDebug("Retrieved {Count} credentials for user {UserId}",
-            credentials.Count, userId);
+        _logger.LogDebug("Retrieved {Count} credentials for customer {CustomerId} user {UserId}",
+            credentials.Count, customerId, userId);
 
         return credentials;
     }
 
     public async Task<string?> GetDecryptedCredentialAsync(
+        Guid customerId,
         Guid userId,
         string providerId,
         CancellationToken cancellationToken = default)
     {
-        var config = await _configRepository.GetAsync(userId, providerId, cancellationToken);
+        var config = await _configRepository.GetAsync(customerId, userId, providerId, cancellationToken);
         if (config is null || !config.IsEnabled)
         {
             return null;

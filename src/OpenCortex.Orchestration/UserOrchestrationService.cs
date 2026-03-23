@@ -13,26 +13,31 @@ namespace OpenCortex.Orchestration;
 public interface IUserOrchestrationService
 {
     Task<IReadOnlyList<IModelProvider>> GetProvidersAsync(
+        Guid customerId,
         Guid userId,
         CancellationToken cancellationToken = default);
 
     Task<IModelProvider?> GetProviderAsync(
+        Guid customerId,
         Guid userId,
         string providerId,
         CancellationToken cancellationToken = default);
 
     Task<RoutingDecision> RouteAsync(
+        Guid customerId,
         Guid userId,
         string message,
         RoutingContext? context = null,
         CancellationToken cancellationToken = default);
 
     Task<OrchestrationResult> ExecuteAsync(
+        Guid customerId,
         Guid userId,
         OrchestrationRequest request,
         CancellationToken cancellationToken = default);
 
     IAsyncEnumerable<OrchestrationStreamChunk> StreamAsync(
+        Guid customerId,
         Guid userId,
         OrchestrationRequest request,
         CancellationToken cancellationToken = default);
@@ -61,42 +66,47 @@ public sealed class UserOrchestrationService : IUserOrchestrationService
     }
 
     public Task<IModelProvider?> GetProviderAsync(
+        Guid customerId,
         Guid userId,
         string providerId,
         CancellationToken cancellationToken = default) =>
-        _userProviderFactory.GetProviderForUserAsync(userId, providerId, cancellationToken);
+        _userProviderFactory.GetProviderForUserAsync(customerId, userId, providerId, cancellationToken);
 
     public Task<IReadOnlyList<IModelProvider>> GetProvidersAsync(
+        Guid customerId,
         Guid userId,
         CancellationToken cancellationToken = default) =>
-        _userProviderFactory.GetProvidersForUserAsync(userId, cancellationToken);
+        _userProviderFactory.GetProvidersForUserAsync(customerId, userId, cancellationToken);
 
     public async Task<RoutingDecision> RouteAsync(
+        Guid customerId,
         Guid userId,
         string message,
         RoutingContext? context = null,
         CancellationToken cancellationToken = default)
     {
-        var router = await CreateRouterAsync(userId, cancellationToken);
+        var router = await CreateRouterAsync(customerId, userId, cancellationToken);
         return await router.RouteAsync(message, context, cancellationToken);
     }
 
     public async Task<OrchestrationResult> ExecuteAsync(
+        Guid customerId,
         Guid userId,
         OrchestrationRequest request,
         CancellationToken cancellationToken = default)
     {
-        var router = await CreateRouterAsync(userId, cancellationToken);
+        var router = await CreateRouterAsync(customerId, userId, cancellationToken);
         var engine = CreateEngine(router);
         return await engine.ExecuteAsync(request, cancellationToken);
     }
 
     public async IAsyncEnumerable<OrchestrationStreamChunk> StreamAsync(
+        Guid customerId,
         Guid userId,
         OrchestrationRequest request,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var router = await CreateRouterAsync(userId, cancellationToken);
+        var router = await CreateRouterAsync(customerId, userId, cancellationToken);
         var engine = CreateEngine(router);
 
         await foreach (var chunk in engine.StreamAsync(request, cancellationToken))
@@ -105,9 +115,9 @@ public sealed class UserOrchestrationService : IUserOrchestrationService
         }
     }
 
-    private async Task<IModelRouter> CreateRouterAsync(Guid userId, CancellationToken cancellationToken)
+    private async Task<IModelRouter> CreateRouterAsync(Guid customerId, Guid userId, CancellationToken cancellationToken)
     {
-        var providers = await _userProviderFactory.GetProvidersForUserAsync(userId, cancellationToken);
+        var providers = await _userProviderFactory.GetProvidersForUserAsync(customerId, userId, cancellationToken);
         if (providers.Count == 0)
         {
             throw new InvalidOperationException("No enabled providers are configured for this user. Configure a provider in Settings first.");

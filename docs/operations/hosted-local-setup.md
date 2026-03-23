@@ -63,6 +63,11 @@ Current migration set:
 - `0004_managed_content.sql`
 - `0005_api_tokens.sql`
 - `0006_managed_document_versions.sql`
+- `0007_conversations.sql`
+- `0008_user_provider_configs.sql`
+- `0009_user_memory_brain.sql`
+- `0009a_customer_membership_memory_brain.sql`
+- `0010_tenant_scoped_user_provider_configs.sql`
 
 ## Step 3: Initialize User Secrets
 
@@ -267,7 +272,7 @@ Check:
 
 - connection string on API/MCP/workers
 - local Postgres container is running
-- all migrations through `0006` were applied
+- all migrations through `0010` were applied
 
 ### Billing routes fail
 

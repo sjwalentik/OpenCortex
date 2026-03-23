@@ -232,7 +232,10 @@ public static class ChatEndpoints
                 return resolved.ErrorResult;
             }
 
-            var providers = await orchestrationService.GetProvidersAsync(resolved.UserGuid!.Value, cancellationToken);
+            var providers = await orchestrationService.GetProvidersAsync(
+                resolved.CustomerGuid!.Value,
+                resolved.UserGuid!.Value,
+                cancellationToken);
             return Results.Ok(BuildProvidersPayload(providers));
         });
 
@@ -249,7 +252,11 @@ public static class ChatEndpoints
                 return resolved.ErrorResult;
             }
 
-            var provider = await orchestrationService.GetProviderAsync(resolved.UserGuid!.Value, providerId, cancellationToken);
+            var provider = await orchestrationService.GetProviderAsync(
+                resolved.CustomerGuid!.Value,
+                resolved.UserGuid!.Value,
+                providerId,
+                cancellationToken);
             if (provider is null)
             {
                 return Results.NotFound(new { message = $"Provider '{providerId}' was not found for the current user." });
@@ -279,7 +286,11 @@ public static class ChatEndpoints
                 return resolved.ErrorResult;
             }
 
-            var provider = await orchestrationService.GetProviderAsync(resolved.UserGuid!.Value, providerId, cancellationToken);
+            var provider = await orchestrationService.GetProviderAsync(
+                resolved.CustomerGuid!.Value,
+                resolved.UserGuid!.Value,
+                providerId,
+                cancellationToken);
             if (provider is null)
             {
                 return Results.NotFound(new { message = $"Provider '{providerId}' was not found for the current user." });
@@ -330,6 +341,7 @@ public static class ChatEndpoints
                 };
 
                 var decision = await orchestrationService.RouteAsync(
+                    resolved.CustomerGuid!.Value,
                     resolved.UserGuid!.Value,
                     request.Message,
                     context,
@@ -385,6 +397,7 @@ public static class ChatEndpoints
 
                 var orchestrationRequest = BuildOrchestrationRequest(request, resolved.TenantContext);
                 var result = await orchestrationService.ExecuteAsync(
+                    resolved.CustomerGuid!.Value,
                     resolved.UserGuid!.Value,
                     orchestrationRequest,
                     cancellationToken);
@@ -453,6 +466,7 @@ public static class ChatEndpoints
                 var streamResult = await StreamChatCompletionAsync(
                     response,
                     orchestrationService.StreamAsync(
+                        resolved.CustomerGuid!.Value,
                         resolved.UserGuid!.Value,
                         orchestrationRequest,
                         cancellationToken),
@@ -520,6 +534,7 @@ public static class ChatEndpoints
 
                 // Load user credentials for tool execution
                 var credentials = await credentialService.GetDecryptedCredentialsAsync(
+                    resolved.CustomerGuid!.Value,
                     resolved.UserGuid!.Value, cancellationToken);
 
                 var agenticRequest = BuildAgenticRequest(request, resolved, credentials);
@@ -588,6 +603,7 @@ public static class ChatEndpoints
 
                 // Load user credentials for tool execution
                 var credentials = await credentialService.GetDecryptedCredentialsAsync(
+                    resolved.CustomerGuid!.Value,
                     resolved.UserGuid!.Value, cancellationToken);
 
                 var agenticRequest = BuildAgenticRequest(request, resolved, credentials);
@@ -619,7 +635,7 @@ public static class ChatEndpoints
         });
     }
 
-    private static async Task<(Guid? UserGuid, OpenCortex.Core.Tenancy.TenantContext? TenantContext, IResult? ErrorResult)> ResolveAuthenticatedChatContextAsync(
+    private static async Task<(Guid? CustomerGuid, Guid? UserGuid, OpenCortex.Core.Tenancy.TenantContext? TenantContext, IResult? ErrorResult)> ResolveAuthenticatedChatContextAsync(
         ClaimsPrincipal user,
         ITenantCatalogStore catalogStore,
         CancellationToken cancellationToken)
@@ -627,18 +643,18 @@ public static class ChatEndpoints
         var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
         if (errorResult is not null)
         {
-            return (null, null, errorResult);
+            return (null, null, null, errorResult);
         }
 
-        if (context is null || string.IsNullOrWhiteSpace(context.ExternalId))
+        if (context is null || string.IsNullOrWhiteSpace(context.ExternalId) || string.IsNullOrWhiteSpace(context.CustomerId))
         {
-            return (null, null, Results.Problem(
+            return (null, null, null, Results.Problem(
                 title: "Invalid authenticated user profile",
-                detail: "Authenticated token is missing a stable external identifier.",
+                detail: "Authenticated token is missing a stable user or customer identifier.",
                 statusCode: StatusCodes.Status401Unauthorized));
         }
 
-        return (GuidFromString(context.ExternalId), context, null);
+        return (GuidFromString(context.CustomerId), GuidFromString(context.ExternalId), context, null);
     }
 
     private static object BuildProvidersPayload(IReadOnlyList<IModelProvider> providers) => new
@@ -1017,13 +1033,13 @@ public static class ChatEndpoints
 
     private static AgenticOrchestrationRequest BuildAgenticRequest(
         ChatCompletionRequest request,
-        (Guid? UserGuid, OpenCortex.Core.Tenancy.TenantContext? TenantContext, IResult? ErrorResult) resolved,
+        (Guid? CustomerGuid, Guid? UserGuid, OpenCortex.Core.Tenancy.TenantContext? TenantContext, IResult? ErrorResult) resolved,
         IReadOnlyDictionary<string, string>? credentials)
     {
         return new AgenticOrchestrationRequest
         {
             UserId = resolved.UserGuid!.Value,
-            CustomerId = GuidFromString(resolved.TenantContext!.CustomerId),
+            CustomerId = resolved.CustomerGuid!.Value,
             ConversationId = request.ConversationId ?? Guid.NewGuid().ToString(),
             Messages = request.Messages.Select(m => new ChatMessage
             {
@@ -1036,7 +1052,7 @@ public static class ChatEndpoints
             MaxIterations = request.MaxToolIterations ?? 25,
             RoutingContext = new RoutingContext
             {
-                CustomerId = resolved.TenantContext.CustomerId,
+                CustomerId = resolved.TenantContext!.CustomerId,
                 UserId = resolved.TenantContext.UserId,
                 BrainId = request.BrainId ?? resolved.TenantContext.BrainId,
                 ConversationId = request.ConversationId,

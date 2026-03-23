@@ -15,7 +15,7 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
         _connectionFactory = connectionFactory;
     }
 
-    public async Task<UserProviderConfig?> GetAsync(Guid userId, string providerId, CancellationToken cancellationToken = default)
+    public async Task<UserProviderConfig?> GetAsync(Guid customerId, Guid userId, string providerId, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -38,9 +38,10 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
                     created_at,
                     updated_at
                 FROM {_connectionFactory.Schema}.user_provider_configs
-                WHERE user_id = @user_id AND provider_id = @provider_id;
+                WHERE customer_id = @customer_id AND user_id = @user_id AND provider_id = @provider_id;
                 """;
 
+            command.Parameters.AddWithValue("customer_id", customerId.ToString());
             command.Parameters.AddWithValue("user_id", userId.ToString());
             command.Parameters.AddWithValue("provider_id", providerId);
 
@@ -58,7 +59,7 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
         return null;
     }
 
-    public async Task<IReadOnlyList<UserProviderConfig>> ListByUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<UserProviderConfig>> ListByUserAsync(Guid customerId, Guid userId, CancellationToken cancellationToken = default)
     {
         var configs = new List<UserProviderConfig>();
         try
@@ -82,10 +83,11 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
                     created_at,
                     updated_at
                 FROM {_connectionFactory.Schema}.user_provider_configs
-                WHERE user_id = @user_id
+                WHERE customer_id = @customer_id AND user_id = @user_id
                 ORDER BY provider_id;
                 """;
 
+            command.Parameters.AddWithValue("customer_id", customerId.ToString());
             command.Parameters.AddWithValue("user_id", userId.ToString());
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -138,7 +140,7 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
                     @is_enabled,
                     @created_at
                 )
-                ON CONFLICT (user_id, provider_id) DO UPDATE SET
+                ON CONFLICT (customer_id, user_id, provider_id) DO UPDATE SET
                     auth_type = EXCLUDED.auth_type,
                     encrypted_api_key = EXCLUDED.encrypted_api_key,
                     encrypted_access_token = EXCLUDED.encrypted_access_token,
@@ -178,7 +180,7 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
         return config;
     }
 
-    public async Task DeleteAsync(Guid userId, string providerId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(Guid customerId, Guid userId, string providerId, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -187,9 +189,10 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
 
             command.CommandText = $"""
                 DELETE FROM {_connectionFactory.Schema}.user_provider_configs
-                WHERE user_id = @user_id AND provider_id = @provider_id;
+                WHERE customer_id = @customer_id AND user_id = @user_id AND provider_id = @provider_id;
                 """;
 
+            command.Parameters.AddWithValue("customer_id", customerId.ToString());
             command.Parameters.AddWithValue("user_id", userId.ToString());
             command.Parameters.AddWithValue("provider_id", providerId);
 
@@ -201,7 +204,7 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
         }
     }
 
-    public async Task<bool> HasAnyConfiguredAsync(Guid userId, CancellationToken cancellationToken = default)
+    public async Task<bool> HasAnyConfiguredAsync(Guid customerId, Guid userId, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -211,10 +214,11 @@ public sealed class PostgresUserProviderConfigRepository : IUserProviderConfigRe
             command.CommandText = $"""
                 SELECT EXISTS(
                     SELECT 1 FROM {_connectionFactory.Schema}.user_provider_configs
-                    WHERE user_id = @user_id AND is_enabled = true
+                    WHERE customer_id = @customer_id AND user_id = @user_id AND is_enabled = true
                 );
                 """;
 
+            command.Parameters.AddWithValue("customer_id", customerId.ToString());
             command.Parameters.AddWithValue("user_id", userId.ToString());
 
             var result = await command.ExecuteScalarAsync(cancellationToken);

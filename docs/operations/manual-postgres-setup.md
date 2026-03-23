@@ -76,6 +76,11 @@ psql "postgresql://user:password@host:5432/opencortex" -v ON_ERROR_STOP=1 -f inf
 - `infra/postgres/migrations/0004_managed_content.sql`
 - `infra/postgres/migrations/0005_api_tokens.sql`
 - `infra/postgres/migrations/0006_managed_document_versions.sql`
+- `infra/postgres/migrations/0007_conversations.sql`
+- `infra/postgres/migrations/0008_user_provider_configs.sql`
+- `infra/postgres/migrations/0009_user_memory_brain.sql`
+- `infra/postgres/migrations/0009a_customer_membership_memory_brain.sql`
+- `infra/postgres/migrations/0010_tenant_scoped_user_provider_configs.sql`
 
 ## Notes
 
