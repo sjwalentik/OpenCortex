@@ -72,16 +72,26 @@ public sealed class ListDirectoryHandler : IToolHandler
         }
 
         var entries = new List<object>();
+        var currentRelativeDirectory = path == "." ? string.Empty : path;
 
         // Parse ls -la output: permissions links owner group size month day time name
         foreach (var line in result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
+            var trimmedLine = line.Trim();
+
+            if (recursive && trimmedLine.EndsWith(':'))
+            {
+                var headerPath = trimmedLine.TrimEnd(':');
+                currentRelativeDirectory = ResolveRemoteRelativeDirectory(path, resolvedPath, headerPath);
+                continue;
+            }
+
             // Skip "total" line and . / .. entries
-            if (line.StartsWith("total ") || line.EndsWith(" .") || line.EndsWith(" .."))
+            if (trimmedLine.StartsWith("total ") || trimmedLine.EndsWith(" .") || trimmedLine.EndsWith(" .."))
                 continue;
 
             // Split by whitespace, then join the tail back together in case the file name contains spaces.
-            var parts = Regex.Split(line.Trim(), @"\s+");
+            var parts = Regex.Split(trimmedLine, @"\s+");
             if (parts.Length < 9) continue;
 
             var permissions = parts[0];
@@ -92,7 +102,9 @@ public sealed class ListDirectoryHandler : IToolHandler
             if (name.StartsWith('.')) continue;
 
             var isDirectory = permissions.StartsWith('d');
-            var relativePath = path == "." ? name : $"{path}/{name}";
+            var relativePath = string.IsNullOrEmpty(currentRelativeDirectory)
+                ? name
+                : $"{currentRelativeDirectory}/{name}";
 
             if (SensitivePathPolicy.IsSensitive(relativePath))
             {
@@ -126,6 +138,32 @@ public sealed class ListDirectoryHandler : IToolHandler
             path,
             entries
         });
+    }
+
+    private static string ResolveRemoteRelativeDirectory(string requestedPath, string resolvedPath, string headerPath)
+    {
+        var normalizedHeader = headerPath.Replace('\\', '/').TrimEnd('/');
+        var normalizedResolved = resolvedPath.Replace('\\', '/').TrimEnd('/');
+
+        if (string.Equals(normalizedHeader, normalizedResolved, StringComparison.Ordinal))
+        {
+            return requestedPath == "." ? string.Empty : requestedPath;
+        }
+
+        if (normalizedHeader.StartsWith(normalizedResolved + "/", StringComparison.Ordinal))
+        {
+            var suffix = normalizedHeader[(normalizedResolved.Length + 1)..];
+            if (string.IsNullOrEmpty(suffix))
+            {
+                return requestedPath == "." ? string.Empty : requestedPath;
+            }
+
+            return requestedPath == "."
+                ? suffix
+                : $"{requestedPath}/{suffix}";
+        }
+
+        return requestedPath == "." ? string.Empty : requestedPath;
     }
 
     private async Task<string> ExecuteLocalAsync(
