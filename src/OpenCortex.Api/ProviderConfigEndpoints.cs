@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using OpenCortex.Core;
 using OpenCortex.Core.OAuth;
+using OpenCortex.Tools;
 
 namespace OpenCortex.Api;
 
@@ -198,6 +200,14 @@ public static class ProviderConfigEndpoints
                     oauthService.IsOAuthConfigured("openai")
                 ),
                 new AvailableProvider(
+                    "openai-codex",
+                    "OpenAI Codex (ChatGPT subscription)",
+                    new[] { "session_json" },
+                    "gpt-5.4",
+                    "https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan",
+                    false
+                ),
+                new AvailableProvider(
                     "ollama",
                     "Ollama (Local/Self-hosted)",
                     new[] { "none" },
@@ -211,13 +221,216 @@ public static class ProviderConfigEndpoints
                     oauthService.IsOAuthConfigured("github")
                         ? new[] { "oauth", "api_key" }
                         : new[] { "api_key" },
-                    null,
+                    string.Empty,
                     "https://github.com/settings/tokens?type=beta",
                     oauthService.IsOAuthConfigured("github")
                 )
             };
 
             return Results.Ok(new { providers = available });
+        });
+
+        routes.MapPost("/openai-codex/hosted-login/start", async (
+            ClaimsPrincipal user,
+            IWorkspaceManager workspaceManager,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = GetUserId(user);
+            if (userId is null) return Results.Unauthorized();
+
+            if (!workspaceManager.SupportsContainerIsolation)
+            {
+                return Results.BadRequest(new
+                {
+                    message = "Hosted Codex sign-in is available only when workspaces run in isolated containers or pods. Use manual session import for local mode."
+                });
+            }
+
+            var workspaceStatus = await workspaceManager.EnsureRunningAsync(userId.Value, null, cancellationToken);
+            var workspacePath = workspaceStatus.WorkspacePath
+                ?? await workspaceManager.GetWorkspacePathAsync(userId.Value, cancellationToken);
+            var environment = BuildCodexRuntimeEnvironment(workspaceManager, workspacePath);
+            var authFilePath = WorkspaceRuntimePaths.GetCodexAuthFilePath(
+                workspaceManager.SupportsContainerIsolation,
+                workspacePath).Replace('\\', '/');
+            var authDirectory = Path.GetDirectoryName(authFilePath)?.Replace('\\', '/');
+            var logPath = WorkspaceRuntimePaths.GetCodexDeviceAuthLogPath(workspacePath).Replace('\\', '/');
+            var pidPath = WorkspaceRuntimePaths.GetCodexDeviceAuthPidPath(workspacePath).Replace('\\', '/');
+            var stateDirectory = WorkspaceRuntimePaths.GetCodexStateDirectoryPath(workspacePath).Replace('\\', '/');
+
+            if (string.IsNullOrWhiteSpace(authDirectory))
+            {
+                return Results.Problem(
+                    title: "Hosted Codex sign-in is not ready.",
+                    detail: "Failed to resolve the runtime auth directory.",
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            var startScript =
+                $"mkdir -p {ShellEscaping.SingleQuote(stateDirectory)} {ShellEscaping.SingleQuote(authDirectory)} " +
+                $"&& rm -f {ShellEscaping.SingleQuote(logPath)} {ShellEscaping.SingleQuote(pidPath)} {ShellEscaping.SingleQuote(authFilePath)} " +
+                $"&& nohup codex login --device-auth -c cli_auth_credentials_store='file' > {ShellEscaping.SingleQuote(logPath)} 2>&1 < /dev/null & echo $! > {ShellEscaping.SingleQuote(pidPath)}";
+
+            var result = await workspaceManager.ExecuteCommandAsync(
+                userId.Value,
+                "/bin/sh",
+                argumentList:
+                [
+                    "-c",
+                    startScript
+                ],
+                environmentVariables: environment,
+                cancellationToken: cancellationToken);
+
+            if (!result.Success)
+            {
+                return Results.Problem(
+                    title: "Failed to start hosted Codex sign-in.",
+                    detail: ErrorMessages.ForExternalFailure("Failed to start hosted Codex sign-in.", result.StandardError),
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            var status = await ReadHostedCodexLoginStatusAsync(
+                workspaceManager,
+                userId.Value,
+                cancellationToken);
+
+            return Results.Ok(status with
+            {
+                Message = "Hosted Codex sign-in started. Use the login URL and code shown in the log output, then complete sign-in after authentication succeeds."
+            });
+        });
+
+        routes.MapGet("/openai-codex/hosted-login/status", async (
+            ClaimsPrincipal user,
+            IWorkspaceManager workspaceManager,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = GetUserId(user);
+            if (userId is null) return Results.Unauthorized();
+
+            if (!workspaceManager.SupportsContainerIsolation)
+            {
+                return Results.BadRequest(new
+                {
+                    message = "Hosted Codex sign-in status is available only for isolated container or pod runtimes."
+                });
+            }
+
+            var status = await ReadHostedCodexLoginStatusAsync(
+                workspaceManager,
+                userId.Value,
+                cancellationToken);
+
+            return Results.Ok(status);
+        });
+
+        routes.MapPost("/openai-codex/hosted-login/complete", async (
+            ClaimsPrincipal user,
+            IUserProviderConfigRepository repository,
+            ICredentialEncryption encryption,
+            IWorkspaceManager workspaceManager,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = GetUserId(user);
+            var customerId = GetCustomerId(user);
+            if (userId is null || customerId is null) return Results.Unauthorized();
+
+            if (!workspaceManager.SupportsContainerIsolation)
+            {
+                return Results.BadRequest(new
+                {
+                    message = "Hosted Codex sign-in completion is available only for isolated container or pod runtimes."
+                });
+            }
+
+            var workspacePath = await workspaceManager.GetWorkspacePathAsync(userId.Value, cancellationToken);
+            var authFilePath = WorkspaceRuntimePaths.GetCodexAuthFilePath(
+                workspaceManager.SupportsContainerIsolation,
+                workspacePath).Replace('\\', '/');
+
+            var authReadResult = await workspaceManager.ExecuteCommandAsync(
+                userId.Value,
+                "/bin/sh",
+                argumentList:
+                [
+                    "-c",
+                    $"cat {ShellEscaping.SingleQuote(authFilePath)}"
+                ],
+                environmentVariables: BuildCodexRuntimeEnvironment(workspaceManager, workspacePath),
+                cancellationToken: cancellationToken);
+
+            if (!authReadResult.Success || string.IsNullOrWhiteSpace(authReadResult.StandardOutput))
+            {
+                return Results.BadRequest(new
+                {
+                    message = "Hosted Codex sign-in has not completed yet. No auth cache was found in the runtime."
+                });
+            }
+
+            var existing = await repository.GetAsync(userId.Value, WorkspaceRuntimePaths.CodexProviderId, cancellationToken);
+            var config = MergeProviderConfig(
+                existing,
+                new ProviderConfigRequest(
+                    AuthType: "session_json",
+                    SessionJson: authReadResult.StandardOutput.Trim(),
+                    IsEnabled: true),
+                customerId.Value,
+                userId.Value,
+                WorkspaceRuntimePaths.CodexProviderId,
+                encryption);
+
+            try
+            {
+                await repository.UpsertAsync(config, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BuildProviderConfigStorageUnavailableResult(ex);
+            }
+
+            return Results.Ok(new
+            {
+                message = "Hosted Codex sign-in completed and the session was saved for this account.",
+                providerId = WorkspaceRuntimePaths.CodexProviderId
+            });
+        });
+
+        routes.MapPost("/openai-codex/hosted-login/cancel", async (
+            ClaimsPrincipal user,
+            IWorkspaceManager workspaceManager,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = GetUserId(user);
+            if (userId is null) return Results.Unauthorized();
+
+            if (!workspaceManager.SupportsContainerIsolation)
+            {
+                return Results.BadRequest(new
+                {
+                    message = "Hosted Codex sign-in cancellation is available only for isolated container or pod runtimes."
+                });
+            }
+
+            var workspacePath = await workspaceManager.GetWorkspacePathAsync(userId.Value, cancellationToken);
+            var pidPath = WorkspaceRuntimePaths.GetCodexDeviceAuthPidPath(workspacePath).Replace('\\', '/');
+
+            await workspaceManager.ExecuteCommandAsync(
+                userId.Value,
+                "/bin/sh",
+                argumentList:
+                [
+                    "-c",
+                    $"if [ -f {ShellEscaping.SingleQuote(pidPath)} ]; then kill $(cat {ShellEscaping.SingleQuote(pidPath)}) >/dev/null 2>&1 || true; rm -f {ShellEscaping.SingleQuote(pidPath)}; fi"
+                ],
+                cancellationToken: cancellationToken);
+
+            var status = await ReadHostedCodexLoginStatusAsync(
+                workspaceManager,
+                userId.Value,
+                cancellationToken);
+
+            return Results.Ok(status with { Message = "Hosted Codex sign-in was cancelled." });
         });
 
         // --- OAuth Flow Endpoints ---
@@ -499,6 +712,11 @@ public static class ProviderConfigEndpoints
             config.EncryptedAccessToken = encryption.Encrypt(request.AccessToken.Trim());
         }
 
+        if (!string.IsNullOrWhiteSpace(request.SessionJson))
+        {
+            config.EncryptedAccessToken = encryption.Encrypt(request.SessionJson.Trim());
+        }
+
         if (!string.IsNullOrWhiteSpace(request.RefreshToken))
         {
             config.EncryptedRefreshToken = encryption.Encrypt(request.RefreshToken.Trim());
@@ -518,6 +736,11 @@ public static class ProviderConfigEndpoints
                 break;
             case "oauth":
                 config.EncryptedApiKey = null;
+                break;
+            case "session_json":
+                config.EncryptedApiKey = null;
+                config.EncryptedRefreshToken = null;
+                config.TokenExpiresAt = null;
                 break;
         }
 
@@ -553,9 +776,17 @@ public static class ProviderConfigEndpoints
 
     private static string ResolveDefaultAuthType(string providerId)
     {
-        return string.Equals(providerId, "ollama", StringComparison.OrdinalIgnoreCase)
-            ? "none"
-            : "api_key";
+        if (string.Equals(providerId, "ollama", StringComparison.OrdinalIgnoreCase))
+        {
+            return "none";
+        }
+
+        if (string.Equals(providerId, "openai-codex", StringComparison.OrdinalIgnoreCase))
+        {
+            return "session_json";
+        }
+
+        return "api_key";
     }
 
     private static string? NormalizeOAuthReturnUrl(string returnUrl)
@@ -594,6 +825,76 @@ public static class ProviderConfigEndpoints
         return $"{baseUrl}{separator}{query}{hash}";
     }
 
+    private static async Task<HostedCodexLoginStatusResponse> ReadHostedCodexLoginStatusAsync(
+        IWorkspaceManager workspaceManager,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var workspacePath = await workspaceManager.GetWorkspacePathAsync(userId, cancellationToken);
+        var environment = BuildCodexRuntimeEnvironment(workspaceManager, workspacePath);
+        var logPath = WorkspaceRuntimePaths.GetCodexDeviceAuthLogPath(workspacePath).Replace('\\', '/');
+        var pidPath = WorkspaceRuntimePaths.GetCodexDeviceAuthPidPath(workspacePath).Replace('\\', '/');
+        var authFilePath = WorkspaceRuntimePaths.GetCodexAuthFilePath(
+            workspaceManager.SupportsContainerIsolation,
+            workspacePath).Replace('\\', '/');
+
+        var statusResult = await workspaceManager.ExecuteCommandAsync(
+            userId,
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"if [ -f {ShellEscaping.SingleQuote(pidPath)} ]; then pid=$(cat {ShellEscaping.SingleQuote(pidPath)}); if kill -0 \"$pid\" >/dev/null 2>&1; then echo running; else echo finished; fi; else echo not_started; fi"
+            ],
+            environmentVariables: environment,
+            cancellationToken: cancellationToken);
+
+        var logResult = await workspaceManager.ExecuteCommandAsync(
+            userId,
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"tail -n 80 {ShellEscaping.SingleQuote(logPath)} 2>/dev/null || true"
+            ],
+            environmentVariables: environment,
+            cancellationToken: cancellationToken);
+
+        var authResult = await workspaceManager.ExecuteCommandAsync(
+            userId,
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"if [ -f {ShellEscaping.SingleQuote(authFilePath)} ]; then echo true; else echo false; fi"
+            ],
+            environmentVariables: environment,
+            cancellationToken: cancellationToken);
+
+        return new HostedCodexLoginStatusResponse(
+            string.Equals(statusResult.StandardOutput.Trim(), "running", StringComparison.OrdinalIgnoreCase),
+            string.Equals(authResult.StandardOutput.Trim(), "true", StringComparison.OrdinalIgnoreCase),
+            logResult.StandardOutput.Trim(),
+            string.Equals(statusResult.StandardOutput.Trim(), "not_started", StringComparison.OrdinalIgnoreCase)
+                ? "Hosted Codex sign-in has not started yet."
+                : "Hosted Codex sign-in status loaded.");
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildCodexRuntimeEnvironment(
+        IWorkspaceManager workspaceManager,
+        string workspacePath)
+    {
+        var homePath = WorkspaceRuntimePaths.GetCodexHomePath(
+            workspaceManager.SupportsContainerIsolation,
+            workspacePath).Replace('\\', '/');
+
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["HOME"] = homePath,
+            ["CODEX_HOME"] = $"{homePath.TrimEnd('/', '\\')}/.codex"
+        };
+    }
+
     private static IResult BuildProviderConfigStorageUnavailableResult(InvalidOperationException exception) =>
         Results.Problem(
             title: "Provider configuration storage is not ready.",
@@ -609,6 +910,7 @@ internal sealed record ProviderConfigRequest(
     string? AuthType = "api_key",
     string? ApiKey = null,
     string? AccessToken = null,
+    string? SessionJson = null,
     string? RefreshToken = null,
     DateTime? TokenExpiresAt = null,
     UserProviderSettings? Settings = null,
@@ -623,3 +925,11 @@ internal sealed record AvailableProvider(
     string? ConfigUrl,
     bool OAuthConfigured
 );
+
+internal sealed record HostedCodexLoginStatusResponse(
+    bool IsRunning,
+    bool AuthFileAvailable,
+    string Log,
+    string Message
+);
+

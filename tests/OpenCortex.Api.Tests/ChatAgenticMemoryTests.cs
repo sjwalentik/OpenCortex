@@ -259,6 +259,9 @@ public sealed class ChatAgenticMemoryTests : IClassFixture<ChatAgenticMemoryTest
         public Task<IReadOnlyList<Conversation>> ListConversationsAsync(string customerId, int? limit = null, int? offset = null, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task UpdateConversationAsync(Conversation conversation, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
         public Task UpdateTitleAsync(string conversationId, string title, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
     }

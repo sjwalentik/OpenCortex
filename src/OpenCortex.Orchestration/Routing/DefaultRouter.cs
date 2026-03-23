@@ -143,27 +143,30 @@ public sealed class DefaultRouter : IModelRouter
 
     private string GetDefaultProviderForCategory(TaskCategory category)
     {
-        // Map categories to preferred provider types
-        var preferredType = category switch
+        // Map categories to an ordered list of preferred provider types.
+        string[] preferredTypes = category switch
         {
-            TaskCategory.Code => "openai",
-            TaskCategory.Planning => "anthropic",
-            TaskCategory.Writing => "anthropic",
-            TaskCategory.Analysis => "anthropic",
-            TaskCategory.Quick => "ollama",
-            TaskCategory.Private => "ollama",
-            TaskCategory.Reasoning => "anthropic",
-            _ => _options.DefaultProvider ?? "anthropic"
+            TaskCategory.Code => ["openai"],
+            TaskCategory.Planning => ["anthropic"],
+            TaskCategory.Writing => ["anthropic"],
+            TaskCategory.Analysis => ["anthropic"],
+            TaskCategory.Quick => ["ollama"],
+            TaskCategory.Private => ["ollama"],
+            TaskCategory.Reasoning => ["anthropic"],
+            _ => !string.IsNullOrEmpty(_options.DefaultProvider)
+                ? [_options.DefaultProvider]
+                : ["anthropic"]
         };
 
-        // Try to find a provider of the preferred type
-        var provider = _providers.FirstOrDefault(p =>
-            p.ProviderType.Equals(preferredType, StringComparison.OrdinalIgnoreCase));
+        var provider = preferredTypes
+            .Select(preferredType => _providers.FirstOrDefault(p =>
+                p.ProviderType.Equals(preferredType, StringComparison.OrdinalIgnoreCase)))
+            .FirstOrDefault(candidate => candidate is not null);
 
         // Fall back to configured default
         if (provider is null && !string.IsNullOrEmpty(_options.DefaultProvider))
         {
-            provider = _providerMap.GetValueOrDefault(_options.DefaultProvider);
+            _providerMap.TryGetValue(_options.DefaultProvider, out provider);
         }
 
         // Fall back to any available provider

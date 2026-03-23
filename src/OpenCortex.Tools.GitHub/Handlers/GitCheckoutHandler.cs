@@ -201,10 +201,13 @@ public sealed class GitCheckoutHandler : IToolHandler
         {
             var gitDirsResult = await _workspace.ExecuteCommandAsync(
                 userId,
-                $"find {ShellEscaping.SingleQuote(workspacePath)} -mindepth 2 -maxdepth 2 -type d -name .git -exec dirname {{}} \\;",
-                null,
-                null,
-                cancellationToken);
+                "/bin/sh",
+                argumentList:
+                [
+                    "-c",
+                    $"find {ShellEscaping.SingleQuote(workspacePath)} -mindepth 2 -maxdepth 2 -type d -name .git -exec dirname {{}} \\;"
+                ],
+                cancellationToken: cancellationToken);
 
             var gitDirs = gitDirsResult.StandardOutput
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -361,10 +364,14 @@ public sealed class GitCheckoutHandler : IToolHandler
         var shellCommand = GitHubGitAuth.BuildShellCommand(token, arguments);
         var result = await _workspace.ExecuteCommandAsync(
             userId,
-            shellCommand,
-            null,
-            workingDirectory,
-            cancellationToken);
+            "/bin/sh",
+            workingDirectory: workingDirectory,
+            argumentList:
+            [
+                "-c",
+                shellCommand
+            ],
+            cancellationToken: cancellationToken);
 
         return (result.ExitCode == 0, result.StandardOutput, result.StandardError);
     }

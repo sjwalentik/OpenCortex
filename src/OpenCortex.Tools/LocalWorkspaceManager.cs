@@ -148,6 +148,7 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
     {
         // For local mode, just ensure the directory exists
         var workspacePath = await GetWorkspacePathAsync(userId, cancellationToken);
+        SyncCodexAuthState(workspacePath, credentials);
 
         lock (_lock)
         {
@@ -170,6 +171,9 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
         string command,
         string? arguments = null,
         string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environmentVariables = null,
+        IReadOnlyList<string>? argumentList = null,
+        string? standardInput = null,
         CancellationToken cancellationToken = default)
     {
         var workspacePath = await GetWorkspacePathAsync(userId, cancellationToken);
@@ -193,8 +197,8 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
             StartInfo = new ProcessStartInfo
             {
                 FileName = command,
-                Arguments = arguments ?? string.Empty,
                 WorkingDirectory = workDir,
+                RedirectStandardInput = standardInput is not null,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -202,9 +206,35 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
             }
         };
 
+        if (argumentList is { Count: > 0 })
+        {
+            foreach (var argument in argumentList)
+            {
+                process.StartInfo.ArgumentList.Add(argument);
+            }
+        }
+        else
+        {
+            process.StartInfo.Arguments = arguments ?? string.Empty;
+        }
+
+        if (environmentVariables is not null)
+        {
+            foreach (var (key, value) in environmentVariables)
+            {
+                process.StartInfo.Environment[key] = value;
+            }
+        }
+
         try
         {
             process.Start();
+
+            if (standardInput is not null)
+            {
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken);
+                process.StandardInput.Close();
+            }
 
             var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -277,5 +307,59 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
 
         // Relative paths are relative to the current directory
         return Path.GetFullPath(basePath);
+    }
+
+    private static void SyncCodexAuthState(
+        string workspacePath,
+        IReadOnlyDictionary<string, string>? credentials)
+    {
+        var authFilePath = WorkspaceRuntimePaths.GetCodexAuthFilePath(
+            supportsContainerIsolation: false,
+            workspacePath);
+        var authDirectory = Path.GetDirectoryName(authFilePath);
+        var sessionJson = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.CodexProviderId);
+
+        if (string.IsNullOrWhiteSpace(sessionJson))
+        {
+            if (File.Exists(authFilePath))
+            {
+                File.Delete(authFilePath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(authDirectory) && Directory.Exists(authDirectory))
+            {
+                TryDeleteEmptyDirectory(authDirectory);
+                var codexRoot = Directory.GetParent(authDirectory)?.FullName;
+                if (!string.IsNullOrWhiteSpace(codexRoot))
+                {
+                    TryDeleteEmptyDirectory(codexRoot);
+                }
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(authDirectory))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(authDirectory);
+        File.WriteAllText(authFilePath, sessionJson);
+    }
+
+    private static void TryDeleteEmptyDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)
+                && !Directory.EnumerateFileSystemEntries(path).Any())
+            {
+                Directory.Delete(path, recursive: false);
+            }
+        }
+        catch
+        {
+        }
     }
 }

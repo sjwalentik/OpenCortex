@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Text.Json;
 
 using OpenCortex.Tools;
@@ -53,10 +54,13 @@ public sealed class ListDirectoryHandler : IToolHandler
         var lsFlags = recursive ? "-laR" : "-la";
         var result = await _workspace.ExecuteCommandAsync(
             userId,
-            $"ls {lsFlags} -- {quotedPath} 2>/dev/null",
-            null,
-            null,
-            cancellationToken);
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"ls {lsFlags} -- {quotedPath} 2>/dev/null"
+            ],
+            cancellationToken: cancellationToken);
 
         if (result.ExitCode != 0 && string.IsNullOrWhiteSpace(result.StandardOutput))
         {
@@ -76,13 +80,13 @@ public sealed class ListDirectoryHandler : IToolHandler
             if (line.StartsWith("total ") || line.EndsWith(" .") || line.EndsWith(" .."))
                 continue;
 
-            // Split by whitespace, but name might have spaces so limit to 9 parts
-            var parts = line.Split(' ', 9, StringSplitOptions.RemoveEmptyEntries);
+            // Split by whitespace, then join the tail back together in case the file name contains spaces.
+            var parts = Regex.Split(line.Trim(), @"\s+");
             if (parts.Length < 9) continue;
 
             var permissions = parts[0];
             var size = long.TryParse(parts[4], out var s) ? s : 0;
-            var name = parts[8];
+            var name = string.Join(' ', parts.Skip(8));
 
             // Skip hidden files starting with .
             if (name.StartsWith('.')) continue;

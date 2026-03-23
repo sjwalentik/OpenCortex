@@ -78,6 +78,9 @@ public interface IWorkspaceManager
         string command,
         string? arguments = null,
         string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environmentVariables = null,
+        IReadOnlyList<string>? argumentList = null,
+        string? standardInput = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

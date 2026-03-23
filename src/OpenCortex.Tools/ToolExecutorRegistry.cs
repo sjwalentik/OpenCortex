@@ -83,7 +83,7 @@ public sealed class ToolExecutorRegistry : IToolExecutor
             return ToolExecutionResult.Ok(
                 toolCall.Id,
                 toolCall.Function.Name,
-                output,
+                output ?? string.Empty,
                 stopwatch.Elapsed);
         }
         catch (OperationCanceledException)

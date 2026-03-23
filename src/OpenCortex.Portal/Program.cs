@@ -358,6 +358,7 @@ static bool IsAllowedPortalApiPath(string path, string method)
             || IsTenantBrainReindexPath(normalizedPath)
             || IsChatCompletionPath(normalizedPath)
             || IsProviderConfigTogglePath(normalizedPath)
+            || IsProviderConfigHostedActionPath(normalizedPath)
             || IsProviderConfigOAuthActionPath(normalizedPath),
         "PUT" =>
             IsTenantBrainDocumentItemPath(normalizedPath)
@@ -454,6 +455,20 @@ static bool IsProviderConfigTogglePath(string normalizedPath)
         && string.Equals(segments[1], "providers", StringComparison.OrdinalIgnoreCase)
         && string.Equals(segments[2], "config", StringComparison.OrdinalIgnoreCase)
         && string.Equals(segments[4], "toggle", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsProviderConfigHostedActionPath(string normalizedPath)
+{
+    // Matches: api/providers/config/{providerId}/hosted-login/start|complete|cancel
+    var segments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    return segments.Length == 6
+        && string.Equals(segments[0], "api", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[1], "providers", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[2], "config", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(segments[4], "hosted-login", StringComparison.OrdinalIgnoreCase)
+        && (string.Equals(segments[5], "start", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(segments[5], "complete", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(segments[5], "cancel", StringComparison.OrdinalIgnoreCase));
 }
 
 static void CopyDownstreamResponseHeaders(HttpResponseMessage downstreamResponse, HttpResponse response)

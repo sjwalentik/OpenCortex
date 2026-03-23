@@ -11,7 +11,7 @@ public sealed class UserProviderConfig
     public string ProviderId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Authentication type: "api_key", "oauth"
+    /// Authentication type: "api_key", "oauth", or provider-specific variants such as "session_json"
     /// </summary>
     public string AuthType { get; set; } = "api_key";
 
