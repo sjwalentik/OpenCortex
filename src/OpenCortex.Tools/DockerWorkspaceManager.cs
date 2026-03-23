@@ -54,7 +54,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         // All paths inside container are relative to /workspace
         // Basic path traversal check
         var normalized = Path.GetFullPath(Path.Combine(WorkspacePathInContainer, path));
-        return normalized.StartsWith(WorkspacePathInContainer, StringComparison.Ordinal);
+        return IsWithinWorkspace(normalized);
     }
 
     public string ResolvePath(Guid userId, string relativePath)
@@ -62,7 +62,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         var resolved = Path.Combine(WorkspacePathInContainer, relativePath).Replace('\\', '/');
         var normalized = Path.GetFullPath(resolved).Replace('\\', '/');
 
-        if (!normalized.StartsWith(WorkspacePathInContainer, StringComparison.Ordinal))
+        if (!IsWithinWorkspace(normalized))
         {
             throw new UnauthorizedAccessException(
                 $"Path '{relativePath}' resolves outside the workspace. Access denied.");
@@ -368,6 +368,15 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         }
 
         return builder.ToString();
+    }
+
+    private static bool IsWithinWorkspace(string candidatePath)
+    {
+        var normalizedRoot = WorkspacePathInContainer.TrimEnd('/');
+        var normalizedCandidate = candidatePath.Replace('\\', '/').TrimEnd('/');
+
+        return string.Equals(normalizedCandidate, normalizedRoot, StringComparison.Ordinal)
+            || normalizedCandidate.StartsWith(normalizedRoot + "/", StringComparison.Ordinal);
     }
 
     private async Task<string?> GetContainerStatusAsync(string containerName, CancellationToken cancellationToken)

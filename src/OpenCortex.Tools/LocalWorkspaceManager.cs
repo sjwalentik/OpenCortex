@@ -64,8 +64,7 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
             var normalizedWorkspace = Path.GetFullPath(workspacePath);
             var normalizedPath = Path.GetFullPath(Path.Combine(normalizedWorkspace, path));
 
-            // Check that the normalized path starts with the workspace path
-            return normalizedPath.StartsWith(normalizedWorkspace, StringComparison.OrdinalIgnoreCase);
+            return IsWithinWorkspace(normalizedWorkspace, normalizedPath);
         }
         catch
         {
@@ -80,7 +79,7 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
         var resolvedPath = Path.GetFullPath(Path.Combine(normalizedWorkspace, relativePath));
 
         // Security check: ensure path doesn't escape workspace
-        if (!resolvedPath.StartsWith(normalizedWorkspace, StringComparison.OrdinalIgnoreCase))
+        if (!IsWithinWorkspace(normalizedWorkspace, resolvedPath))
         {
             throw new UnauthorizedAccessException(
                 $"Path '{relativePath}' resolves outside the workspace. Access denied.");
@@ -307,6 +306,20 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
 
         // Relative paths are relative to the current directory
         return Path.GetFullPath(basePath);
+    }
+
+    private static bool IsWithinWorkspace(string workspaceRoot, string candidatePath)
+    {
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(workspaceRoot);
+        var normalizedCandidate = Path.TrimEndingDirectorySeparator(candidatePath);
+
+        return string.Equals(normalizedCandidate, normalizedRoot, StringComparison.OrdinalIgnoreCase)
+            || normalizedCandidate.StartsWith(
+                normalizedRoot + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase)
+            || normalizedCandidate.StartsWith(
+                normalizedRoot + Path.AltDirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private static void SyncCodexAuthState(

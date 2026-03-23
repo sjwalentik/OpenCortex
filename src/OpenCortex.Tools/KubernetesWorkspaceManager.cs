@@ -54,7 +54,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
     public bool IsPathAllowed(Guid userId, string path)
     {
         var normalized = Path.GetFullPath(Path.Combine(WorkspacePathInPod, path)).Replace('\\', '/');
-        return normalized.StartsWith(WorkspacePathInPod, StringComparison.Ordinal);
+        return IsWithinWorkspace(normalized);
     }
 
     public string ResolvePath(Guid userId, string relativePath)
@@ -62,7 +62,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
         var resolved = Path.Combine(WorkspacePathInPod, relativePath).Replace('\\', '/');
         var normalized = Path.GetFullPath(resolved).Replace('\\', '/');
 
-        if (!normalized.StartsWith(WorkspacePathInPod, StringComparison.Ordinal))
+        if (!IsWithinWorkspace(normalized))
         {
             throw new UnauthorizedAccessException(
                 $"Path '{relativePath}' resolves outside the workspace. Access denied.");
@@ -344,6 +344,15 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
         }
 
         return builder.ToString();
+    }
+
+    private static bool IsWithinWorkspace(string candidatePath)
+    {
+        var normalizedRoot = WorkspacePathInPod.TrimEnd('/');
+        var normalizedCandidate = candidatePath.Replace('\\', '/').TrimEnd('/');
+
+        return string.Equals(normalizedCandidate, normalizedRoot, StringComparison.Ordinal)
+            || normalizedCandidate.StartsWith(normalizedRoot + "/", StringComparison.Ordinal);
     }
 
     private async Task<WorkspaceStatus> WaitForPodReadyAsync(
