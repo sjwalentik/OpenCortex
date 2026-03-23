@@ -490,6 +490,7 @@ spec:
   containers:
     - name: agent
       image: {_options.ContainerImage}
+      imagePullPolicy: Always
       workingDir: {WorkspacePathInPod}
       resources:
         requests:

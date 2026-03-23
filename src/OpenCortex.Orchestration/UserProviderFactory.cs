@@ -38,10 +38,11 @@ public sealed class UserProviderFactory : IUserProviderFactory
 
     public async Task<IModelProvider?> GetProviderForUserAsync(Guid userId, string providerId, CancellationToken cancellationToken = default)
     {
-        var config = await _configRepository.GetAsync(userId, providerId, cancellationToken);
+        var normalizedProviderId = NormalizeProviderId(providerId);
+        var config = await _configRepository.GetAsync(userId, normalizedProviderId, cancellationToken);
         if (config is null || !config.IsEnabled)
         {
-            _logger.LogDebug("No enabled config found for user {UserId} provider {ProviderId}", userId, providerId);
+            _logger.LogDebug("No enabled config found for user {UserId} provider {ProviderId}", userId, normalizedProviderId);
             return null;
         }
 
@@ -150,7 +151,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
                 "anthropic" => CreateAnthropicProvider(config, settings),
                 "openai" => CreateOpenAIProvider(config, settings),
                 "openai-codex" => CreateCodexProvider(config, settings),
-                "ollama" => CreateOllamaProvider(config, settings),
+                "ollama" or "ollama-remote" => CreateOllamaProvider(config, settings),
                 _ => null
             };
         }
@@ -236,6 +237,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
 
         var options = Providers.Ollama.OllamaOptions.CreateRemote(endpoint) with
         {
+            ProviderId = "ollama",
             DefaultModel = settings?.DefaultModel ?? "qwen3.5-35b-a3b-instruct"
         };
 
@@ -267,4 +269,9 @@ public sealed class UserProviderFactory : IUserProviderFactory
             _workspaceManager,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CodexCliModelProvider>.Instance);
     }
+
+    private static string NormalizeProviderId(string providerId) =>
+        string.Equals(providerId, "ollama-remote", StringComparison.OrdinalIgnoreCase)
+            ? "ollama"
+            : providerId;
 }

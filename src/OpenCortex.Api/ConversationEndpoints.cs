@@ -242,7 +242,7 @@ public static class ConversationEndpoints
         }
         else
         {
-            metadata["providerId"] = providerId.Trim();
+            metadata["providerId"] = NormalizeProviderId(providerId);
         }
 
         if (string.IsNullOrWhiteSpace(modelId))
@@ -268,7 +268,7 @@ public static class ConversationEndpoints
         {
             var metadata = JsonNode.Parse(metadataJson) as JsonObject;
             return new ConversationRoutingPreference(
-                metadata?["providerId"]?.GetValue<string?>(),
+                NormalizeProviderId(metadata?["providerId"]?.GetValue<string?>()),
                 metadata?["modelId"]?.GetValue<string?>());
         }
         catch
@@ -276,6 +276,11 @@ public static class ConversationEndpoints
             return new ConversationRoutingPreference(null, null);
         }
     }
+
+    private static string? NormalizeProviderId(string? providerId) =>
+        string.Equals(providerId?.Trim(), "ollama-remote", StringComparison.OrdinalIgnoreCase)
+            ? "ollama"
+            : providerId?.Trim();
 
     private static bool IsConversationOwnedByRequester(Conversation? conversation, TenantContext? context) =>
         conversation is not null

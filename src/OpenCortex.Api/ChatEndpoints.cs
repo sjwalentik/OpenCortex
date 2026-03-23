@@ -119,7 +119,7 @@ public static class ChatEndpoints
         {
             var context = new RoutingContext
             {
-                RequestedProviderId = request.ProviderId,
+                RequestedProviderId = NormalizeProviderId(request.ProviderId),
                 RequestedModelId = request.ModelId,
                 IsPrivate = request.IsPrivate,
                 ForceMultiModel = request.ForceMultiModel
@@ -145,7 +145,7 @@ public static class ChatEndpoints
                 SystemMessage = request.SystemMessage,
                 RoutingContext = new RoutingContext
                 {
-                    RequestedProviderId = request.ProviderId,
+                    RequestedProviderId = NormalizeProviderId(request.ProviderId),
                     RequestedModelId = request.ModelId,
                     IsPrivate = request.IsPrivate
                 },
@@ -198,7 +198,7 @@ public static class ChatEndpoints
                 SystemMessage = request.SystemMessage,
                 RoutingContext = new RoutingContext
                 {
-                    RequestedProviderId = request.ProviderId,
+                    RequestedProviderId = NormalizeProviderId(request.ProviderId),
                     RequestedModelId = request.ModelId,
                     IsPrivate = request.IsPrivate
                 },
@@ -322,7 +322,7 @@ public static class ChatEndpoints
                     UserId = resolved.TenantContext!.UserId,
                     BrainId = request.BrainId ?? resolved.TenantContext.BrainId,
                     ConversationId = request.ConversationId,
-                    RequestedProviderId = request.ProviderId,
+                    RequestedProviderId = NormalizeProviderId(request.ProviderId),
                     RequestedModelId = request.ModelId,
                     IsPrivate = request.IsPrivate,
                     ForceMultiModel = request.ForceMultiModel,
@@ -702,7 +702,7 @@ public static class ChatEndpoints
                 BrainId = request.BrainId ?? context?.BrainId,
                 ConversationId = request.ConversationId,
                 PreviousProviderId = request.PreviousProviderId,
-                RequestedProviderId = request.ProviderId,
+                RequestedProviderId = NormalizeProviderId(request.ProviderId),
                 RequestedModelId = request.ModelId,
                 IsPrivate = request.IsPrivate
             },
@@ -1041,7 +1041,7 @@ public static class ChatEndpoints
                 BrainId = request.BrainId ?? resolved.TenantContext.BrainId,
                 ConversationId = request.ConversationId,
                 PreviousProviderId = request.PreviousProviderId,
-                RequestedProviderId = request.ProviderId,
+                RequestedProviderId = NormalizeProviderId(request.ProviderId),
                 RequestedModelId = request.ModelId,
                 IsPrivate = request.IsPrivate
             },
@@ -1413,6 +1413,11 @@ public static class ChatEndpoints
             usage,
             (int)stopwatch.ElapsedMilliseconds);
     }
+
+    private static string? NormalizeProviderId(string? providerId) =>
+        string.Equals(providerId?.Trim(), "ollama-remote", StringComparison.OrdinalIgnoreCase)
+            ? "ollama"
+            : providerId?.Trim();
 }
 
 // Request DTOs
