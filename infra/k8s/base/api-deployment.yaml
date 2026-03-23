@@ -37,6 +37,12 @@ spec:
                 secretKeyRef:
                   name: opencortex-db-credentials
                   key: connection-string
+            # Credential encryption
+            - name: OpenCortex__Security__EncryptionKey
+              valueFrom:
+                secretKeyRef:
+                  name: opencortex-security
+                  key: encryption-key
             # Embeddings
             - name: OpenCortex__Embeddings__Provider
               valueFrom:
