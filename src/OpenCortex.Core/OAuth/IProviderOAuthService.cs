@@ -8,12 +8,12 @@ public interface IProviderOAuthService
     /// <summary>
     /// Generate the authorization URL for a provider.
     /// </summary>
-    string GetAuthorizationUrl(string providerId, Guid userId, string? state = null);
+    string GetAuthorizationUrl(string providerId, Guid customerId, Guid userId, string? state = null);
 
     /// <summary>
     /// Validate and parse an OAuth state value.
     /// </summary>
-    bool TryValidateState(string providerId, string state, out Guid userId, out string? returnUrl);
+    bool TryValidateState(string providerId, string state, out Guid customerId, out Guid userId, out string? returnUrl);
 
     /// <summary>
     /// Exchange an authorization code for tokens.

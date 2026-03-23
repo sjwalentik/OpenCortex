@@ -40,7 +40,7 @@ public sealed class ProviderOAuthService : IProviderOAuthService
         };
     }
 
-    public string GetAuthorizationUrl(string providerId, Guid userId, string? state = null)
+    public string GetAuthorizationUrl(string providerId, Guid customerId, Guid userId, string? state = null)
     {
         var providerConfig = GetProviderConfig(providerId);
         if (providerConfig is null)
@@ -48,7 +48,7 @@ public sealed class ProviderOAuthService : IProviderOAuthService
             throw new ArgumentException($"OAuth not configured for provider: {providerId}");
         }
 
-        var stateValue = CreateSignedState(providerConfig, userId, state);
+        var stateValue = CreateSignedState(providerConfig, customerId, userId, state);
 
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["client_id"] = providerConfig.ClientId;
@@ -60,8 +60,9 @@ public sealed class ProviderOAuthService : IProviderOAuthService
         return $"{providerConfig.AuthorizationEndpoint}?{queryParams}";
     }
 
-    public bool TryValidateState(string providerId, string state, out Guid userId, out string? returnUrl)
+    public bool TryValidateState(string providerId, string state, out Guid customerId, out Guid userId, out string? returnUrl)
     {
+        customerId = Guid.Empty;
         userId = Guid.Empty;
         returnUrl = null;
 
@@ -110,6 +111,7 @@ public sealed class ProviderOAuthService : IProviderOAuthService
         }
 
         if (payload is null
+            || !Guid.TryParse(payload.CustomerId, out customerId)
             || !Guid.TryParse(payload.UserId, out userId)
             || payload.IssuedAtUnixSeconds <= 0)
         {
@@ -326,12 +328,13 @@ public sealed class ProviderOAuthService : IProviderOAuthService
         };
     }
 
-    private static string CreateSignedState(ProviderOAuthEndpoints providerConfig, Guid userId, string? returnUrl)
+    private static string CreateSignedState(ProviderOAuthEndpoints providerConfig, Guid customerId, Guid userId, string? returnUrl)
     {
         var payload = new OAuthStatePayload(
+            customerId.ToString(),
             userId.ToString(),
             DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            string.IsNullOrWhiteSpace(returnUrl) ? null : returnUrl.Trim());
+            NormalizeReturnUrl(returnUrl));
 
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
 
@@ -348,8 +351,14 @@ public sealed class ProviderOAuthService : IProviderOAuthService
             return null;
         }
 
-        return Uri.TryCreate(returnUrl, UriKind.RelativeOrAbsolute, out var parsed)
-            ? parsed.ToString()
+        var trimmed = returnUrl.Trim();
+        if (!trimmed.StartsWith("/", StringComparison.Ordinal) || trimmed.StartsWith("//", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return Uri.TryCreate(trimmed, UriKind.Relative, out var relativeUri)
+            ? relativeUri.ToString()
             : null;
     }
 
@@ -386,6 +395,7 @@ public sealed class ProviderOAuthService : IProviderOAuthService
     );
 
     private sealed record OAuthStatePayload(
+        string CustomerId,
         string UserId,
         long IssuedAtUnixSeconds,
         string? ReturnUrl);

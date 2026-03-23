@@ -443,14 +443,19 @@ public static class ProviderConfigEndpoints
             string? returnUrl = null) =>
         {
             var userId = GetUserId(user);
-            if (userId is null) return Results.Unauthorized();
+            var customerId = GetCustomerId(user);
+            if (userId is null || customerId is null) return Results.Unauthorized();
 
             if (!oauthService.IsOAuthConfigured(providerId))
             {
                 return Results.BadRequest(new { message = $"OAuth is not configured for provider '{providerId}'." });
             }
 
-            var authUrl = oauthService.GetAuthorizationUrl(providerId, userId.Value, returnUrl);
+            var authUrl = oauthService.GetAuthorizationUrl(
+                providerId,
+                customerId.Value,
+                userId.Value,
+                NormalizeOAuthReturnUrl(returnUrl ?? string.Empty));
             return Results.Ok(new { authorizationUrl = authUrl });
         });
 
@@ -464,7 +469,7 @@ public static class ProviderConfigEndpoints
             ICredentialEncryption encryption,
             CancellationToken cancellationToken) =>
         {
-            if (!oauthService.TryValidateState(providerId, state, out var stateUserId, out var returnUrl))
+            if (!oauthService.TryValidateState(providerId, state, out var stateCustomerId, out var stateUserId, out var returnUrl))
             {
                 return Results.BadRequest(new { message = "Invalid OAuth state." });
             }
@@ -498,7 +503,7 @@ public static class ProviderConfigEndpoints
             var config = new UserProviderConfig
             {
                 ConfigId = existing?.ConfigId ?? Guid.Empty,
-                CustomerId = existing?.CustomerId ?? stateUserId,
+                CustomerId = existing?.CustomerId ?? stateCustomerId,
                 UserId = stateUserId,
                 ProviderId = normalizedProviderId,
                 AuthType = "oauth",
@@ -773,18 +778,14 @@ public static class ProviderConfigEndpoints
         }
 
         var trimmed = returnUrl.Trim();
-        if (trimmed.StartsWith("/", StringComparison.Ordinal))
+        if (!trimmed.StartsWith("/", StringComparison.Ordinal) || trimmed.StartsWith("//", StringComparison.Ordinal))
         {
-            return trimmed;
+            return null;
         }
 
-        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
-            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-        {
-            return uri.ToString();
-        }
-
-        return null;
+        return Uri.TryCreate(trimmed, UriKind.Relative, out var relativeUri)
+            ? relativeUri.ToString()
+            : null;
     }
 
     private static string BuildOAuthReturnUrl(string returnUrl, string providerId, bool isSuccess, string? error = null)
