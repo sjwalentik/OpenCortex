@@ -79,7 +79,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
                 ["HOME"] = homePath,
                 ["CODEX_HOME"] = GetCodexHomeDirectory(homePath)
             },
-            argumentList: BuildArgumentList(command.PrefixArguments, model),
+            argumentList: BuildArgumentList(command.PrefixArguments, model, _workspaceManager.SupportsContainerIsolation),
             standardInput: prompt,
             cancellationToken: cancellationToken);
 
@@ -194,7 +194,8 @@ internal sealed class CodexCliModelProvider : IModelProvider
 
     private static IReadOnlyList<string> BuildArgumentList(
         IReadOnlyList<string> prefixArguments,
-        string model)
+        string model,
+        bool runtimeIsExternallySandboxed)
     {
         var arguments = new List<string>(prefixArguments)
         {
@@ -202,12 +203,24 @@ internal sealed class CodexCliModelProvider : IModelProvider
             "--json",
             "--skip-git-repo-check",
             "--color",
-            "never",
-            "--full-auto",
+            "never"
+        };
+
+        if (runtimeIsExternallySandboxed)
+        {
+            arguments.Add("--dangerously-bypass-approvals-and-sandbox");
+        }
+        else
+        {
+            arguments.Add("--full-auto");
+        }
+
+        arguments.AddRange(
+        [
             "-m",
             model,
             "-"
-        };
+        ]);
 
         return arguments;
     }
