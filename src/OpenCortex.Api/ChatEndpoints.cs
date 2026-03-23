@@ -366,6 +366,7 @@ public static class ChatEndpoints
                 var conversationError = await ValidateConversationAccessAsync(
                     request.ConversationId,
                     resolved.TenantContext!.CustomerId,
+                    resolved.TenantContext.UserId,
                     conversationRepository,
                     cancellationToken);
                 if (conversationError is not null)
@@ -430,6 +431,7 @@ public static class ChatEndpoints
                 var conversationError = await ValidateConversationAccessAsync(
                     request.ConversationId,
                     resolved.TenantContext!.CustomerId,
+                    resolved.TenantContext.UserId,
                     conversationRepository,
                     cancellationToken);
                 if (conversationError is not null)
@@ -499,6 +501,7 @@ public static class ChatEndpoints
                 var conversationError = await ValidateConversationAccessAsync(
                     request.ConversationId,
                     resolved.TenantContext!.CustomerId,
+                    resolved.TenantContext.UserId,
                     conversationRepository,
                     cancellationToken);
                 if (conversationError is not null)
@@ -566,6 +569,7 @@ public static class ChatEndpoints
                 var conversationError = await ValidateConversationAccessAsync(
                     request.ConversationId,
                     resolved.TenantContext!.CustomerId,
+                    resolved.TenantContext.UserId,
                     conversationRepository,
                     cancellationToken);
                 if (conversationError is not null)
@@ -961,6 +965,7 @@ public static class ChatEndpoints
     private static async Task<IResult?> ValidateConversationAccessAsync(
         string? conversationId,
         string customerId,
+        string userId,
         IConversationRepository conversationRepository,
         CancellationToken cancellationToken)
     {
@@ -970,7 +975,9 @@ public static class ChatEndpoints
         }
 
         var conversation = await conversationRepository.GetByIdAsync(conversationId, cancellationToken);
-        if (conversation is null || !string.Equals(conversation.CustomerId, customerId, StringComparison.Ordinal))
+        if (conversation is null
+            || !string.Equals(conversation.CustomerId, customerId, StringComparison.Ordinal)
+            || !string.Equals(conversation.UserId, userId, StringComparison.Ordinal))
         {
             return Results.NotFound(new { message = $"Conversation '{conversationId}' was not found." });
         }

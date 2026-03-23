@@ -108,6 +108,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
 
     public async Task<IReadOnlyList<Conversation>> ListAsync(
         string customerId,
+        string userId,
         ConversationStatus? status = null,
         int? limit = null,
         int? offset = null,
@@ -116,7 +117,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
 
-        var whereClause = "WHERE customer_id = @customer_id";
+        var whereClause = "WHERE customer_id = @customer_id AND user_id = @user_id";
         if (status.HasValue)
         {
             whereClause += " AND status = @status";
@@ -141,6 +142,7 @@ public sealed class PostgresConversationRepository : IConversationRepository
             """;
 
         command.Parameters.AddWithValue("customer_id", customerId);
+        command.Parameters.AddWithValue("user_id", userId);
         if (status.HasValue)
         {
             command.Parameters.AddWithValue("status", status.Value.ToString().ToLowerInvariant());

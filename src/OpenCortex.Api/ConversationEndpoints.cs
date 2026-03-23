@@ -32,6 +32,7 @@ public static class ConversationEndpoints
 
             var conversations = await conversationService.ListConversationsAsync(
                 context!.CustomerId,
+                context.UserId,
                 limit ?? 50,
                 offset ?? 0,
                 cancellationToken);
@@ -117,25 +118,26 @@ public static class ConversationEndpoints
                 messageLimit ?? 100,
                 cancellationToken);
 
-            if (conversation is null || conversation.CustomerId != context!.CustomerId)
+            if (!IsConversationOwnedByRequester(conversation, context))
             {
                 return Results.NotFound(new { message = $"Conversation '{conversationId}' was not found." });
             }
 
-            var routing = GetConversationRoutingPreference(conversation.Metadata);
+            var ownedConversation = conversation!;
+            var routing = GetConversationRoutingPreference(ownedConversation.Metadata);
 
             return Results.Ok(new
             {
-                conversationId = conversation.ConversationId,
-                title = conversation.Title,
-                brainId = conversation.BrainId,
+                conversationId = ownedConversation.ConversationId,
+                title = ownedConversation.Title,
+                brainId = ownedConversation.BrainId,
                 providerId = routing.ProviderId,
                 modelId = routing.ModelId,
-                systemPrompt = conversation.SystemPrompt,
-                createdAt = conversation.CreatedAt,
-                lastMessageAt = conversation.LastMessageAt,
-                status = conversation.Status.ToString().ToLowerInvariant(),
-                messages = conversation.Messages?.Select(m => new
+                systemPrompt = ownedConversation.SystemPrompt,
+                createdAt = ownedConversation.CreatedAt,
+                lastMessageAt = ownedConversation.LastMessageAt,
+                status = ownedConversation.Status.ToString().ToLowerInvariant(),
+                messages = ownedConversation.Messages?.Select(m => new
                 {
                     messageId = m.MessageId,
                     role = m.Role.ToString().ToLowerInvariant(),
@@ -167,7 +169,7 @@ public static class ConversationEndpoints
 
             var conversation = await conversationRepository.GetByIdAsync(conversationId, cancellationToken);
 
-            if (conversation is null || conversation.CustomerId != context!.CustomerId)
+            if (!IsConversationOwnedByRequester(conversation, context))
             {
                 return Results.NotFound(new { message = $"Conversation '{conversationId}' was not found." });
             }
@@ -179,11 +181,12 @@ public static class ConversationEndpoints
 
             if (request.UpdateRouting)
             {
-                conversation.Metadata = BuildConversationMetadata(
-                    conversation.Metadata,
+                var ownedConversation = conversation!;
+                ownedConversation.Metadata = BuildConversationMetadata(
+                    ownedConversation.Metadata,
                     request.ProviderId,
                     request.ModelId);
-                await conversationService.UpdateConversationAsync(conversation, cancellationToken);
+                await conversationService.UpdateConversationAsync(ownedConversation, cancellationToken);
             }
 
             return Results.Ok(new { message = "Conversation updated." });
@@ -206,7 +209,7 @@ public static class ConversationEndpoints
 
             var conversation = await conversationRepository.GetByIdAsync(conversationId, cancellationToken);
 
-            if (conversation is null || conversation.CustomerId != context!.CustomerId)
+            if (!IsConversationOwnedByRequester(conversation, context))
             {
                 return Results.NotFound(new { message = $"Conversation '{conversationId}' was not found." });
             }
@@ -272,6 +275,12 @@ public static class ConversationEndpoints
             return new ConversationRoutingPreference(null, null);
         }
     }
+
+    private static bool IsConversationOwnedByRequester(Conversation? conversation, TenantContext? context) =>
+        conversation is not null
+        && context is not null
+        && string.Equals(conversation.CustomerId, context.CustomerId, StringComparison.Ordinal)
+        && string.Equals(conversation.UserId, context.UserId, StringComparison.Ordinal);
 }
 
 internal sealed record CreateConversationRequest(

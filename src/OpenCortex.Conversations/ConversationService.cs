@@ -25,10 +25,11 @@ public interface IConversationService
     Task<Conversation?> GetConversationAsync(string conversationId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// List conversations for a customer.
+    /// List conversations for a customer and requesting user.
     /// </summary>
     Task<IReadOnlyList<Conversation>> ListConversationsAsync(
         string customerId,
+        string userId,
         int? limit = null,
         int? offset = null,
         CancellationToken cancellationToken = default);
@@ -126,11 +127,12 @@ public sealed class ConversationService : IConversationService
 
     public Task<IReadOnlyList<Conversation>> ListConversationsAsync(
         string customerId,
+        string userId,
         int? limit = null,
         int? offset = null,
         CancellationToken cancellationToken = default)
     {
-        return _repository.ListAsync(customerId, ConversationStatus.Active, limit, offset, cancellationToken);
+        return _repository.ListAsync(customerId, userId, ConversationStatus.Active, limit, offset, cancellationToken);
     }
 
     public async Task ArchiveConversationAsync(string conversationId, CancellationToken cancellationToken = default)

@@ -231,7 +231,7 @@ public sealed class ChatAgenticMemoryTests : IClassFixture<ChatAgenticMemoryTest
         public Task<Conversation?> GetByIdAsync(string conversationId, CancellationToken cancellationToken = default) => Task.FromResult<Conversation?>(null);
         public Task<IReadOnlyList<Message>> GetMessagesAsync(string conversationId, int? limit = null, int? offset = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<Conversation?> GetWithMessagesAsync(string conversationId, int? messageLimit = null, CancellationToken cancellationToken = default) => Task.FromResult<Conversation?>(null);
-        public Task<IReadOnlyList<Conversation>> ListAsync(string customerId, ConversationStatus? status = null, int? limit = null, int? offset = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<Conversation>> ListAsync(string customerId, string userId, ConversationStatus? status = null, int? limit = null, int? offset = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task UpdateAsync(Conversation conversation, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task UpdateMessageAsync(Message message, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
@@ -256,7 +256,7 @@ public sealed class ChatAgenticMemoryTests : IClassFixture<ChatAgenticMemoryTest
         public Task<IReadOnlyList<ChatMessage>> GetMessagesForProviderAsync(string conversationId, int? limit = null, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
-        public Task<IReadOnlyList<Conversation>> ListConversationsAsync(string customerId, int? limit = null, int? offset = null, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<Conversation>> ListConversationsAsync(string customerId, string userId, int? limit = null, int? offset = null, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
         public Task UpdateConversationAsync(Conversation conversation, CancellationToken cancellationToken = default)

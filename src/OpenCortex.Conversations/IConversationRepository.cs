@@ -21,10 +21,11 @@ public interface IConversationRepository
     Task<Conversation?> GetWithMessagesAsync(string conversationId, int? messageLimit = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// List conversations for a customer.
+    /// List conversations for a customer and user.
     /// </summary>
     Task<IReadOnlyList<Conversation>> ListAsync(
         string customerId,
+        string userId,
         ConversationStatus? status = null,
         int? limit = null,
         int? offset = null,
