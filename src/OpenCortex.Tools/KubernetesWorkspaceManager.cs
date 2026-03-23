@@ -150,6 +150,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
         string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environmentVariables = null,
         IReadOnlyList<string>? argumentList = null,
+        string? standardInput = null,
         CancellationToken cancellationToken = default)
     {
         var podName = GetPodName(userId);
@@ -173,7 +174,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
         var shellScript = $"cd -- {ShellEscaping.SingleQuote(workDir)} && {fullCommand}";
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await RunKubectlExecAsync(ns, podName, shellScript, cancellationToken);
+        var result = await RunKubectlExecAsync(ns, podName, shellScript, standardInput, cancellationToken);
         stopwatch.Stop();
 
         return new CommandResult
@@ -294,7 +295,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
             ? $"rm -f {ShellEscaping.SingleQuote(authFilePath)}"
             : BuildCodexAuthWriteScript(authDirectory, authFilePath, sessionJson);
 
-        await RunKubectlExecAsync(ns, podName, syncScript, cancellationToken);
+        await RunKubectlExecAsync(ns, podName, syncScript, null, cancellationToken);
     }
 
     private static string BuildCodexAuthWriteScript(
@@ -618,6 +619,7 @@ spec:
         string ns,
         string podName,
         string shellCommand,
+        string? standardInput,
         CancellationToken cancellationToken,
         int timeoutSeconds = 60)
     {
@@ -626,6 +628,7 @@ spec:
             StartInfo = new ProcessStartInfo
             {
                 FileName = "kubectl",
+                RedirectStandardInput = standardInput is not null,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -635,6 +638,10 @@ spec:
 
         // Use ArgumentList to preserve each argument correctly
         process.StartInfo.ArgumentList.Add("exec");
+        if (standardInput is not null)
+        {
+            process.StartInfo.ArgumentList.Add("-i");
+        }
         process.StartInfo.ArgumentList.Add("-n");
         process.StartInfo.ArgumentList.Add(ns);
         process.StartInfo.ArgumentList.Add(podName);
@@ -649,6 +656,12 @@ spec:
         try
         {
             process.Start();
+
+            if (standardInput is not null)
+            {
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), cts.Token);
+                process.StandardInput.Close();
+            }
 
             var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
             var errorTask = process.StandardError.ReadToEndAsync(cts.Token);

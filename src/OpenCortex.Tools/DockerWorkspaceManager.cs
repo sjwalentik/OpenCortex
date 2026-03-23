@@ -157,6 +157,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environmentVariables = null,
         IReadOnlyList<string>? argumentList = null,
+        string? standardInput = null,
         CancellationToken cancellationToken = default)
     {
         var containerName = GetContainerName(userId);
@@ -179,7 +180,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         var shellScript = $"cd -- {ShellEscaping.SingleQuote(workDir)} && {fullCommand}";
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await RunDockerExecAsync(containerName, shellScript, cancellationToken);
+        var result = await RunDockerExecAsync(containerName, shellScript, standardInput, cancellationToken);
         stopwatch.Stop();
 
         return new CommandResult
@@ -318,7 +319,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             ? $"rm -f {ShellEscaping.SingleQuote(authFilePath)}"
             : BuildCodexAuthWriteScript(authDirectory, authFilePath, sessionJson);
 
-        await RunDockerExecAsync(containerName, syncScript, cancellationToken);
+        await RunDockerExecAsync(containerName, syncScript, null, cancellationToken);
     }
 
     private static string BuildCodexAuthWriteScript(
@@ -490,6 +491,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
     private static async Task<(bool Success, int ExitCode, string? Output, string? Error)> RunDockerExecAsync(
         string containerName,
         string shellCommand,
+        string? standardInput,
         CancellationToken cancellationToken,
         int timeoutSeconds = 60)
     {
@@ -498,6 +500,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             StartInfo = new ProcessStartInfo
             {
                 FileName = "docker",
+                RedirectStandardInput = standardInput is not null,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -506,6 +509,10 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         };
 
         process.StartInfo.ArgumentList.Add("exec");
+        if (standardInput is not null)
+        {
+            process.StartInfo.ArgumentList.Add("-i");
+        }
         process.StartInfo.ArgumentList.Add(containerName);
         process.StartInfo.ArgumentList.Add("/bin/sh");
         process.StartInfo.ArgumentList.Add("-c");
@@ -517,6 +524,12 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         try
         {
             process.Start();
+
+            if (standardInput is not null)
+            {
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), cts.Token);
+                process.StandardInput.Close();
+            }
 
             var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
             var errorTask = process.StandardError.ReadToEndAsync(cts.Token);

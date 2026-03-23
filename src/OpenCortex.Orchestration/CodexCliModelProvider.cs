@@ -79,7 +79,8 @@ internal sealed class CodexCliModelProvider : IModelProvider
                 ["HOME"] = homePath,
                 ["CODEX_HOME"] = GetCodexHomeDirectory(homePath)
             },
-            argumentList: BuildArgumentList(command.PrefixArguments, model, prompt),
+            argumentList: BuildArgumentList(command.PrefixArguments, model),
+            standardInput: prompt,
             cancellationToken: cancellationToken);
 
         if (!commandResult.Success)
@@ -193,8 +194,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
 
     private static IReadOnlyList<string> BuildArgumentList(
         IReadOnlyList<string> prefixArguments,
-        string model,
-        string prompt)
+        string model)
     {
         var arguments = new List<string>(prefixArguments)
         {
@@ -206,7 +206,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
             "--full-auto",
             "-m",
             model,
-            prompt
+            "-"
         };
 
         return arguments;

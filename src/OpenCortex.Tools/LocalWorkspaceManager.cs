@@ -173,6 +173,7 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
         string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environmentVariables = null,
         IReadOnlyList<string>? argumentList = null,
+        string? standardInput = null,
         CancellationToken cancellationToken = default)
     {
         var workspacePath = await GetWorkspacePathAsync(userId, cancellationToken);
@@ -197,6 +198,7 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
             {
                 FileName = command,
                 WorkingDirectory = workDir,
+                RedirectStandardInput = standardInput is not null,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -227,6 +229,12 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
         try
         {
             process.Start();
+
+            if (standardInput is not null)
+            {
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken);
+                process.StandardInput.Close();
+            }
 
             var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
