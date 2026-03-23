@@ -69,10 +69,13 @@ public sealed class ReadFileHandler : IToolHandler
         // Check if file exists and get its size
         var statResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"wc -c < {quotedPath} 2>/dev/null",
-            null,
-            null,
-            cancellationToken);
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"wc -c < {quotedPath} 2>/dev/null"
+            ],
+            cancellationToken: cancellationToken);
 
         if (statResult.ExitCode != 0 || string.IsNullOrWhiteSpace(statResult.StandardOutput))
         {
@@ -89,10 +92,13 @@ public sealed class ReadFileHandler : IToolHandler
         // Read at most MaxReadBytes so tools do not dump arbitrarily large files into chat.
         var catResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"head -c {MaxReadBytes} -- {quotedPath}",
-            null,
-            null,
-            cancellationToken);
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"head -c {MaxReadBytes} -- {quotedPath}"
+            ],
+            cancellationToken: cancellationToken);
 
         if (catResult.ExitCode != 0)
         {

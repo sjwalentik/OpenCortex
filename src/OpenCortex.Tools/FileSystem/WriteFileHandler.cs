@@ -76,10 +76,13 @@ public sealed class WriteFileHandler : IToolHandler
             var quotedDirectory = ShellEscaping.SingleQuote(directory);
             await _workspace.ExecuteCommandAsync(
                 userId,
-                $"mkdir -p -- {quotedDirectory}",
-                null,
-                null,
-                cancellationToken);
+                "/bin/sh",
+                argumentList:
+                [
+                    "-c",
+                    $"mkdir -p -- {quotedDirectory}"
+                ],
+                cancellationToken: cancellationToken);
         }
 
         // Base64 encode content to safely pass through shell
@@ -88,10 +91,13 @@ public sealed class WriteFileHandler : IToolHandler
         // Use printf and tee to avoid shell interpretation of the file path.
         var writeResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"printf '%s' '{base64Content}' | base64 -d | tee -- {quotedPath} > /dev/null",
-            null,
-            null,
-            cancellationToken);
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"printf '%s' '{base64Content}' | base64 -d | tee -- {quotedPath} > /dev/null"
+            ],
+            cancellationToken: cancellationToken);
 
         if (writeResult.ExitCode != 0)
         {

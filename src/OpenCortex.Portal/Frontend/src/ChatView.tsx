@@ -30,6 +30,13 @@ export type Conversation = {
   status: string;
 };
 
+type ConversationDetailResponse = {
+  conversationId: string;
+  messages?: ChatMessage[];
+  providerId?: string | null;
+  modelId?: string | null;
+};
+
 export type ChatViewProps = {
   authSession: { idToken: string } | null;
   activeBrainId: string;
@@ -100,6 +107,31 @@ type StreamActivity = {
   isHeartbeat?: boolean;
 };
 
+type ChatProviderSummary = {
+  providerId: string;
+  name: string;
+  type?: string;
+};
+
+type ChatProviderCatalogResponse = {
+  providers?: ChatProviderSummary[];
+};
+
+type ChatProviderModel = {
+  id: string;
+  name?: string;
+};
+
+type ChatProviderModelsResponse = {
+  models?: ChatProviderModel[];
+};
+
+type ModelCommand =
+  | { kind: 'show' }
+  | { kind: 'auto' }
+  | { kind: 'set'; providerId: string; modelId: string }
+  | { kind: 'error'; message: string };
+
 function applyStreamActivity(activities: StreamActivity[], chunk: StreamChunk): StreamActivity[] {
   if (!chunk.stage || !chunk.message) {
     return activities;
@@ -124,6 +156,59 @@ function applyStreamActivity(activities: StreamActivity[], chunk: StreamChunk): 
   return next.slice(-4);
 }
 
+
+function normalizeProviderAlias(value: string) {
+  switch (value.trim().toLowerCase()) {
+    case 'codex':
+    case 'chatgpt':
+    case 'gpt':
+      return 'openai-codex';
+    case 'auto':
+      return '';
+    default:
+      return value.trim().toLowerCase();
+  }
+}
+
+function parseModelCommand(input: string): ModelCommand | null {
+  const trimmed = input.trim();
+  if (!trimmed.toLowerCase().startsWith('/model')) {
+    return null;
+  }
+
+  const args = trimmed.split(/\s+/).slice(1);
+  if (args.length === 0) {
+    return { kind: 'show' };
+  }
+
+  if (args.length === 1 && args[0].toLowerCase() === 'auto') {
+    return { kind: 'auto' };
+  }
+
+  if (args.length > 2) {
+    return { kind: 'error', message: 'Usage: /model auto, /model <provider>, /model <provider> <model>, or /model <provider>/<model>.' };
+  }
+
+  let providerToken = args[0];
+  let modelToken = args[1] || '';
+
+  if (!modelToken && providerToken.includes('/')) {
+    const slashIndex = providerToken.indexOf('/');
+    modelToken = providerToken.slice(slashIndex + 1);
+    providerToken = providerToken.slice(0, slashIndex);
+  }
+
+  return { kind: 'set', providerId: providerToken.trim(), modelId: modelToken.trim() };
+}
+
+function formatModelSelection(providerId: string, modelId: string) {
+  if (!providerId) {
+    return 'auto routing';
+  }
+
+  return modelId ? `${providerId}/${modelId}` : `${providerId} (provider default)`;
+}
+
 export function ChatView({
   authSession,
   activeBrainId,
@@ -146,6 +231,10 @@ export function ChatView({
   const [currentTraceId, setCurrentTraceId] = useState<string | null>(null);
   const [pendingToolCalls, setPendingToolCalls] = useState<ToolCallDisplay[]>([]);
   const [telemetrySummary, setTelemetrySummary] = useState<StreamChunk['telemetry'] | null>(null);
+  const [availableProviders, setAvailableProviders] = useState<ChatProviderSummary[]>([]);
+  const [providerModels, setProviderModels] = useState<ChatProviderModel[]>([]);
+  const [selectedProviderId, setSelectedProviderId] = useState('');
+  const [selectedModelId, setSelectedModelId] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
@@ -165,6 +254,28 @@ export function ChatView({
 
     void loadConversations();
   }, [authSession]);
+
+  useEffect(() => {
+    if (!authSession || !hasConfiguredProviders) {
+      setAvailableProviders([]);
+      setProviderModels([]);
+      setSelectedProviderId('');
+      setSelectedModelId('');
+      return;
+    }
+
+    void loadProviders();
+  }, [authSession, hasConfiguredProviders]);
+
+  useEffect(() => {
+    if (!selectedProviderId) {
+      setProviderModels([]);
+      setSelectedModelId('');
+      return;
+    }
+
+    void loadProviderModels(selectedProviderId);
+  }, [selectedProviderId]);
 
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
@@ -217,13 +328,149 @@ export function ChatView({
     }
   }
 
+  async function loadProviders() {
+    try {
+      const response = await portalFetch('/portal-api/api/chat/providers');
+      const data = (await response.json()) as ChatProviderCatalogResponse;
+      const providers = data.providers || [];
+
+      setAvailableProviders(providers);
+
+      if (selectedProviderId && !providers.some((provider) => provider.providerId === selectedProviderId)) {
+        setSelectedProviderId('');
+        setSelectedModelId('');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load providers');
+    }
+  }
+
+  async function loadProviderModels(providerId: string) {
+    try {
+      const response = await portalFetch(`/portal-api/api/chat/providers/${encodeURIComponent(providerId)}/models`);
+      const data = (await response.json()) as ChatProviderModelsResponse;
+      const models = data.models || [];
+      setProviderModels(models);
+
+      if (selectedModelId && !models.some((model) => model.id === selectedModelId)) {
+        setSelectedModelId('');
+      }
+
+      return models;
+    } catch (err) {
+      setProviderModels([]);
+      setSelectedModelId('');
+      setError(err instanceof Error ? err.message : 'Failed to load models');
+      return [];
+    }
+  }
+
+  function addLocalSystemMessage(content: string) {
+    setMessages((prev) => [...prev, {
+      messageId: `local-system-${Date.now()}`,
+      role: 'system',
+      content,
+      createdAt: new Date().toISOString(),
+    }]);
+  }
+
+  async function saveConversationRoutingPreference(
+    conversationId: string,
+    providerId: string,
+    modelId: string,
+  ) {
+    await portalFetch(`/portal-api/tenant/conversations/${conversationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        title: null,
+        updateRouting: true,
+        providerId: providerId || null,
+        modelId: modelId || null,
+      }),
+    });
+  }
+
+  async function applyProviderSelection(
+    providerId: string,
+    modelId: string,
+  ) {
+    setSelectedProviderId(providerId);
+    setSelectedModelId(modelId);
+
+    if (activeConversationIdRef.current) {
+      await saveConversationRoutingPreference(activeConversationIdRef.current, providerId, modelId);
+    }
+  }
+
+  async function handleModelCommand(command: ModelCommand) {
+    setInputValue('');
+
+    if (command.kind === 'show') {
+      addLocalSystemMessage(`Current model selection: ${formatModelSelection(selectedProviderId, selectedModelId)}`);
+      return;
+    }
+
+    if (command.kind === 'error') {
+      addLocalSystemMessage(command.message);
+      return;
+    }
+
+    if (command.kind === 'auto') {
+      await applyProviderSelection('', '');
+      addLocalSystemMessage('Model routing reset to auto.');
+      return;
+    }
+
+    const normalizedProviderId = normalizeProviderAlias(command.providerId);
+    const provider = availableProviders.find((candidate) => candidate.providerId === normalizedProviderId);
+
+    if (!provider) {
+      if (!selectedProviderId) {
+        addLocalSystemMessage(`Unknown provider '${command.providerId}'. Choose one of: ${availableProviders.map((candidate) => candidate.providerId).join(', ') || 'none configured'}.`);
+        return;
+      }
+
+      const models = await loadProviderModels(selectedProviderId);
+      const desiredModelId = command.modelId || command.providerId;
+      if (models.length > 0 && !models.some((model) => model.id === desiredModelId)) {
+        addLocalSystemMessage(`Unknown model '${desiredModelId}' for ${selectedProviderId}.`);
+        return;
+      }
+
+      await applyProviderSelection(selectedProviderId, desiredModelId);
+      addLocalSystemMessage(`Model selection updated to ${formatModelSelection(selectedProviderId, desiredModelId)}.`);
+      return;
+    }
+
+    const models = await loadProviderModels(normalizedProviderId);
+    const desiredModelId = command.modelId || '';
+    if (desiredModelId && models.length > 0 && !models.some((model) => model.id === desiredModelId)) {
+      addLocalSystemMessage(`Unknown model '${desiredModelId}' for ${normalizedProviderId}.`);
+      return;
+    }
+
+    await applyProviderSelection(normalizedProviderId, desiredModelId);
+    addLocalSystemMessage(`Model selection updated to ${formatModelSelection(normalizedProviderId, desiredModelId)}.`);
+  }
+
+  async function handleProviderSelectionChange(nextProviderId: string) {
+    await applyProviderSelection(nextProviderId, '');
+  }
+
+  async function handleModelSelectionChange(nextModelId: string) {
+    await applyProviderSelection(selectedProviderId, nextModelId);
+  }
+
+
   async function loadConversation(conversationId: string) {
     setMessagesLoading(true);
     setError(null);
     try {
       const response = await portalFetch(`/portal-api/tenant/conversations/${conversationId}?messageLimit=100`);
-      const data = await response.json();
+      const data = await response.json() as ConversationDetailResponse;
       setMessages(data.messages || []);
+      setSelectedProviderId(data.providerId || '');
+      setSelectedModelId(data.modelId || '');
       setActiveConversationId(conversationId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load conversation');
@@ -239,6 +486,8 @@ export function ChatView({
         body: JSON.stringify({
           title: 'New Conversation',
           brainId: activeBrainId || null,
+          providerId: selectedProviderId || null,
+          modelId: selectedModelId || null,
         }),
       });
       const data = await response.json();
@@ -267,6 +516,12 @@ export function ChatView({
 
   async function sendMessage() {
     if (!hasConfiguredProviders || !inputValue.trim() || isStreaming) return;
+
+    const modelCommand = parseModelCommand(inputValue);
+    if (modelCommand) {
+      await handleModelCommand(modelCommand);
+      return;
+    }
 
     let conversationId = activeConversationId;
     if (!conversationId) {
@@ -317,6 +572,8 @@ export function ChatView({
           })),
           conversationId,
           brainId: activeBrainId || null,
+          providerId: selectedProviderId || null,
+          modelId: selectedModelId || null,
           enableTools: agenticMode,
         }),
         signal: abortControllerRef.current.signal,
@@ -621,7 +878,7 @@ export function ChatView({
               ) : (
                 <>
                   <h2>Configure a provider first</h2>
-                  <p>Chat now runs against your own provider settings. Connect OpenAI, Anthropic, or Ollama under Account before sending a message.</p>
+                  <p>Chat now runs against your own provider settings. Connect OpenAI Codex, OpenAI, Anthropic, or Ollama under Account before sending a message.</p>
                   <button
                     type="button"
                     className="button button-primary"
@@ -640,10 +897,13 @@ export function ChatView({
               >
                 <div className="chat-message-header">
                   <span className="chat-message-role">
-                    {message.role === 'user' ? 'You' : 'Assistant'}
+                    {message.role === 'user' ? 'You' : message.role === 'system' ? 'System' : 'Assistant'}
                   </span>
                   {message.providerId && (
                     <span className="chat-message-provider">{message.providerId}</span>
+                  )}
+                  {message.modelId && (
+                    <span className="chat-message-provider">{message.modelId}</span>
                   )}
                   <span className="chat-message-time">{formatTime(message.createdAt)}</span>
                 </div>
@@ -727,6 +987,36 @@ export function ChatView({
 
         <div className="chat-input-container">
           <div className="chat-input-options">
+            <label className="field">
+              <span>Provider</span>
+              <select
+                value={selectedProviderId}
+                onChange={(e) => void handleProviderSelectionChange(e.target.value)}
+                disabled={isStreaming || !hasConfiguredProviders}
+              >
+                <option value="">Auto routing</option>
+                {availableProviders.map((provider) => (
+                  <option key={provider.providerId} value={provider.providerId}>
+                    {provider.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Model</span>
+              <select
+                value={selectedModelId}
+                onChange={(e) => void handleModelSelectionChange(e.target.value)}
+                disabled={isStreaming || !selectedProviderId || providerModels.length === 0}
+              >
+                <option value="">Provider default</option>
+                {providerModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name || model.id}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="chat-toggle">
               <input
                 type="checkbox"
@@ -743,12 +1033,10 @@ export function ChatView({
             )}
           </div>
           <textarea
-            className="chat-input"
+            placeholder={hasConfiguredProviders ? (agenticMode ? 'Ask me to do something with tools (e.g., "List files in microsoft/vscode repo")...' : 'Type a message or use /model <provider> <model>...') : 'Configure a provider in Account before chatting.'}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={hasConfiguredProviders ? (agenticMode ? 'Ask me to do something with tools (e.g., "List files in microsoft/vscode repo")...' : 'Type a message...') : 'Configure a provider in Account before chatting.'}
-            disabled={isStreaming || !hasConfiguredProviders}
             rows={3}
           />
           <div className="chat-input-actions">
@@ -790,5 +1078,4 @@ export function ChatView({
     </section>
   );
 }
-
 

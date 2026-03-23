@@ -182,10 +182,18 @@ type ConfiguredProviderResponse = {
 type ProviderEditorState = {
   authType: string;
   apiKey: string;
+  sessionJson: string;
   defaultModel: string;
   baseUrl: string;
 };
 
+
+type HostedCodexLoginStatus = {
+  isRunning: boolean;
+  authFileAvailable: boolean;
+  log: string;
+  message: string;
+};
 type DocumentSummary = {
   managedDocumentId: string;
   title?: string;
@@ -393,6 +401,7 @@ function App() {
   const [requestWriteScope, setRequestWriteScope] = useState(false);
   const [createdToken, setCreatedToken] = useState<CreatedTokenState | null>(null);
   const [accountActionMessage, setAccountActionMessage] = useState<string | null>(null);
+  const [hostedCodexLoginStatus, setHostedCodexLoginStatus] = useState<HostedCodexLoginStatus | null>(null);
   const [toolQueryBrainId, setToolQueryBrainId] = useState('');
   const [toolQuerySearch, setToolQuerySearch] = useState('identity');
   const [toolQueryRank, setToolQueryRank] = useState('hybrid');
@@ -572,6 +581,7 @@ function App() {
       setMemoryFilter('');
       setCreatedToken(null);
       setAccountActionMessage(null);
+      setHostedCodexLoginStatus(null);
       setToolQueryBrainId('');
       setToolQueryResults(null);
       setToolFetchedDocuments({});
@@ -1162,6 +1172,58 @@ async function handleOpenDocumentLink(rawPath: string) {
     }
   }
 
+  async function handleStartHostedCodexLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/start', session.idToken, {
+        method: 'POST',
+      }) as HostedCodexLoginStatus;
+      setHostedCodexLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Codex sign-in started.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to start hosted Codex sign-in.');
+    }
+  }
+
+  async function handleRefreshHostedCodexLoginStatus() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/status', session.idToken) as HostedCodexLoginStatus;
+      setHostedCodexLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Codex sign-in status loaded.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to refresh hosted Codex sign-in status.');
+    }
+  }
+
+  async function handleCompleteHostedCodexLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/complete', session.idToken, {
+        method: 'POST',
+      }) as { message?: string };
+      setAccountActionMessage(response.message || 'Hosted Codex sign-in completed.');
+      setRefreshNonce((value) => value + 1);
+      const status = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/status', session.idToken) as HostedCodexLoginStatus;
+      setHostedCodexLoginStatus(status);
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to complete hosted Codex sign-in.');
+    }
+  }
+
+  async function handleCancelHostedCodexLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/openai-codex/hosted-login/cancel', session.idToken, {
+        method: 'POST',
+      }) as HostedCodexLoginStatus;
+      setHostedCodexLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Codex sign-in cancelled.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to cancel hosted Codex sign-in.');
+    }
+  }
+
   function handleOpenProviderSettings() {
     if (!authSession) {
       return;
@@ -1610,18 +1672,23 @@ const memoryViewBrains = memoryActiveBrain ? [memoryActiveBrain] : [];
             configuredProviders={configuredProviders}
             context={context}
             createdToken={createdToken}
+            codexHostedLoginStatus={hostedCodexLoginStatus}
             memoryBrainPreference={memoryBrainPreference}
             onCopyCreatedToken={handleCopyCreatedToken}
             onCreateToken={handleCreateToken}
+            onCancelHostedCodexLogin={handleCancelHostedCodexLogin}
+            onCompleteHostedCodexLogin={handleCompleteHostedCodexLogin}
             onDeleteProvider={handleDeleteProvider}
             onDisconnectProviderOAuth={handleDisconnectProviderOAuth}
             onDismissCreatedToken={() => setCreatedToken(null)}
             onRefreshSession={handleRefreshSession}
+            onRefreshHostedCodexLoginStatus={handleRefreshHostedCodexLoginStatus}
             onRequestWriteScopeChange={setRequestWriteScope}
             onRevokeToken={handleRevokeToken}
             onSaveMemoryBrain={handleSaveMemoryBrain}
             onSaveProviderConfig={handleSaveProviderConfig}
             onSignOut={handleSignOut}
+            onStartHostedCodexLogin={handleStartHostedCodexLogin}
             onStartProviderOAuth={handleStartProviderOAuth}
             onToggleProvider={handleToggleProvider}
             onTokenExpiresAtInputChange={setTokenExpiresAtInput}
@@ -2115,21 +2182,26 @@ type AccountViewProps = {
   availableProviders: AvailableProvider[];
   billing: PortalBilling | null;
   brains: BrainSummary[];
+  codexHostedLoginStatus: HostedCodexLoginStatus | null;
   configuredProviders: ConfiguredProviderSummary[];
   context: PortalContext | null;
   createdToken: CreatedTokenState | null;
   memoryBrainPreference: MemoryBrainPreference | null;
+  onCancelHostedCodexLogin: () => Promise<void>;
+  onCompleteHostedCodexLogin: () => Promise<void>;
   onCopyCreatedToken: () => void;
   onCreateToken: () => void;
   onDeleteProvider: (providerId: string) => Promise<void>;
   onDisconnectProviderOAuth: (providerId: string) => Promise<void>;
   onDismissCreatedToken: () => void;
+  onRefreshHostedCodexLoginStatus: () => Promise<void>;
   onRefreshSession: () => Promise<string | null>;
   onRequestWriteScopeChange: (value: boolean) => void;
   onRevokeToken: (apiTokenId: string) => void;
   onSaveMemoryBrain: (memoryBrainId: string) => Promise<void>;
   onSaveProviderConfig: (providerId: string, editor: ProviderEditorState) => Promise<void>;
   onSignOut: () => void;
+  onStartHostedCodexLogin: () => Promise<void>;
   onStartProviderOAuth: (providerId: string) => Promise<void>;
   onToggleProvider: (providerId: string) => Promise<void>;
   onTokenExpiresAtInputChange: (value: string) => void;
@@ -2146,21 +2218,26 @@ function AccountView({
   availableProviders,
   billing,
   brains,
+  codexHostedLoginStatus,
   configuredProviders,
   context,
   createdToken,
   memoryBrainPreference,
+  onCancelHostedCodexLogin,
+  onCompleteHostedCodexLogin,
   onCopyCreatedToken,
   onCreateToken,
   onDeleteProvider,
   onDisconnectProviderOAuth,
   onDismissCreatedToken,
+  onRefreshHostedCodexLoginStatus,
   onRefreshSession,
   onRequestWriteScopeChange,
   onRevokeToken,
   onSaveMemoryBrain,
   onSaveProviderConfig,
   onSignOut,
+  onStartHostedCodexLogin,
   onStartProviderOAuth,
   onToggleProvider,
   onTokenExpiresAtInputChange,
@@ -2351,7 +2428,7 @@ function AccountView({
         <div className="panel-header">
           <div>
             <h3>Provider Settings</h3>
-            <p className="summary-detail">Connect Anthropic or OpenAI with OAuth or API keys, or point Ollama at a remote endpoint.</p>
+            <p className="summary-detail">Connect API-backed providers, import a Codex session for subscription-backed access, or point Ollama at a remote endpoint.</p>
           </div>
         </div>
 
@@ -2365,8 +2442,11 @@ function AccountView({
               const pending = pendingProviderId === provider.providerId;
               const supportsApiKey = provider.authTypes.includes('api_key');
               const supportsOAuth = provider.authTypes.includes('oauth') && isProviderOAuthConfigured(provider);
+              const supportsSessionJson = provider.authTypes.includes('session_json');
               const isOllama = provider.providerId === 'ollama';
               const isOAuthMode = editor.authType === 'oauth';
+              const isSessionJsonMode = editor.authType === 'session_json';
+              const currentHostedCodexStatus = provider.providerId === 'openai-codex' ? codexHostedLoginStatus : null;
               const statusClass = configured
                 ? (configured.isEnabled ? 'status-chip-active' : 'status-chip-expired')
                 : 'status-chip-revoked';
@@ -2400,7 +2480,9 @@ function AccountView({
                     {configured?.updatedAt ? <span>Updated {formatDateTime(configured.updatedAt || undefined)}</span> : null}
                     {configured?.tokenExpiresAt ? <span>Token Expires {formatDateTime(configured.tokenExpiresAt || undefined)}</span> : null}
                     {provider.configUrl ? (
-                      <a href={provider.configUrl} target="_blank" rel="noreferrer">Get API Key</a>
+                      <a href={provider.configUrl} target="_blank" rel="noreferrer">
+                        {provider.providerId === 'openai-codex' ? 'Open setup guide' : 'Get API Key'}
+                      </a>
                     ) : null}
                   </div>
 
@@ -2460,10 +2542,93 @@ function AccountView({
                     </label>
                   ) : null}
 
+
+                  {supportsSessionJson && isSessionJsonMode ? (
+                    <label className="field">
+                      <span>Codex Session JSON</span>
+                      <textarea
+                        rows={8}
+                        value={editor.sessionJson}
+                        onChange={(event) => updateProviderEditor(provider.providerId, { sessionJson: event.target.value })}
+                        placeholder={configured?.hasCredentials
+                          ? 'Leave blank to keep the stored Codex session JSON'
+                          : 'Paste the contents of ~/.codex/auth.json'}
+                        disabled={pending}
+                        className="document-content-editor"
+                        spellCheck={false}
+                      />
+                    </label>
+                  ) : null}
                   {supportsOAuth && isOAuthMode ? (
                     <p className="summary-detail provider-auth-note">
                       OAuth uses a browser redirect. Save any default model changes, then connect the provider for this account.
                     </p>
+                  ) : null}
+
+
+                  {supportsSessionJson && isSessionJsonMode ? (
+                    <p className="summary-detail provider-auth-note">
+                      The stored session JSON is encrypted, then materialized only inside the user&apos;s isolated workspace runtime so Codex runs under that user&apos;s own subscription.
+                    </p>
+                  ) : null}
+
+                  {provider.providerId === 'openai-codex' && supportsSessionJson && isSessionJsonMode ? (
+                    <section className="created-token-panel">
+                      <div className="panel-header compact-header">
+                        <div>
+                          <h3>Hosted Codex Sign-In</h3>
+                          <p className="summary-detail">Run device auth inside the user&apos;s isolated workspace or pod, finish the browser sign-in, then complete the connection to save the session for this account.</p>
+                        </div>
+                      </div>
+
+                      <dl className="facts-list compact-facts">
+                        <div className="fact-row"><dt>Status</dt><dd>{!currentHostedCodexStatus ? 'Not started' : currentHostedCodexStatus.authFileAvailable ? 'Ready to complete' : currentHostedCodexStatus.isRunning ? 'Waiting for authentication' : 'Idle'}</dd></div>
+                        <div className="fact-row"><dt>Runtime Auth</dt><dd>{currentHostedCodexStatus?.authFileAvailable ? 'Present' : 'Missing'}</dd></div>
+                      </dl>
+
+                      <div className="action-row">
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, onStartHostedCodexLogin)}
+                          disabled={pending}
+                        >
+                          Start Hosted Sign-In
+                        </button>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, onRefreshHostedCodexLoginStatus)}
+                          disabled={pending}
+                        >
+                          Refresh Status
+                        </button>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => void runProviderAction(provider.providerId, onCompleteHostedCodexLogin)}
+                          disabled={pending}
+                        >
+                          Complete Sign-In
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-danger"
+                          onClick={() => void runProviderAction(provider.providerId, onCancelHostedCodexLogin)}
+                          disabled={pending}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      <textarea
+                        readOnly
+                        rows={8}
+                        value={currentHostedCodexStatus?.log || currentHostedCodexStatus?.message || 'No hosted sign-in activity yet.'}
+                        className="document-content-editor"
+                        spellCheck={false}
+                      />
+                    </section>
                   ) : null}
 
                   <div className="action-row">
@@ -2472,7 +2637,7 @@ function AccountView({
                       className="button button-primary"
                       onClick={() => void runProviderAction(provider.providerId, async () => {
                         await onSaveProviderConfig(provider.providerId, editor);
-                        updateProviderEditor(provider.providerId, { apiKey: '' });
+                        updateProviderEditor(provider.providerId, { apiKey: '', sessionJson: '' });
                       })}
                       disabled={pending}
                     >
@@ -2838,6 +3003,7 @@ function buildProviderEditorState(
   return {
     authType: defaultAuthType,
     apiKey: '',
+    sessionJson: '',
     defaultModel: configured?.settings?.defaultModel || provider?.defaultModel || '',
     baseUrl: configured?.settings?.baseUrl || '',
   };
@@ -2874,6 +3040,10 @@ function buildProviderConfigRequest(
     request.apiKey = editor.apiKey.trim();
   }
 
+  if (editor.authType === 'session_json' && editor.sessionJson.trim()) {
+    request.sessionJson = editor.sessionJson.trim();
+  }
+
   return request;
 }
 
@@ -2900,6 +3070,8 @@ function formatProviderAuthType(authType: string) {
       return 'API Key';
     case 'oauth':
       return 'OAuth';
+    case 'session_json':
+      return 'Session JSON';
     case 'none':
       return 'None';
     default:

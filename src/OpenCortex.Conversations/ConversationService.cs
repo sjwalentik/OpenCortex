@@ -68,6 +68,11 @@ public interface IConversationService
     /// Update the conversation title.
     /// </summary>
     Task UpdateTitleAsync(string conversationId, string title, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persist the full conversation record.
+    /// </summary>
+    Task UpdateConversationAsync(Conversation conversation, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -238,4 +243,7 @@ public sealed class ConversationService : IConversationService
         conversation.Title = title;
         await _repository.UpdateAsync(conversation, cancellationToken);
     }
+
+    public Task UpdateConversationAsync(Conversation conversation, CancellationToken cancellationToken = default)
+        => _repository.UpdateAsync(conversation, cancellationToken);
 }

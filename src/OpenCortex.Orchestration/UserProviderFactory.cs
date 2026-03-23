@@ -16,6 +16,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
     private readonly IUserProviderConfigRepository _configRepository;
     private readonly ICredentialEncryption _encryption;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly Tools.IWorkspaceManager _workspaceManager;
     private readonly IProviderOAuthService _oauthService;
     private readonly ILogger<UserProviderFactory> _logger;
 
@@ -23,12 +24,14 @@ public sealed class UserProviderFactory : IUserProviderFactory
         IUserProviderConfigRepository configRepository,
         ICredentialEncryption encryption,
         IHttpClientFactory httpClientFactory,
+        Tools.IWorkspaceManager workspaceManager,
         IProviderOAuthService oauthService,
         ILogger<UserProviderFactory> logger)
     {
         _configRepository = configRepository;
         _encryption = encryption;
         _httpClientFactory = httpClientFactory;
+        _workspaceManager = workspaceManager;
         _oauthService = oauthService;
         _logger = logger;
     }
@@ -146,6 +149,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
             {
                 "anthropic" => CreateAnthropicProvider(config, settings),
                 "openai" => CreateOpenAIProvider(config, settings),
+                "openai-codex" => CreateCodexProvider(config, settings),
                 "ollama" => CreateOllamaProvider(config, settings),
                 _ => null
             };
@@ -239,5 +243,28 @@ public sealed class UserProviderFactory : IUserProviderFactory
             httpClient,
             Options.Create(options),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Providers.Ollama.OllamaProvider>.Instance);
+    }
+
+    private IModelProvider? CreateCodexProvider(UserProviderConfig config, UserProviderSettings? settings)
+    {
+        if (string.IsNullOrEmpty(config.EncryptedAccessToken))
+        {
+            _logger.LogWarning("No session credential found for OpenAI Codex provider");
+            return null;
+        }
+
+        var sessionJson = _encryption.Decrypt(config.EncryptedAccessToken);
+        if (string.IsNullOrWhiteSpace(sessionJson))
+        {
+            _logger.LogWarning("OpenAI Codex provider session payload was empty after decryption");
+            return null;
+        }
+
+        return new CodexCliModelProvider(
+            config.UserId,
+            settings?.DefaultModel ?? "gpt-5.4",
+            sessionJson,
+            _workspaceManager,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CodexCliModelProvider>.Instance);
     }
 }

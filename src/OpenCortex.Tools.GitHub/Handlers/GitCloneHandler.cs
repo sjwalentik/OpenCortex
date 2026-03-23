@@ -163,10 +163,13 @@ public sealed class GitCloneHandler : IToolHandler
 
         var pathExistsResult = await _workspace.ExecuteCommandAsync(
             userId,
-            $"test -e {ShellEscaping.SingleQuote(fullTargetPath)}",
-            null,
-            null,
-            cancellationToken);
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"test -e {ShellEscaping.SingleQuote(fullTargetPath)}"
+            ],
+            cancellationToken: cancellationToken);
 
         if (pathExistsResult.ExitCode == 0)
         {
@@ -317,10 +320,14 @@ public sealed class GitCloneHandler : IToolHandler
         var shellCommand = GitHubGitAuth.BuildShellCommand(token, arguments);
         var result = await _workspace.ExecuteCommandAsync(
             userId,
-            shellCommand,
-            null,
-            workingDirectory,
-            cancellationToken);
+            "/bin/sh",
+            workingDirectory: workingDirectory,
+            argumentList:
+            [
+                "-c",
+                shellCommand
+            ],
+            cancellationToken: cancellationToken);
 
         return (result.ExitCode == 0, result.StandardOutput, result.StandardError);
     }

@@ -1,6 +1,7 @@
 using OpenCortex.Conversations;
 using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Tenancy;
+using System.Text.Json.Nodes;
 
 namespace OpenCortex.Api;
 
@@ -71,11 +72,25 @@ public static class ConversationEndpoints
                 request.SystemPrompt,
                 cancellationToken);
 
+            conversation.Metadata = BuildConversationMetadata(
+                conversation.Metadata,
+                request.ProviderId,
+                request.ModelId);
+
+            if (conversation.Metadata is not null)
+            {
+                await conversationService.UpdateConversationAsync(conversation, cancellationToken);
+            }
+
+            var routing = GetConversationRoutingPreference(conversation.Metadata);
+
             return Results.Created($"/tenant/conversations/{conversation.ConversationId}", new
             {
                 conversationId = conversation.ConversationId,
                 title = conversation.Title,
                 brainId = conversation.BrainId,
+                providerId = routing.ProviderId,
+                modelId = routing.ModelId,
                 createdAt = conversation.CreatedAt,
                 status = conversation.Status.ToString().ToLowerInvariant()
             });
@@ -107,11 +122,15 @@ public static class ConversationEndpoints
                 return Results.NotFound(new { message = $"Conversation '{conversationId}' was not found." });
             }
 
+            var routing = GetConversationRoutingPreference(conversation.Metadata);
+
             return Results.Ok(new
             {
                 conversationId = conversation.ConversationId,
                 title = conversation.Title,
                 brainId = conversation.BrainId,
+                providerId = routing.ProviderId,
+                modelId = routing.ModelId,
                 systemPrompt = conversation.SystemPrompt,
                 createdAt = conversation.CreatedAt,
                 lastMessageAt = conversation.LastMessageAt,
@@ -158,6 +177,15 @@ public static class ConversationEndpoints
                 await conversationService.UpdateTitleAsync(conversationId, request.Title, cancellationToken);
             }
 
+            if (request.UpdateRouting)
+            {
+                conversation.Metadata = BuildConversationMetadata(
+                    conversation.Metadata,
+                    request.ProviderId,
+                    request.ModelId);
+                await conversationService.UpdateConversationAsync(conversation, cancellationToken);
+            }
+
             return Results.Ok(new { message = "Conversation updated." });
         });
 
@@ -188,12 +216,78 @@ public static class ConversationEndpoints
             return Results.Ok(new { message = $"Conversation '{conversationId}' was archived." });
         });
     }
+
+    private static string? BuildConversationMetadata(
+        string? existingMetadata,
+        string? providerId,
+        string? modelId)
+    {
+        JsonObject metadata;
+        try
+        {
+            metadata = JsonNode.Parse(existingMetadata ?? "{}") as JsonObject ?? new JsonObject();
+        }
+        catch
+        {
+            metadata = new JsonObject();
+        }
+
+        if (string.IsNullOrWhiteSpace(providerId))
+        {
+            metadata.Remove("providerId");
+        }
+        else
+        {
+            metadata["providerId"] = providerId.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(modelId))
+        {
+            metadata.Remove("modelId");
+        }
+        else
+        {
+            metadata["modelId"] = modelId.Trim();
+        }
+
+        return metadata.Count == 0 ? null : metadata.ToJsonString();
+    }
+
+    private static ConversationRoutingPreference GetConversationRoutingPreference(string? metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return new ConversationRoutingPreference(null, null);
+        }
+
+        try
+        {
+            var metadata = JsonNode.Parse(metadataJson) as JsonObject;
+            return new ConversationRoutingPreference(
+                metadata?["providerId"]?.GetValue<string?>(),
+                metadata?["modelId"]?.GetValue<string?>());
+        }
+        catch
+        {
+            return new ConversationRoutingPreference(null, null);
+        }
+    }
 }
 
 internal sealed record CreateConversationRequest(
     string? Title,
     string? BrainId,
-    string? SystemPrompt);
+    string? SystemPrompt,
+    string? ProviderId = null,
+    string? ModelId = null);
 
 internal sealed record UpdateConversationRequest(
-    string? Title);
+    string? Title,
+    bool UpdateRouting = false,
+    string? ProviderId = null,
+    string? ModelId = null);
+
+internal sealed record ConversationRoutingPreference(
+    string? ProviderId,
+    string? ModelId);
+

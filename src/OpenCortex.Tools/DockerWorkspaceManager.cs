@@ -107,6 +107,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
 
             if (existingStatus == "running")
             {
+                await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
                 UpdateLastActivity(userId);
                 return new WorkspaceStatus
                 {
@@ -125,6 +126,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
                 var startResult = await RunDockerCommandAsync($"start {containerName}", cancellationToken);
                 if (startResult.Success)
                 {
+                    await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
                     UpdateLastActivity(userId);
                     return new WorkspaceStatus
                     {
@@ -153,6 +155,8 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         string command,
         string? arguments = null,
         string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environmentVariables = null,
+        IReadOnlyList<string>? argumentList = null,
         CancellationToken cancellationToken = default)
     {
         var containerName = GetContainerName(userId);
@@ -171,9 +175,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             ? WorkspacePathInContainer
             : ResolvePath(userId, workingDirectory);
 
-        var fullCommand = string.IsNullOrEmpty(arguments)
-            ? command
-            : $"{command} {arguments}";
+        var fullCommand = BuildShellCommand(command, arguments, argumentList, environmentVariables);
         var shellScript = $"cd -- {ShellEscaping.SingleQuote(workDir)} && {fullCommand}";
 
         var stopwatch = Stopwatch.StartNew();
@@ -239,8 +241,6 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         IReadOnlyDictionary<string, string>? credentials,
         CancellationToken cancellationToken)
     {
-        _ = credentials;
-
         var containerName = GetContainerName(userId);
         var volumeName = GetVolumeName(userId);
 
@@ -284,6 +284,8 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
 
         _logger.LogInformation("Created container {ContainerName} for user {UserId}", containerName, userId);
 
+        await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
+
         return new WorkspaceStatus
         {
             UserId = userId,
@@ -294,6 +296,77 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             LastActivityAt = DateTime.UtcNow,
             Message = "Container created and started"
         };
+    }
+
+    private async Task SyncCodexAuthStateAsync(
+        Guid userId,
+        IReadOnlyDictionary<string, string>? credentials,
+        CancellationToken cancellationToken)
+    {
+        var sessionJson = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.CodexProviderId);
+        var authFilePath = WorkspaceRuntimePaths.GetCodexAuthFilePath(
+            supportsContainerIsolation: true,
+            WorkspacePathInContainer);
+        var authDirectory = Path.GetDirectoryName(authFilePath)?.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(authDirectory))
+        {
+            return;
+        }
+
+        var containerName = GetContainerName(userId);
+        var syncScript = string.IsNullOrWhiteSpace(sessionJson)
+            ? $"rm -f {ShellEscaping.SingleQuote(authFilePath)}"
+            : BuildCodexAuthWriteScript(authDirectory, authFilePath, sessionJson);
+
+        await RunDockerExecAsync(containerName, syncScript, cancellationToken);
+    }
+
+    private static string BuildCodexAuthWriteScript(
+        string authDirectory,
+        string authFilePath,
+        string sessionJson)
+    {
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(sessionJson));
+        return
+            $"mkdir -p {ShellEscaping.SingleQuote(authDirectory)} " +
+            $"&& printf %s {ShellEscaping.SingleQuote(encoded)} | base64 -d > {ShellEscaping.SingleQuote(authFilePath)} " +
+            $"&& chmod 600 {ShellEscaping.SingleQuote(authFilePath)}";
+    }
+
+    private static string BuildShellCommand(
+        string command,
+        string? arguments,
+        IReadOnlyList<string>? argumentList,
+        IReadOnlyDictionary<string, string>? environmentVariables)
+    {
+        var builder = new StringBuilder();
+
+        if (environmentVariables is not null)
+        {
+            foreach (var (key, value) in environmentVariables)
+            {
+                builder.Append(key)
+                    .Append('=')
+                    .Append(ShellEscaping.SingleQuote(value))
+                    .Append(' ');
+            }
+        }
+
+        builder.Append(ShellEscaping.SingleQuote(command));
+
+        if (argumentList is { Count: > 0 })
+        {
+            foreach (var argument in argumentList)
+            {
+                builder.Append(' ').Append(ShellEscaping.SingleQuote(argument));
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(arguments))
+        {
+            builder.Append(' ').Append(arguments);
+        }
+
+        return builder.ToString();
     }
 
     private async Task<string?> GetContainerStatusAsync(string containerName, CancellationToken cancellationToken)
