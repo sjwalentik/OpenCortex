@@ -464,7 +464,7 @@ public static class ProviderConfigEndpoints
             ICredentialEncryption encryption,
             CancellationToken cancellationToken) =>
         {
-            if (!TryParseOAuthState(state, out var stateUserId, out var returnUrl))
+            if (!oauthService.TryValidateState(providerId, state, out var stateUserId, out var returnUrl))
             {
                 return Results.BadRequest(new { message = "Invalid OAuth state." });
             }
@@ -745,33 +745,6 @@ public static class ProviderConfigEndpoints
         }
 
         return config;
-    }
-
-    private static bool TryParseOAuthState(string state, out Guid userId, out string? returnUrl)
-    {
-        userId = Guid.Empty;
-        returnUrl = null;
-
-        if (string.IsNullOrWhiteSpace(state))
-        {
-            return false;
-        }
-
-        var separatorIndex = state.IndexOf(':');
-        var userIdSegment = separatorIndex >= 0 ? state[..separatorIndex] : state;
-        if (!Guid.TryParse(userIdSegment, out userId))
-        {
-            return false;
-        }
-
-        if (separatorIndex < 0 || separatorIndex == state.Length - 1)
-        {
-            return true;
-        }
-
-        var encodedReturnUrl = state[(separatorIndex + 1)..];
-        returnUrl = NormalizeOAuthReturnUrl(Uri.UnescapeDataString(encodedReturnUrl));
-        return true;
     }
 
     private static string ResolveDefaultAuthType(string providerId)

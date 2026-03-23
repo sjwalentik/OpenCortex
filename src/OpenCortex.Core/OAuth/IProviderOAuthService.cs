@@ -11,6 +11,11 @@ public interface IProviderOAuthService
     string GetAuthorizationUrl(string providerId, Guid userId, string? state = null);
 
     /// <summary>
+    /// Validate and parse an OAuth state value.
+    /// </summary>
+    bool TryValidateState(string providerId, string state, out Guid userId, out string? returnUrl);
+
+    /// <summary>
     /// Exchange an authorization code for tokens.
     /// </summary>
     Task<OAuthTokenResult> ExchangeCodeAsync(string providerId, string code, CancellationToken cancellationToken = default);

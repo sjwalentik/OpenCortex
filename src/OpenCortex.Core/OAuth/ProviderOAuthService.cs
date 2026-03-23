@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Web;
@@ -12,6 +14,7 @@ namespace OpenCortex.Core.OAuth;
 /// </summary>
 public sealed class ProviderOAuthService : IProviderOAuthService
 {
+    private const int OAuthStateLifetimeMinutes = 15;
     private readonly ProviderOAuthConfig _config;
     private readonly HttpClient _httpClient;
     private readonly ILogger<ProviderOAuthService> _logger;
@@ -45,10 +48,7 @@ public sealed class ProviderOAuthService : IProviderOAuthService
             throw new ArgumentException($"OAuth not configured for provider: {providerId}");
         }
 
-        // Include user ID in state for callback correlation
-        var stateValue = string.IsNullOrEmpty(state)
-            ? userId.ToString()
-            : $"{userId}:{Uri.EscapeDataString(state)}";
+        var stateValue = CreateSignedState(providerConfig, userId, state);
 
         var queryParams = HttpUtility.ParseQueryString(string.Empty);
         queryParams["client_id"] = providerConfig.ClientId;
@@ -58,6 +58,74 @@ public sealed class ProviderOAuthService : IProviderOAuthService
         queryParams["state"] = stateValue;
 
         return $"{providerConfig.AuthorizationEndpoint}?{queryParams}";
+    }
+
+    public bool TryValidateState(string providerId, string state, out Guid userId, out string? returnUrl)
+    {
+        userId = Guid.Empty;
+        returnUrl = null;
+
+        var providerConfig = GetProviderConfig(providerId);
+        if (providerConfig is null || string.IsNullOrWhiteSpace(state))
+        {
+            return false;
+        }
+
+        var separatorIndex = state.IndexOf('.');
+        if (separatorIndex <= 0 || separatorIndex == state.Length - 1)
+        {
+            return false;
+        }
+
+        var payloadSegment = state[..separatorIndex];
+        var signatureSegment = state[(separatorIndex + 1)..];
+
+        byte[] payloadBytes;
+        byte[] providedSignature;
+        try
+        {
+            payloadBytes = Base64UrlDecode(payloadSegment);
+            providedSignature = Base64UrlDecode(signatureSegment);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(providerConfig.ClientSecret));
+        var expectedSignature = hmac.ComputeHash(payloadBytes);
+        if (!CryptographicOperations.FixedTimeEquals(providedSignature, expectedSignature))
+        {
+            return false;
+        }
+
+        OAuthStatePayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<OAuthStatePayload>(payloadBytes);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (payload is null
+            || !Guid.TryParse(payload.UserId, out userId)
+            || payload.IssuedAtUnixSeconds <= 0)
+        {
+            return false;
+        }
+
+        var issuedAt = DateTimeOffset.FromUnixTimeSeconds(payload.IssuedAtUnixSeconds);
+        var now = DateTimeOffset.UtcNow;
+        if (issuedAt > now.AddMinutes(1)
+            || issuedAt < now.AddMinutes(-OAuthStateLifetimeMinutes))
+        {
+            return false;
+        }
+
+        returnUrl = NormalizeReturnUrl(payload.ReturnUrl);
+        return true;
     }
 
     public async Task<OAuthTokenResult> ExchangeCodeAsync(string providerId, string code, CancellationToken cancellationToken = default)
@@ -258,6 +326,56 @@ public sealed class ProviderOAuthService : IProviderOAuthService
         };
     }
 
+    private static string CreateSignedState(ProviderOAuthEndpoints providerConfig, Guid userId, string? returnUrl)
+    {
+        var payload = new OAuthStatePayload(
+            userId.ToString(),
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            string.IsNullOrWhiteSpace(returnUrl) ? null : returnUrl.Trim());
+
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(providerConfig.ClientSecret));
+        var signature = hmac.ComputeHash(payloadBytes);
+
+        return $"{Base64UrlEncode(payloadBytes)}.{Base64UrlEncode(signature)}";
+    }
+
+    private static string? NormalizeReturnUrl(string? returnUrl)
+    {
+        if (string.IsNullOrWhiteSpace(returnUrl))
+        {
+            return null;
+        }
+
+        return Uri.TryCreate(returnUrl, UriKind.RelativeOrAbsolute, out var parsed)
+            ? parsed.ToString()
+            : null;
+    }
+
+    private static string Base64UrlEncode(byte[] value) =>
+        Convert.ToBase64String(value)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+
+    private static byte[] Base64UrlDecode(string value)
+    {
+        var normalized = value
+            .Replace('-', '+')
+            .Replace('_', '/');
+
+        var padded = (normalized.Length % 4) switch
+        {
+            0 => normalized,
+            2 => normalized + "==",
+            3 => normalized + "=",
+            _ => throw new FormatException("Invalid base64url value.")
+        };
+
+        return Convert.FromBase64String(padded);
+    }
+
     private sealed record ProviderOAuthEndpoints(
         string ClientId,
         string ClientSecret,
@@ -266,6 +384,11 @@ public sealed class ProviderOAuthService : IProviderOAuthService
         string TokenEndpoint,
         string[] Scopes
     );
+
+    private sealed record OAuthStatePayload(
+        string UserId,
+        long IssuedAtUnixSeconds,
+        string? ReturnUrl);
 
     private sealed class OAuthTokenResponse
     {
