@@ -146,7 +146,7 @@ public sealed class DefaultRouter : IModelRouter
         // Map categories to an ordered list of preferred provider types.
         string[] preferredTypes = category switch
         {
-            TaskCategory.Code => ["openai-codex", "openai"],
+            TaskCategory.Code => ["openai"],
             TaskCategory.Planning => ["anthropic"],
             TaskCategory.Writing => ["anthropic"],
             TaskCategory.Analysis => ["anthropic"],
