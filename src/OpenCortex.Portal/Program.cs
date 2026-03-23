@@ -187,7 +187,7 @@ app.MapPost("/portal-auth/refresh", async (
     });
 });
 
-app.MapMethods("/portal-api/{**path}", ["GET", "POST", "PUT", "DELETE"], async (
+app.MapMethods("/portal-api/{**path}", ["GET", "POST", "PUT", "PATCH", "DELETE"], async (
     string path,
     HttpContext httpContext,
     IHttpClientFactory httpClientFactory,
@@ -344,7 +344,7 @@ static bool IsAllowedPortalApiPath(string path, string method)
     return normalizedMethod switch
     {
         "GET" =>
-            normalizedPath is "tenant/me" or "tenant/me/memory-brain" or "tenant/brains" or "tenant/billing/plan" or "tenant/tokens" or "tenant/conversations"
+            normalizedPath is "tenant/me" or "tenant/me/memory-brain" or "tenant/me/workspace-runtime" or "tenant/brains" or "tenant/billing/plan" or "tenant/tokens" or "tenant/conversations"
             || normalizedPath.StartsWith("tenant/brains/", StringComparison.OrdinalIgnoreCase)
             || normalizedPath.StartsWith("tenant/conversations/", StringComparison.OrdinalIgnoreCase)
             || string.Equals(normalizedPath, "tenant/query", StringComparison.OrdinalIgnoreCase)
@@ -363,6 +363,7 @@ static bool IsAllowedPortalApiPath(string path, string method)
         "PUT" =>
             IsTenantBrainDocumentItemPath(normalizedPath)
             || string.Equals(normalizedPath, "tenant/me/memory-brain", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedPath, "tenant/me/workspace-runtime", StringComparison.OrdinalIgnoreCase)
             || IsProviderConfigItemPath(normalizedPath),
         "PATCH" => IsTenantConversationItemPath(normalizedPath),
         "DELETE" =>
