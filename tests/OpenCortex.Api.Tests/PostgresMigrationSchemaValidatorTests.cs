@@ -65,6 +65,7 @@ public sealed class PostgresMigrationSchemaValidatorTests
             "0008_user_provider_configs",
             "0009_user_memory_brain",
             "0009a_customer_membership_memory_brain",
+            "0010_tenant_scoped_user_provider_configs",
         };
 
         var missing = PostgresMigrationSchemaValidator.GetMissingMigrations(applied);
