@@ -97,9 +97,14 @@ jobs:
 
       - name: Copy image pull secret to agent-workspaces
         run: |
-          kubectl get secret ghcr-pull-secret -n opencortex-develop -o yaml | \
-            sed 's/namespace: opencortex-develop/namespace: agent-workspaces/' | \
-            kubectl apply -f -
+          kubectl get secret ghcr-pull-secret -n opencortex-develop \
+            -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > /tmp/ghcr-dockerconfig.json
+
+          kubectl create secret generic ghcr-pull-secret \
+            --namespace=agent-workspaces \
+            --type=kubernetes.io/dockerconfigjson \
+            --from-file=.dockerconfigjson=/tmp/ghcr-dockerconfig.json \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Delete deployments for selector migration
         run: |
