@@ -19,6 +19,7 @@ COPY src/OpenCortex.Providers.Ollama/OpenCortex.Providers.Ollama.csproj src/Open
 COPY src/OpenCortex.Retrieval/OpenCortex.Retrieval.csproj src/OpenCortex.Retrieval/
 COPY src/OpenCortex.Tools/OpenCortex.Tools.csproj src/OpenCortex.Tools/
 COPY src/OpenCortex.Tools.Memory/OpenCortex.Tools.Memory.csproj src/OpenCortex.Tools.Memory/
+COPY src/OpenCortex.Shared/ src/OpenCortex.Shared/
 COPY src/OpenCortex.McpServer/OpenCortex.McpServer.csproj src/OpenCortex.McpServer/
 
 # Restore dependencies. Cache NuGet state and retry transient CI network failures.
@@ -45,6 +46,7 @@ COPY src/OpenCortex.Providers.Ollama/ src/OpenCortex.Providers.Ollama/
 COPY src/OpenCortex.Retrieval/ src/OpenCortex.Retrieval/
 COPY src/OpenCortex.Tools/ src/OpenCortex.Tools/
 COPY src/OpenCortex.Tools.Memory/ src/OpenCortex.Tools.Memory/
+COPY src/OpenCortex.Shared/ src/OpenCortex.Shared/
 COPY src/OpenCortex.McpServer/ src/OpenCortex.McpServer/
 
 # Build and publish. The restore will be fast if packages are already cached.
