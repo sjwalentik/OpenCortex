@@ -4,6 +4,7 @@ export type ChatMessage = {
   messageId: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  thinkingContent?: string;
   providerId?: string;
   modelId?: string;
   latencyMs?: number;
@@ -57,6 +58,7 @@ type StreamChunk = {
   retryable?: boolean;
   timestamp?: string;
   contentDelta?: string;
+  thinkingDelta?: string;
   isComplete?: boolean;
   finishReason?: string;
   providerId?: string;
@@ -718,19 +720,21 @@ export function ChatView({
 
             if (chunk.eventType === 'status' || chunk.eventType === 'heartbeat' || chunk.eventType === 'error') {
               setStreamActivities((prev) => applyStreamActivity(prev, chunk));
-              if (chunk.eventType === 'error' && chunk.message) {
-                setError(chunk.message);
+              if (chunk.eventType === 'error') {
+                const errorText = chunk.message || chunk.error;
+                if (errorText) setError(errorText);
               }
             }
 
-            if (chunk.contentDelta && activeConversationIdRef.current === conversationId) {
+            if ((chunk.contentDelta || chunk.thinkingDelta) && activeConversationIdRef.current === conversationId) {
               setMessages((prev) => {
                 const updated = [...prev];
                 const lastIndex = updated.length - 1;
                 if (lastIndex >= 0 && updated[lastIndex].isStreaming) {
                   updated[lastIndex] = {
                     ...updated[lastIndex],
-                    content: `${updated[lastIndex].content}${chunk.contentDelta}`,
+                    ...(chunk.contentDelta ? { content: `${updated[lastIndex].content}${chunk.contentDelta}` } : {}),
+                    ...(chunk.thinkingDelta ? { thinkingContent: `${updated[lastIndex].thinkingContent ?? ''}${chunk.thinkingDelta}` } : {}),
                   };
                 }
                 return updated;

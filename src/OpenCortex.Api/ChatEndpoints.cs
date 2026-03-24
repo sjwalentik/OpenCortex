@@ -912,11 +912,20 @@ public static class ChatEndpoints
             {
                 await heartbeatTask;
             }
-            catch (OperationCanceledException)
+            catch
             {
+                // Suppress heartbeat task exceptions (OCE from cancellation, IOException from broken pipe, etc.)
             }
 
-            await WriteDoneEventAsync(response, writeLock, CancellationToken.None);
+            try
+            {
+                await WriteDoneEventAsync(response, writeLock, CancellationToken.None);
+            }
+            catch
+            {
+                // Suppress — client may have already disconnected before [DONE] could be written.
+            }
+
             stopwatch.Stop();
         }
 
@@ -934,6 +943,7 @@ public static class ChatEndpoints
     {
         eventType = "content",
         contentDelta = chunk.Chunk.ContentDelta,
+        thinkingDelta = chunk.Chunk.ThinkingDelta,
         isComplete = chunk.Chunk.IsComplete,
         finishReason = chunk.Chunk.FinishReason?.ToString().ToLowerInvariant(),
         providerId = chunk.ProviderId,
@@ -1507,11 +1517,20 @@ public static class ChatEndpoints
             {
                 await heartbeatTask;
             }
-            catch (OperationCanceledException)
+            catch
             {
+                // Suppress heartbeat task exceptions (OCE from cancellation, IOException from broken pipe, etc.)
             }
 
-            await WriteDoneEventAsync(response, writeLock, CancellationToken.None);
+            try
+            {
+                await WriteDoneEventAsync(response, writeLock, CancellationToken.None);
+            }
+            catch
+            {
+                // Suppress — client may have already disconnected before [DONE] could be written.
+            }
+
             stopwatch.Stop();
         }
 

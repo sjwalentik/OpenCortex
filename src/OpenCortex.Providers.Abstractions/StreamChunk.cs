@@ -11,6 +11,12 @@ public sealed record StreamChunk
     public string? ContentDelta { get; init; }
 
     /// <summary>
+    /// Incremental thinking/reasoning content (e.g. from &lt;think&gt; blocks).
+    /// Separate from ContentDelta so the UI can render it distinctly.
+    /// </summary>
+    public string? ThinkingDelta { get; init; }
+
+    /// <summary>
     /// Incremental tool call data.
     /// </summary>
     public ToolCallDelta? ToolCallDelta { get; init; }

@@ -111,6 +111,7 @@ public sealed class OllamaProvider : ModelProviderBase
         TokenUsage? finalUsage = null;
         FinishReason? finishReason = null;
         string? model = null;
+        var inThinkBlock = false;
 
         while (!reader.EndOfStream)
         {
@@ -142,14 +143,24 @@ public sealed class OllamaProvider : ModelProviderBase
             var delta = choice.Delta;
             if (delta is null) continue;
 
-            // Handle content delta
+            // Handle content delta — split out <think>...</think> reasoning blocks
             if (!string.IsNullOrEmpty(delta.Content))
             {
-                yield return new StreamChunk
+                var (segments, nextInThinkBlock) = SplitThinkBlocks(delta.Content, inThinkBlock);
+                inThinkBlock = nextInThinkBlock;
+
+                foreach (var (thinking, content) in segments)
                 {
-                    ContentDelta = delta.Content,
-                    Model = model
-                };
+                    if (!string.IsNullOrEmpty(thinking))
+                    {
+                        yield return new StreamChunk { ThinkingDelta = thinking, Model = model };
+                    }
+
+                    if (!string.IsNullOrEmpty(content))
+                    {
+                        yield return new StreamChunk { ContentDelta = content, Model = model };
+                    }
+                }
             }
 
             // Handle tool call deltas
@@ -345,6 +356,62 @@ public sealed class OllamaProvider : ModelProviderBase
             FinishReason = MapFinishReason(choice?.FinishReason),
             Model = response.Model ?? "unknown"
         };
+    }
+
+    /// <summary>
+    /// Splits a streaming content delta into (thinkingSegment, contentSegment) pairs,
+    /// tracking whether we are currently inside a &lt;think&gt;...&lt;/think&gt; block across calls.
+    /// Returns the segments and the updated inThinkBlock state.
+    /// </summary>
+    private static (IReadOnlyList<(string? Thinking, string? Content)> Segments, bool InThinkBlock) SplitThinkBlocks(
+        string delta,
+        bool inThinkBlock)
+    {
+        const string openTag = "<think>";
+        const string closeTag = "</think>";
+
+        var segments = new List<(string? Thinking, string? Content)>();
+        var remaining = delta;
+
+        while (remaining.Length > 0)
+        {
+            if (!inThinkBlock)
+            {
+                var openIdx = remaining.IndexOf(openTag, StringComparison.OrdinalIgnoreCase);
+                if (openIdx < 0)
+                {
+                    segments.Add((null, remaining));
+                    break;
+                }
+
+                if (openIdx > 0)
+                {
+                    segments.Add((null, remaining[..openIdx]));
+                }
+
+                inThinkBlock = true;
+                remaining = remaining[(openIdx + openTag.Length)..];
+            }
+            else
+            {
+                var closeIdx = remaining.IndexOf(closeTag, StringComparison.OrdinalIgnoreCase);
+                if (closeIdx < 0)
+                {
+                    segments.Add((remaining, null));
+                    break;
+                }
+
+                if (closeIdx > 0)
+                {
+                    segments.Add((remaining[..closeIdx], null));
+                }
+
+                inThinkBlock = false;
+                remaining = remaining[(closeIdx + closeTag.Length)..];
+            }
+        }
+
+        return (segments, inThinkBlock);
     }
 
     private sealed class ToolCallBuilder
