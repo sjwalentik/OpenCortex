@@ -689,13 +689,44 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
 
         var orchRequest = BuildCodexNativeOrchestrationRequest(request);
         var llmStopwatch = Stopwatch.StartNew();
+        string? streamError = null;
 
-        await foreach (var chunk in _orchestration.StreamAsync(
+        await using var enumerator = _orchestration.StreamAsync(
             request.CustomerId,
             request.UserId,
             orchRequest,
-            cancellationToken))
+            cancellationToken).GetAsyncEnumerator(cancellationToken);
+
+        while (true)
         {
+            OrchestrationStreamChunk chunk;
+
+            try
+            {
+                if (!await enumerator.MoveNextAsync())
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                streamError = ErrorRedaction.Sanitize(
+                    "Codex agentic execution failed.",
+                    ex.Message,
+                    request.Credentials);
+                telemetryBuilder.SetError(streamError);
+
+                _logger.LogError(ex,
+                    "Codex-native agentic streaming failed. TraceId={TraceId}",
+                    telemetryBuilder.TraceId);
+                break;
+            }
+
+            chunk = enumerator.Current;
             providerId = chunk.ProviderId;
 
             if (!string.IsNullOrWhiteSpace(chunk.Chunk.Model))
@@ -721,6 +752,43 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         }
 
         llmStopwatch.Stop();
+
+        if (!string.IsNullOrWhiteSpace(streamError))
+        {
+            stopwatch.Stop();
+            var errorTelemetry = telemetryBuilder.Build();
+
+            yield return new AgenticErrorEvent
+            {
+                Error = streamError,
+                Iteration = 1,
+                TraceId = telemetryBuilder.TraceId
+            };
+
+            yield return new AgenticCompleteEvent
+            {
+                Result = new AgenticOrchestrationResult
+                {
+                    Completion = new ChatCompletion
+                    {
+                        Content = contentBuffer.ToString(),
+                        Usage = usage,
+                        FinishReason = FinishReason.Other,
+                        Model = modelId
+                    },
+                    Conversation = conversation,
+                    ToolExecutions = Array.Empty<ToolExecutionResult>(),
+                    Iterations = 1,
+                    Duration = stopwatch.Elapsed,
+                    ProviderId = providerId,
+                    ModelId = modelId,
+                    ReachedMaxIterations = false,
+                    Error = streamError,
+                    Telemetry = errorTelemetry
+                }
+            };
+            yield break;
+        }
 
         var content = contentBuffer.ToString();
         if (!string.IsNullOrWhiteSpace(content))

@@ -2,7 +2,7 @@
 
 This document tracks the implementation status of all user stories across the multi-agent orchestration roadmap.
 
-**Last Updated**: 2026-03-20
+**Last Updated**: 2026-03-24
 
 ---
 
@@ -21,11 +21,11 @@ This document tracks the implementation status of all user stories across the mu
 
 | Priority | Epic | Stories | Completed | Progress |
 |----------|------|---------|-----------|----------|
-| P1 | Agent Memory | 7 | 0 | Foundation in progress |
+| P1 | Agent Memory | 7 | 7 | 100% ✅ |
 | P2 | Task Persistence | 17 | 0 | 0% |
 | P3 | Agent Delegation | 17 | 0 | 0% |
 | P4 | Shared Workspace | 11 | 0 | 0% |
-| **Total** | | **52** | **0** | **0%** |
+| **Total** | | **52** | **7** | **13%** |
 
 ---
 
@@ -39,29 +39,29 @@ This document tracks the implementation status of all user stories across the mu
 
 | Status | ID | User Story | Assignee | Notes |
 |--------|-----|------------|----------|-------|
-| `[~]` | US-001 | Resolve Memory Brain | | `IMemoryBrainResolver`, `IUserMemoryPreferenceStore`, and customer-scoped memory-brain persistence are in progress |
+| `[x]` | US-001 | Resolve Memory Brain | | `IMemoryBrainResolver`, `IUserMemoryPreferenceStore`, customer-scoped via `customer_memberships.memory_brain_id` |
 
 ### Feature 2: Memory Tools
 
 | Status | ID | User Story | Assignee | Notes |
 |--------|-----|------------|----------|-------|
-| `[~]` | US-002 | Save Memory Tool | | Initial handler, definitions, hosted agentic guidance, MCP exposure, and immediate-reindex coverage are in progress |
-| `[~]` | US-003 | Recall Memories Tool | | Initial OQL-backed recall handler and tests are in progress; hosted agentic chat now appends explicit memory-tool guidance when memory tools are available, and MCP consumers can now use recall_memories directly |
-| `[~]` | US-004 | Forget Memory Tool | | Initial delete handler, MCP exposure, and immediate-reindex coverage are in progress |
+| `[x]` | US-002 | Save Memory Tool | | `SaveMemoryHandler`, quota enforcement, immediate reindex, MCP exposed |
+| `[x]` | US-003 | Recall Memories Tool | | `RecallMemoriesHandler`, OQL-backed, MCP exposed, agentic system prompt guidance |
+| `[x]` | US-004 | Forget Memory Tool | | `ForgetMemoryHandler`, immediate reindex, MCP exposed |
 
 ### Feature 3: Portal UI
 
 | Status | ID | User Story | Assignee | Notes |
 |--------|-----|------------|----------|-------|
-| `[~]` | US-005 | Memories Page | | Shared Markdown authoring surface is in place for memories, and Documents/Memories now share the same App-level workspace controller hook with portal integration coverage |
-| `[~]` | US-006 | Hide Memories from Documents | | Backend `excludePathPrefix` support and portal wiring are in progress |
-| `[~]` | US-007 | Memory Brain Configuration | | Hosted API and Account selector are in progress |
+| `[x]` | US-005 | Memories Page | | `MemoriesView.tsx`, shared Markdown authoring surface with Documents |
+| `[x]` | US-006 | Hide Memories from Documents | | `excludePathPrefix: 'memories/'` on document list; SQL filtering in `PostgresManagedDocumentStore` |
+| `[x]` | US-007 | Memory Brain Configuration | | `MemoryBrainEndpoints.cs` (GET/PUT `/me/memory-brain`), brain selector in Account settings UI |
 
 ### P1 Migrations
 
 | Status | Migration | Description |
 |--------|-----------|-------------|
-| `[~]` | `0009_user_memory_brain.sql` + `0009a_customer_membership_memory_brain.sql` | Adds and then scopes memory_brain_id to customer memberships |
+| `[x]` | `0009_user_memory_brain.sql` + `0009a_customer_membership_memory_brain.sql` | Adds and scopes memory_brain_id to customer memberships |
 | `[x]` | `0010_tenant_scoped_user_provider_configs.sql` | Scopes provider configs by `(customer_id, user_id, provider_id)` |
 | `[x]` | `0011_user_workspace_runtime_profiles.sql` | Stores user-selected managed workspace runtime profiles |
 
@@ -299,6 +299,7 @@ Motivation: surface what the Codex CLI is doing inside the workspace pod in real
 | Date | Change |
 |------|--------|
 | 2026-03-19 | Initial tracker created |
+| 2026-03-24 | P1 marked complete (7/7 stories, all migrations verified in codebase) |
 
 
 
