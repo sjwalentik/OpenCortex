@@ -56,13 +56,17 @@ public sealed class UserProviderFactory : IUserProviderFactory
             }
         }
 
-        return CreateProvider(config);
+        var githubToken = await GetGitHubCredentialAsync(customerId, userId, cancellationToken);
+        return CreateProvider(config, githubToken);
     }
 
     public async Task<IReadOnlyList<IModelProvider>> GetProvidersForUserAsync(Guid customerId, Guid userId, CancellationToken cancellationToken = default)
     {
         var configs = await _configRepository.ListByUserAsync(customerId, userId, cancellationToken);
         var providers = new List<IModelProvider>();
+        var githubToken = TryDecryptCredential(configs.FirstOrDefault(c =>
+            string.Equals(c.ProviderId, "github", StringComparison.OrdinalIgnoreCase)
+            && c.IsEnabled));
 
         foreach (var config in configs.Where(c => c.IsEnabled))
         {
@@ -78,7 +82,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
                 }
             }
 
-            var provider = CreateProvider(currentConfig);
+            var provider = CreateProvider(currentConfig, githubToken);
             if (provider is not null)
             {
                 providers.Add(provider);
@@ -138,7 +142,15 @@ public sealed class UserProviderFactory : IUserProviderFactory
         return config;
     }
 
-    private IModelProvider? CreateProvider(UserProviderConfig config)
+    private async Task<string?> GetGitHubCredentialAsync(Guid customerId, Guid userId, CancellationToken cancellationToken)
+    {
+        var githubConfig = await _configRepository.GetAsync(customerId, userId, "github", cancellationToken);
+        return githubConfig is { IsEnabled: true }
+            ? TryDecryptCredential(githubConfig)
+            : null;
+    }
+
+    private IModelProvider? CreateProvider(UserProviderConfig config, string? githubToken)
     {
         try
         {
@@ -150,7 +162,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
             {
                 "anthropic" => CreateAnthropicProvider(config, settings),
                 "openai" => CreateOpenAIProvider(config, settings),
-                "openai-codex" => CreateCodexProvider(config, settings),
+                "openai-codex" => CreateCodexProvider(config, settings, githubToken),
                 "ollama" or "ollama-remote" => CreateOllamaProvider(config, settings),
                 _ => null
             };
@@ -247,7 +259,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Providers.Ollama.OllamaProvider>.Instance);
     }
 
-    private IModelProvider? CreateCodexProvider(UserProviderConfig config, UserProviderSettings? settings)
+    private IModelProvider? CreateCodexProvider(UserProviderConfig config, UserProviderSettings? settings, string? githubToken)
     {
         if (string.IsNullOrEmpty(config.EncryptedAccessToken))
         {
@@ -266,8 +278,36 @@ public sealed class UserProviderFactory : IUserProviderFactory
             config.UserId,
             settings?.DefaultModel ?? "gpt-5.4",
             sessionJson,
+            githubToken,
             _workspaceManager,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CodexCliModelProvider>.Instance);
+    }
+
+    private string? TryDecryptCredential(UserProviderConfig? config)
+    {
+        if (config is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (!string.IsNullOrEmpty(config.EncryptedAccessToken))
+            {
+                return _encryption.Decrypt(config.EncryptedAccessToken);
+            }
+
+            if (!string.IsNullOrEmpty(config.EncryptedApiKey))
+            {
+                return _encryption.Decrypt(config.EncryptedApiKey);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to decrypt credential for provider {ProviderId}", config.ProviderId);
+        }
+
+        return null;
     }
 
     private static string NormalizeProviderId(string providerId) =>

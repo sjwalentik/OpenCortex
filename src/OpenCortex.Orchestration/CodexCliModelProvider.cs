@@ -22,6 +22,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
     private readonly Guid _userId;
     private readonly string _defaultModel;
     private readonly string _sessionJson;
+    private readonly string? _githubToken;
     private readonly IWorkspaceManager _workspaceManager;
     private readonly ILogger _logger;
 
@@ -29,12 +30,14 @@ internal sealed class CodexCliModelProvider : IModelProvider
         Guid userId,
         string defaultModel,
         string sessionJson,
+        string? githubToken,
         IWorkspaceManager workspaceManager,
         ILogger logger)
     {
         _userId = userId;
         _defaultModel = string.IsNullOrWhiteSpace(defaultModel) ? "gpt-5.4" : defaultModel.Trim();
         _sessionJson = sessionJson;
+        _githubToken = string.IsNullOrWhiteSpace(githubToken) ? null : githubToken.Trim();
         _workspaceManager = workspaceManager;
         _logger = logger;
     }
@@ -74,11 +77,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
             _userId,
             command.FileName,
             workingDirectory: null,
-            environmentVariables: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["HOME"] = homePath,
-                ["CODEX_HOME"] = GetCodexHomeDirectory(homePath)
-            },
+            environmentVariables: BuildRuntimeEnvironment(homePath),
             argumentList: BuildArgumentList(command.PrefixArguments, model, _workspaceManager.SupportsContainerIsolation),
             standardInput: prompt,
             cancellationToken: cancellationToken);
@@ -147,11 +146,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
             var result = await _workspaceManager.ExecuteCommandAsync(
                 _userId,
                 command.FileName,
-                environmentVariables: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["HOME"] = homePath,
-                    ["CODEX_HOME"] = GetCodexHomeDirectory(homePath)
-                },
+                environmentVariables: BuildRuntimeEnvironment(homePath),
                 argumentList: [.. command.PrefixArguments, "--version"],
                 cancellationToken: cancellationToken);
 
@@ -192,6 +187,29 @@ internal sealed class CodexCliModelProvider : IModelProvider
 
     private static string GetCodexHomeDirectory(string homePath) => $"{homePath.TrimEnd('/', '\\')}/.codex";
 
+    private Dictionary<string, string> BuildRuntimeEnvironment(string homePath)
+    {
+        var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["HOME"] = homePath,
+            ["CODEX_HOME"] = GetCodexHomeDirectory(homePath),
+            ["GIT_TERMINAL_PROMPT"] = "0"
+        };
+
+        if (!string.IsNullOrWhiteSpace(_githubToken))
+        {
+            environment["GITHUB_TOKEN"] = _githubToken;
+            environment["GH_TOKEN"] = _githubToken;
+
+            var basicAuth = Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{_githubToken}"));
+            environment["GIT_CONFIG_COUNT"] = "1";
+            environment["GIT_CONFIG_KEY_0"] = "http.https://github.com/.extraheader";
+            environment["GIT_CONFIG_VALUE_0"] = $"AUTHORIZATION: basic {basicAuth}";
+        }
+
+        return environment;
+    }
+
     private static IReadOnlyList<string> BuildArgumentList(
         IReadOnlyList<string> prefixArguments,
         string model,
@@ -230,6 +248,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
         var builder = new StringBuilder();
         builder.AppendLine("You are responding inside OpenCortex.");
         builder.AppendLine("Use the repository workspace when needed.");
+        builder.AppendLine("When repository work requires GitHub authentication, use the authenticated git/GitHub environment already available in this session rather than asking the user to push or open the PR manually.");
         builder.AppendLine("Return a plain-text assistant reply.");
         builder.AppendLine();
         builder.AppendLine("Conversation:");
