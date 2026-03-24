@@ -895,7 +895,7 @@ public static class ChatEndpoints
             heartbeatStage = "error";
             heartbeatMessage = safeMessage;
 
-            await WriteChatStreamEventAsync(response, new
+            await TryWriteChatStreamEventAsync(response, new
             {
                 eventType = "error",
                 stage = heartbeatStage,
@@ -992,6 +992,23 @@ public static class ChatEndpoints
         finally
         {
             writeLock.Release();
+        }
+    }
+
+    private static async Task TryWriteChatStreamEventAsync(
+        HttpResponse response,
+        object payload,
+        SemaphoreSlim writeLock,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await WriteChatStreamEventAsync(response, payload, writeLock, cancellationToken);
+        }
+        catch
+        {
+            // Best effort only. If the response stream is already broken, do not let a secondary write failure
+            // replace the original provider/streaming error with a transport reset.
         }
     }
 
@@ -1502,7 +1519,7 @@ public static class ChatEndpoints
         catch (Exception ex)
         {
             var safeError = ErrorMessages.ForExternalFailure("Streaming failed.", ex.Message);
-            await WriteChatStreamEventAsync(response, new
+            await TryWriteChatStreamEventAsync(response, new
             {
                 eventType = "error",
                 error = safeError,

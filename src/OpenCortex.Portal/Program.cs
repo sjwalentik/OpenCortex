@@ -555,6 +555,10 @@ static async Task ProxyServerSentEventsAsync(
     {
         await TryWriteSseProxyErrorAsync(httpContext, cancellationToken);
     }
+    catch (Exception)
+    {
+        await TryWriteSseProxyErrorAsync(httpContext, cancellationToken);
+    }
 }
 
 static async Task TryWriteSseProxyErrorAsync(HttpContext httpContext, CancellationToken cancellationToken)
