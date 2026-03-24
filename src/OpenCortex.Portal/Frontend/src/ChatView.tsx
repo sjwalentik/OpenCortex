@@ -133,6 +133,20 @@ type ModelCommand =
   | { kind: 'auto' }
   | { kind: 'set'; providerId: string; modelId: string }
   | { kind: 'error'; message: string };
+type ContextPreview = {
+  totalMessages: number;
+  compactedMessages: number;
+  summarizedMessages: number;
+  verbatimMessages: number;
+  estimatedCharacters: number;
+  estimatedTokens: number;
+  digest: string | null;
+};
+
+const MAX_VERBATIM_HISTORY_MESSAGES = 12;
+const MAX_SUMMARY_ENTRIES = 18;
+const MAX_SUMMARY_CHARACTERS = 3000;
+const MAX_SUMMARY_SNIPPET_CHARACTERS = 220;
 
 function applyStreamActivity(activities: StreamActivity[], chunk: StreamChunk): StreamActivity[] {
   if (!chunk.stage || !chunk.message) {
@@ -209,6 +223,109 @@ function formatModelSelection(providerId: string, modelId: string) {
   }
 
   return modelId ? `${providerId}/${modelId}` : `${providerId} (provider default)`;
+}
+
+function normalizeMessageContent(content: string | undefined) {
+  return (content || '').trim().replace(/\s+/g, ' ');
+}
+
+function truncate(value: string, maxLength: number) {
+  return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function buildHistorySummaryLine(message: Pick<ChatMessage, 'role' | 'content'>) {
+  const label = message.role === 'system' ? 'system' : message.role === 'assistant' ? 'assistant' : 'user';
+  const normalized = normalizeMessageContent(message.content);
+  if (!normalized) {
+    return null;
+  }
+
+  return `[${label}] ${truncate(normalized, MAX_SUMMARY_SNIPPET_CHARACTERS)}`;
+}
+
+function buildHistoryDigest(messages: Pick<ChatMessage, 'role' | 'content'>[]) {
+  const lines: string[] = [];
+  let consumedEntries = 0;
+  let totalCharacters = 0;
+
+  for (const message of messages) {
+    const line = buildHistorySummaryLine(message);
+    if (!line) {
+      continue;
+    }
+
+    if (consumedEntries >= MAX_SUMMARY_ENTRIES) {
+      break;
+    }
+
+    const projected = totalCharacters + line.length + 3;
+    if (projected > MAX_SUMMARY_CHARACTERS) {
+      break;
+    }
+
+    lines.push(`- ${line}`);
+    totalCharacters = projected;
+    consumedEntries += 1;
+  }
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const summarizableMessages = messages.filter((message) => !!buildHistorySummaryLine(message)).length;
+  const omittedEntries = summarizableMessages - consumedEntries;
+  if (omittedEntries > 0) {
+    lines.push(`- ... ${omittedEntries} earlier messages omitted to stay within the shared context budget.`);
+  }
+
+  return `Earlier conversation digest:
+${lines.join('\n')}`;
+}
+
+function estimateTokensFromCharacters(characters: number) {
+  return Math.max(1, Math.ceil(characters / 4));
+}
+
+function buildContextPreview(messages: ChatMessage[], pendingInput: string): ContextPreview {
+  const outgoingMessages = [...messages];
+  const trimmedInput = pendingInput.trim();
+  if (trimmedInput && !trimmedInput.startsWith('/model')) {
+    outgoingMessages.push({
+      messageId: 'preview-pending',
+      role: 'user',
+      content: trimmedInput,
+    });
+  }
+
+  if (outgoingMessages.length <= MAX_VERBATIM_HISTORY_MESSAGES) {
+    const estimatedCharacters = outgoingMessages.reduce((sum, message) => sum + normalizeMessageContent(message.content).length, 0);
+    return {
+      totalMessages: outgoingMessages.length,
+      compactedMessages: outgoingMessages.length,
+      summarizedMessages: 0,
+      verbatimMessages: outgoingMessages.length,
+      estimatedCharacters,
+      estimatedTokens: estimateTokensFromCharacters(estimatedCharacters),
+      digest: null,
+    };
+  }
+
+  const olderMessages = outgoingMessages.slice(0, Math.max(0, outgoingMessages.length - MAX_VERBATIM_HISTORY_MESSAGES));
+  const recentMessages = outgoingMessages.slice(-MAX_VERBATIM_HISTORY_MESSAGES);
+  const digest = buildHistoryDigest(olderMessages);
+  const digestLength = digest ? digest.length : 0;
+  const recentLength = recentMessages.reduce((sum, message) => sum + normalizeMessageContent(message.content).length, 0);
+  const estimatedCharacters = digestLength + recentLength;
+
+  return {
+    totalMessages: outgoingMessages.length,
+    compactedMessages: recentMessages.length + (digest ? 1 : 0),
+    summarizedMessages: olderMessages.length,
+    verbatimMessages: recentMessages.length,
+    estimatedCharacters,
+    estimatedTokens: estimateTokensFromCharacters(estimatedCharacters),
+    digest,
+  };
 }
 
 export function ChatView({
@@ -814,6 +931,7 @@ export function ChatView({
 
   const currentActivity = streamActivities[streamActivities.length - 1] ?? null;
   const showStreamingActivity = isStreaming && currentActivity;
+  const contextPreview = buildContextPreview(messages, inputValue);
 
   return (
     <section className="chat-layout">
@@ -917,7 +1035,7 @@ export function ChatView({
                       <details key={tc.id} className={`chat-tool-call chat-tool-call-${tc.status}`}>
                         <summary>
                           <span className={`chat-tool-status chat-tool-status-${tc.status}`}>
-                            {tc.status === 'running' ? '⏳' : tc.status === 'success' ? '✓' : tc.status === 'error' ? '✗' : '○'}
+                            {tc.status === 'running' ? '[...]' : tc.status === 'success' ? '[ok]' : tc.status === 'error' ? '[x]' : '[ ]'}
                           </span>
                           <span className="chat-tool-name">{tc.name}</span>
                           {tc.durationMs !== undefined && (
@@ -1041,6 +1159,26 @@ export function ChatView({
                 Trace: {currentTraceId.slice(0, 8)}...
               </span>
             )}
+          </div>
+          <div className="chat-context-preview">
+            <details>
+              <summary>
+                Next request context: {contextPreview.compactedMessages} messages, about {contextPreview.estimatedTokens} tokens
+              </summary>
+              <div className="chat-context-preview-details">
+                <div>Total turns queued: {contextPreview.totalMessages}</div>
+                <div>Verbatim turns: {contextPreview.verbatimMessages}</div>
+                <div>Summarized older turns: {contextPreview.summarizedMessages}</div>
+                <div>Approx chars sent: {contextPreview.estimatedCharacters}</div>
+                <div>Route: {formatModelSelection(selectedProviderId, selectedModelId)}</div>
+                <div>Mode: {agenticMode ? 'Agentic' : 'Standard chat'}</div>
+                {contextPreview.digest ? (
+                  <pre className="chat-context-preview-digest">{contextPreview.digest}</pre>
+                ) : (
+                  <div>No summary digest yet. The next request is still within the verbatim window.</div>
+                )}
+              </div>
+            </details>
           </div>
           <textarea
             placeholder={hasConfiguredProviders ? (agenticMode ? 'Ask me to do something with tools (e.g., "List files in microsoft/vscode repo")...' : 'Type a message or use /model <provider> <model>...') : 'Configure a provider in Account before chatting.'}
