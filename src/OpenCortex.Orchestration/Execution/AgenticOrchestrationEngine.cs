@@ -32,6 +32,12 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         AgenticOrchestrationRequest request,
         CancellationToken cancellationToken = default)
     {
+        var routedProviderId = await ResolveRequestedOrRoutedProviderIdAsync(request, cancellationToken);
+        if (IsCodexNativeProvider(routedProviderId))
+        {
+            return await ExecuteCodexNativeAgenticAsync(request, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var telemetryBuilder = new AgenticTelemetryBuilder();
         var conversation = new List<ChatMessage>(request.Messages);
@@ -253,6 +259,17 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         AgenticOrchestrationRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var routedProviderId = await ResolveRequestedOrRoutedProviderIdAsync(request, cancellationToken);
+        if (IsCodexNativeProvider(routedProviderId))
+        {
+            await foreach (var codexEvent in StreamCodexNativeAgenticAsync(request, cancellationToken))
+            {
+                yield return codexEvent;
+            }
+
+            yield break;
+        }
+
         var stopwatch = Stopwatch.StartNew();
         var telemetryBuilder = new AgenticTelemetryBuilder();
         var conversation = new List<ChatMessage>(request.Messages);
@@ -542,6 +559,282 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 Telemetry = maxIterTelemetry
             }
         };
+    }
+
+    private async Task<AgenticOrchestrationResult> ExecuteCodexNativeAgenticAsync(
+        AgenticOrchestrationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var telemetryBuilder = new AgenticTelemetryBuilder();
+        var conversation = new List<ChatMessage>(request.Messages);
+        var iterationStartedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            var orchRequest = BuildCodexNativeOrchestrationRequest(request);
+            var llmStopwatch = Stopwatch.StartNew();
+            var result = await _orchestration.ExecuteAsync(
+                request.CustomerId,
+                request.UserId,
+                orchRequest,
+                cancellationToken);
+            llmStopwatch.Stop();
+
+            telemetryBuilder.SetProvider(result.ProviderId, result.ModelId);
+
+            if (!string.IsNullOrWhiteSpace(result.Completion.Content))
+            {
+                conversation.Add(ChatMessage.Assistant(result.Completion.Content));
+            }
+
+            telemetryBuilder.RecordIteration(
+                1,
+                iterationStartedAt,
+                llmStopwatch.Elapsed,
+                TimeSpan.Zero,
+                result.Completion.Usage,
+                Array.Empty<string>(),
+                result.Completion.FinishReason.ToString(),
+                result.Completion.Content?.Length);
+
+            stopwatch.Stop();
+            var telemetry = telemetryBuilder.Build();
+
+            return new AgenticOrchestrationResult
+            {
+                Completion = result.Completion,
+                Conversation = conversation,
+                ToolExecutions = Array.Empty<ToolExecutionResult>(),
+                Iterations = 1,
+                Duration = stopwatch.Elapsed,
+                ProviderId = result.ProviderId,
+                ModelId = result.ModelId,
+                ReachedMaxIterations = false,
+                Telemetry = telemetry
+            };
+        }
+        catch (Exception ex)
+        {
+            var safeError = ErrorRedaction.Sanitize(
+                "Codex agentic execution failed.",
+                ex.Message,
+                request.Credentials);
+            telemetryBuilder.SetError(safeError);
+            stopwatch.Stop();
+
+            return new AgenticOrchestrationResult
+            {
+                Completion = new ChatCompletion
+                {
+                    Content = null,
+                    Usage = TokenUsage.Empty,
+                    FinishReason = FinishReason.Other,
+                    Model = string.Empty
+                },
+                Conversation = conversation,
+                ToolExecutions = Array.Empty<ToolExecutionResult>(),
+                Iterations = 1,
+                Duration = stopwatch.Elapsed,
+                ProviderId = "openai-codex",
+                ModelId = request.RoutingContext?.RequestedModelId ?? string.Empty,
+                ReachedMaxIterations = false,
+                Error = safeError,
+                Telemetry = telemetryBuilder.Build()
+            };
+        }
+    }
+
+    private async IAsyncEnumerable<AgenticStreamEvent> StreamCodexNativeAgenticAsync(
+        AgenticOrchestrationRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var telemetryBuilder = new AgenticTelemetryBuilder();
+        var conversation = new List<ChatMessage>(request.Messages);
+        var iterationStartedAt = DateTimeOffset.UtcNow;
+        var contentBuffer = new System.Text.StringBuilder();
+        var providerId = "openai-codex";
+        var modelId = request.RoutingContext?.RequestedModelId ?? string.Empty;
+        var usage = TokenUsage.Empty;
+
+        _logger.LogInformation(
+            "Starting Codex-native agentic streaming. TraceId={TraceId}",
+            telemetryBuilder.TraceId);
+
+        var workspaceEvents = await EnsureWorkspaceWithEventsAsync(
+            request, telemetryBuilder.TraceId, cancellationToken);
+
+        foreach (var wsEvent in workspaceEvents)
+        {
+            yield return wsEvent;
+
+            if (wsEvent is AgenticWorkspaceErrorEvent errorEvent)
+            {
+                yield return new AgenticErrorEvent
+                {
+                    Error = errorEvent.Error,
+                    Iteration = 0,
+                    TraceId = telemetryBuilder.TraceId
+                };
+                yield break;
+            }
+        }
+
+        yield return new AgenticIterationStartEvent
+        {
+            Iteration = 1,
+            TraceId = telemetryBuilder.TraceId
+        };
+
+        var orchRequest = BuildCodexNativeOrchestrationRequest(request);
+        var llmStopwatch = Stopwatch.StartNew();
+
+        await foreach (var chunk in _orchestration.StreamAsync(
+            request.CustomerId,
+            request.UserId,
+            orchRequest,
+            cancellationToken))
+        {
+            providerId = chunk.ProviderId;
+
+            if (!string.IsNullOrWhiteSpace(chunk.Chunk.Model))
+            {
+                modelId = chunk.Chunk.Model;
+                telemetryBuilder.SetProvider(providerId, modelId);
+            }
+
+            if (!string.IsNullOrEmpty(chunk.Chunk.ContentDelta))
+            {
+                contentBuffer.Append(chunk.Chunk.ContentDelta);
+                yield return new AgenticTextEvent
+                {
+                    Content = chunk.Chunk.ContentDelta,
+                    Iteration = 1
+                };
+            }
+
+            if (chunk.Chunk.IsComplete && chunk.Chunk.FinalUsage is not null)
+            {
+                usage = chunk.Chunk.FinalUsage;
+            }
+        }
+
+        llmStopwatch.Stop();
+
+        var content = contentBuffer.ToString();
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            conversation.Add(ChatMessage.Assistant(content));
+        }
+
+        telemetryBuilder.SetProvider(providerId, modelId);
+        telemetryBuilder.RecordIteration(
+            1,
+            iterationStartedAt,
+            llmStopwatch.Elapsed,
+            TimeSpan.Zero,
+            usage,
+            Array.Empty<string>(),
+            FinishReason.Stop.ToString(),
+            content.Length);
+
+        stopwatch.Stop();
+        var telemetry = telemetryBuilder.Build();
+
+        yield return new AgenticIterationCompleteEvent
+        {
+            Iteration = 1,
+            Duration = llmStopwatch.Elapsed,
+            TokenUsage = usage,
+            HasToolCalls = false
+        };
+
+        yield return new AgenticCompleteEvent
+        {
+            Result = new AgenticOrchestrationResult
+            {
+                Completion = new ChatCompletion
+                {
+                    Content = content,
+                    Usage = usage,
+                    FinishReason = FinishReason.Stop,
+                    Model = modelId
+                },
+                Conversation = conversation,
+                ToolExecutions = Array.Empty<ToolExecutionResult>(),
+                Iterations = 1,
+                Duration = stopwatch.Elapsed,
+                ProviderId = providerId,
+                ModelId = modelId,
+                ReachedMaxIterations = false,
+                Telemetry = telemetry
+            }
+        };
+    }
+
+    private static bool IsCodexNativeProvider(string? providerId) =>
+        string.Equals(providerId?.Trim(), "openai-codex", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<string?> ResolveRequestedOrRoutedProviderIdAsync(
+        AgenticOrchestrationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(request.RoutingContext?.RequestedProviderId))
+        {
+            return request.RoutingContext.RequestedProviderId;
+        }
+
+        var userMessage = request.Messages.LastOrDefault(m => m.Role == ChatRole.User)?.Content ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(userMessage))
+        {
+            return null;
+        }
+
+        var routing = await _orchestration.RouteAsync(
+            request.CustomerId,
+            request.UserId,
+            userMessage,
+            request.RoutingContext,
+            cancellationToken);
+
+        return routing.ProviderId;
+    }
+
+    private static OrchestrationRequest BuildCodexNativeOrchestrationRequest(
+        AgenticOrchestrationRequest request)
+    {
+        var routingContext = request.RoutingContext is null
+            ? new Routing.RoutingContext
+            {
+                RequestedProviderId = "openai-codex"
+            }
+            : request.RoutingContext with
+            {
+                RequestedProviderId = "openai-codex"
+            };
+
+        return new OrchestrationRequest
+        {
+            Messages = request.Messages,
+            Tools = null,
+            SystemMessage = BuildCodexNativeSystemMessage(request.SystemMessage),
+            MemoryContext = request.MemoryContext,
+            RoutingContext = routingContext,
+            Options = request.Options
+        };
+    }
+
+    private static string BuildCodexNativeSystemMessage(string? existingSystemMessage)
+    {
+        const string codexAgenticInstruction =
+            "You are operating in OpenCortex agentic mode backed by Codex. " +
+            "Work autonomously inside the workspace when needed, including inspecting files and running commands. " +
+            "Do not emit OpenCortex tool calls. Use the workspace directly and return a concise final response describing what you did and the result.";
+
+        return string.IsNullOrWhiteSpace(existingSystemMessage)
+            ? codexAgenticInstruction
+            : $"{existingSystemMessage.Trim()}\n\n{codexAgenticInstruction}";
     }
 
     private IReadOnlyList<ToolDefinition> GetTools(AgenticOrchestrationRequest request)

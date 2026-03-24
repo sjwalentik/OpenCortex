@@ -1053,6 +1053,11 @@ public static class ChatEndpoints
             return Results.NotFound(new { message = $"Provider '{normalizedProviderId}' was not found for the current user." });
         }
 
+        if (string.Equals(normalizedProviderId, "openai-codex", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
         if (!provider.Capabilities.SupportsTools)
         {
             return Results.BadRequest(new
