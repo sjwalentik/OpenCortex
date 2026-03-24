@@ -260,6 +260,31 @@ Week 19-20:                                   P4 Changes/Conflict
 
 ---
 
+---
+
+## Afterthought: Codex CLI Observability (Nice-to-Have)
+
+**Epic**: EPIC-OBS - Codex Streaming Observability
+**Document**: [05-afterthought-codex-observability.md](./05-afterthought-codex-observability.md)
+**Estimated Effort**: ~1 week
+**Priority**: Post-P4, nice-to-have
+
+Motivation: surface what the Codex CLI is doing inside the workspace pod in real-time — reasoning tokens, tool/file activity, and better error reporting — for trust, debuggability, and user transparency.
+
+| Status | ID | User Story | Notes |
+|--------|-----|------------|-------|
+| `[ ]` | US-OBS-001 | Stream Codex JSON output in real-time | Replace buffered stdout with line-by-line streaming reader |
+| `[ ]` | US-OBS-002 | Surface Codex reasoning tokens | Emit as `ThinkingDelta`; requires empirical JSON event mapping from a live pod session |
+| `[ ]` | US-OBS-003 | Surface Codex tool/file activity | Map `function_call` events to agentic tool call UI |
+| `[ ]` | US-OBS-004 | Improve Codex error reporting | Preserve partial output; surface meaningful stderr on failure |
+
+**Foundation already in place** (2026-03-23):
+- `ThinkingDelta` on `StreamChunk` — reasoning blocks already render in the UI
+- Agentic SSE heartbeat and workspace event infrastructure
+- No new migrations or schema changes needed
+
+---
+
 ## Notes
 
 - User story IDs in this tracker (US-001 to US-052) are globally unique

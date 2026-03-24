@@ -12,6 +12,7 @@ This directory contains the detailed planning documentation for transforming Ope
 | [02-priority-task-persistence.md](./02-priority-task-persistence.md) | P2: Task/Goal Persistence (detailed breakdown) |
 | [03-priority-agent-delegation.md](./03-priority-agent-delegation.md) | P3: Agent Delegation |
 | [04-priority-shared-workspace.md](./04-priority-shared-workspace.md) | P4: Shared Workspace Coordination |
+| [05-afterthought-codex-observability.md](./05-afterthought-codex-observability.md) | Nice-to-have: Codex CLI streaming observability & reasoning |
 
 ## Architecture Note: MCP as Foundation
 
