@@ -420,6 +420,7 @@ function App() {
   const [createdToken, setCreatedToken] = useState<CreatedTokenState | null>(null);
   const [accountActionMessage, setAccountActionMessage] = useState<string | null>(null);
   const [hostedCodexLoginStatus, setHostedCodexLoginStatus] = useState<HostedCodexLoginStatus | null>(null);
+  const [hostedClaudeLoginStatus, setHostedClaudeLoginStatus] = useState<HostedCodexLoginStatus | null>(null);
   const [toolQueryBrainId, setToolQueryBrainId] = useState('');
   const [toolQuerySearch, setToolQuerySearch] = useState('identity');
   const [toolQueryRank, setToolQueryRank] = useState('hybrid');
@@ -601,6 +602,7 @@ function App() {
       setCreatedToken(null);
       setAccountActionMessage(null);
       setHostedCodexLoginStatus(null);
+      setHostedClaudeLoginStatus(null);
       setToolQueryBrainId('');
       setToolQueryResults(null);
       setToolFetchedDocuments({});
@@ -1266,6 +1268,58 @@ async function handleOpenDocumentLink(rawPath: string) {
     }
   }
 
+  async function handleStartHostedClaudeLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/claude-cli/hosted-login/start', session.idToken, {
+        method: 'POST',
+      }) as HostedCodexLoginStatus;
+      setHostedClaudeLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Claude sign-in started.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to start hosted Claude sign-in.');
+    }
+  }
+
+  async function handleRefreshHostedClaudeLoginStatus() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/claude-cli/hosted-login/status', session.idToken) as HostedCodexLoginStatus;
+      setHostedClaudeLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Claude sign-in status loaded.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to refresh hosted Claude sign-in status.');
+    }
+  }
+
+  async function handleCompleteHostedClaudeLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/claude-cli/hosted-login/complete', session.idToken, {
+        method: 'POST',
+      }) as { message?: string };
+      setAccountActionMessage(response.message || 'Hosted Claude sign-in completed.');
+      const status = await portalFetch('/portal-api/api/providers/config/claude-cli/hosted-login/status', session.idToken) as HostedCodexLoginStatus;
+      setHostedClaudeLoginStatus(status);
+      await handleLoadConfiguredProviders();
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to complete hosted Claude sign-in.');
+    }
+  }
+
+  async function handleCancelHostedClaudeLogin() {
+    try {
+      const session = await getValidSession();
+      const response = await portalFetch('/portal-api/api/providers/config/claude-cli/hosted-login/cancel', session.idToken, {
+        method: 'POST',
+      }) as HostedCodexLoginStatus;
+      setHostedClaudeLoginStatus(response);
+      setAccountActionMessage(response.message || 'Hosted Claude sign-in cancelled.');
+    } catch (error) {
+      setAccountActionMessage(error instanceof Error ? error.message : 'Failed to cancel hosted Claude sign-in.');
+    }
+  }
+
   function handleOpenProviderSettings() {
     if (!authSession) {
       return;
@@ -1712,17 +1766,21 @@ const memoryViewBrains = memoryActiveBrain ? [memoryActiveBrain] : [];
             context={context}
             createdToken={createdToken}
             codexHostedLoginStatus={hostedCodexLoginStatus}
+            claudeHostedLoginStatus={hostedClaudeLoginStatus}
             memoryBrainPreference={memoryBrainPreference}
             workspaceRuntimePreference={workspaceRuntimePreference}
             onCopyCreatedToken={handleCopyCreatedToken}
             onCreateToken={handleCreateToken}
             onCancelHostedCodexLogin={handleCancelHostedCodexLogin}
             onCompleteHostedCodexLogin={handleCompleteHostedCodexLogin}
+            onCancelHostedClaudeLogin={handleCancelHostedClaudeLogin}
+            onCompleteHostedClaudeLogin={handleCompleteHostedClaudeLogin}
             onDeleteProvider={handleDeleteProvider}
             onDisconnectProviderOAuth={handleDisconnectProviderOAuth}
             onDismissCreatedToken={() => setCreatedToken(null)}
             onRefreshSession={handleRefreshSession}
             onRefreshHostedCodexLoginStatus={handleRefreshHostedCodexLoginStatus}
+            onRefreshHostedClaudeLoginStatus={handleRefreshHostedClaudeLoginStatus}
             onRequestWriteScopeChange={setRequestWriteScope}
             onRevokeToken={handleRevokeToken}
             onSaveMemoryBrain={handleSaveMemoryBrain}
@@ -1730,6 +1788,7 @@ const memoryViewBrains = memoryActiveBrain ? [memoryActiveBrain] : [];
             onSaveProviderConfig={handleSaveProviderConfig}
             onSignOut={handleSignOut}
             onStartHostedCodexLogin={handleStartHostedCodexLogin}
+            onStartHostedClaudeLogin={handleStartHostedClaudeLogin}
             onStartProviderOAuth={handleStartProviderOAuth}
             onToggleProvider={handleToggleProvider}
             onTokenExpiresAtInputChange={setTokenExpiresAtInput}
@@ -2216,6 +2275,7 @@ type AccountViewProps = {
   billing: PortalBilling | null;
   brains: BrainSummary[];
   codexHostedLoginStatus: HostedCodexLoginStatus | null;
+  claudeHostedLoginStatus: HostedCodexLoginStatus | null;
   configuredProviders: ConfiguredProviderSummary[];
   context: PortalContext | null;
   createdToken: CreatedTokenState | null;
@@ -2223,12 +2283,15 @@ type AccountViewProps = {
   workspaceRuntimePreference: WorkspaceRuntimePreference | null;
   onCancelHostedCodexLogin: () => Promise<void>;
   onCompleteHostedCodexLogin: () => Promise<void>;
+  onCancelHostedClaudeLogin: () => Promise<void>;
+  onCompleteHostedClaudeLogin: () => Promise<void>;
   onCopyCreatedToken: () => void;
   onCreateToken: () => void;
   onDeleteProvider: (providerId: string) => Promise<void>;
   onDisconnectProviderOAuth: (providerId: string) => Promise<void>;
   onDismissCreatedToken: () => void;
   onRefreshHostedCodexLoginStatus: () => Promise<void>;
+  onRefreshHostedClaudeLoginStatus: () => Promise<void>;
   onRefreshSession: () => Promise<string | null>;
   onRequestWriteScopeChange: (value: boolean) => void;
   onRevokeToken: (apiTokenId: string) => void;
@@ -2237,6 +2300,7 @@ type AccountViewProps = {
   onSaveProviderConfig: (providerId: string, editor: ProviderEditorState) => Promise<void>;
   onSignOut: () => void;
   onStartHostedCodexLogin: () => Promise<void>;
+  onStartHostedClaudeLogin: () => Promise<void>;
   onStartProviderOAuth: (providerId: string) => Promise<void>;
   onToggleProvider: (providerId: string) => Promise<void>;
   onTokenExpiresAtInputChange: (value: string) => void;
@@ -2254,6 +2318,7 @@ function AccountView({
   billing,
   brains,
   codexHostedLoginStatus,
+  claudeHostedLoginStatus,
   configuredProviders,
   context,
   createdToken,
@@ -2261,12 +2326,15 @@ function AccountView({
   workspaceRuntimePreference,
   onCancelHostedCodexLogin,
   onCompleteHostedCodexLogin,
+  onCancelHostedClaudeLogin,
+  onCompleteHostedClaudeLogin,
   onCopyCreatedToken,
   onCreateToken,
   onDeleteProvider,
   onDisconnectProviderOAuth,
   onDismissCreatedToken,
   onRefreshHostedCodexLoginStatus,
+  onRefreshHostedClaudeLoginStatus,
   onRefreshSession,
   onRequestWriteScopeChange,
   onRevokeToken,
@@ -2275,6 +2343,7 @@ function AccountView({
   onSaveProviderConfig,
   onSignOut,
   onStartHostedCodexLogin,
+  onStartHostedClaudeLogin,
   onStartProviderOAuth,
   onToggleProvider,
   onTokenExpiresAtInputChange,
@@ -2560,7 +2629,7 @@ function AccountView({
               const isOllama = provider.providerId === 'ollama';
               const isOAuthMode = editor.authType === 'oauth';
               const isSessionJsonMode = editor.authType === 'session_json';
-              const currentHostedCodexStatus = provider.providerId === 'openai-codex' ? codexHostedLoginStatus : null;
+              const currentHostedCodexStatus = provider.providerId === 'openai-codex' ? codexHostedLoginStatus : provider.providerId === 'claude-cli' ? claudeHostedLoginStatus : null;
               const statusClass = configured
                 ? (configured.isEnabled ? 'status-chip-active' : 'status-chip-expired')
                 : 'status-chip-revoked';
@@ -2595,7 +2664,7 @@ function AccountView({
                     {configured?.tokenExpiresAt ? <span>Token Expires {formatDateTime(configured.tokenExpiresAt || undefined)}</span> : null}
                     {provider.configUrl ? (
                       <a href={provider.configUrl} target="_blank" rel="noreferrer">
-                        {provider.providerId === 'openai-codex' ? 'Open setup guide' : 'Get API Key'}
+                        {provider.providerId === 'openai-codex' ? 'Open setup guide' : provider.providerId === 'claude-cli' ? 'Get API Key (optional)' : 'Get API Key'}
                       </a>
                     ) : null}
                   </div>
@@ -2659,14 +2728,16 @@ function AccountView({
 
                   {supportsSessionJson && isSessionJsonMode ? (
                     <label className="field">
-                      <span>Codex Session JSON</span>
+                      <span>{provider.providerId === 'claude-cli' ? 'Claude Credentials JSON' : 'Codex Session JSON'}</span>
                       <textarea
                         rows={8}
                         value={editor.sessionJson}
                         onChange={(event) => updateProviderEditor(provider.providerId, { sessionJson: event.target.value })}
                         placeholder={configured?.hasCredentials
-                          ? 'Leave blank to keep the stored Codex session JSON'
-                          : 'Paste the contents of ~/.codex/auth.json'}
+                          ? `Leave blank to keep the stored ${provider.providerId === 'claude-cli' ? 'Claude credentials' : 'Codex session JSON'}`
+                          : provider.providerId === 'claude-cli'
+                            ? 'Paste the contents of ~/.claude/.credentials.json'
+                            : 'Paste the contents of ~/.codex/auth.json'}
                         disabled={pending}
                         className="document-content-editor"
                         spellCheck={false}
@@ -2682,29 +2753,33 @@ function AccountView({
 
                   {supportsSessionJson && isSessionJsonMode ? (
                     <p className="summary-detail provider-auth-note">
-                      The stored session JSON is encrypted, then materialized only inside the user&apos;s isolated workspace runtime so Codex runs under that user&apos;s own subscription.
+                      The stored session credentials are encrypted, then materialized only inside the user&apos;s isolated workspace runtime so the CLI runs under that user&apos;s own subscription.
                     </p>
                   ) : null}
 
-                  {provider.providerId === 'openai-codex' && supportsSessionJson && isSessionJsonMode ? (
+                  {(provider.providerId === 'openai-codex' || provider.providerId === 'claude-cli') && supportsSessionJson && isSessionJsonMode ? (
                     <section className="created-token-panel">
                       <div className="panel-header compact-header">
                         <div>
-                          <h3>Hosted Codex Sign-In</h3>
-                          <p className="summary-detail">Run device auth inside the user&apos;s isolated workspace or pod, finish the browser sign-in, then complete the connection to save the session for this account.</p>
+                          <h3>{provider.providerId === 'claude-cli' ? 'Hosted Claude Sign-In' : 'Hosted Codex Sign-In'}</h3>
+                          <p className="summary-detail">
+                            {provider.providerId === 'claude-cli'
+                              ? 'Start the sign-in process inside the workspace pod, open the URL shown in the log output to authenticate with your Claude.ai subscription, then complete the connection.'
+                              : 'Run device auth inside the user\'s isolated workspace or pod, finish the browser sign-in, then complete the connection to save the session for this account.'}
+                          </p>
                         </div>
                       </div>
 
                       <dl className="facts-list compact-facts">
                         <div className="fact-row"><dt>Status</dt><dd>{!currentHostedCodexStatus ? 'Not started' : currentHostedCodexStatus.authFileAvailable ? 'Ready to complete' : currentHostedCodexStatus.isRunning ? 'Waiting for authentication' : 'Idle'}</dd></div>
-                        <div className="fact-row"><dt>Runtime Auth</dt><dd>{currentHostedCodexStatus?.authFileAvailable ? 'Present' : 'Missing'}</dd></div>
+                        <div className="fact-row"><dt>Credentials</dt><dd>{currentHostedCodexStatus?.authFileAvailable ? 'Present' : 'Missing'}</dd></div>
                       </dl>
 
                       <div className="action-row">
                         <button
                           type="button"
                           className="button"
-                          onClick={() => void runProviderAction(provider.providerId, onStartHostedCodexLogin)}
+                          onClick={() => void runProviderAction(provider.providerId, provider.providerId === 'claude-cli' ? onStartHostedClaudeLogin : onStartHostedCodexLogin)}
                           disabled={pending}
                         >
                           Start Hosted Sign-In
@@ -2712,7 +2787,7 @@ function AccountView({
                         <button
                           type="button"
                           className="button"
-                          onClick={() => void runProviderAction(provider.providerId, onRefreshHostedCodexLoginStatus)}
+                          onClick={() => void runProviderAction(provider.providerId, provider.providerId === 'claude-cli' ? onRefreshHostedClaudeLoginStatus : onRefreshHostedCodexLoginStatus)}
                           disabled={pending}
                         >
                           Refresh Status
@@ -2720,7 +2795,7 @@ function AccountView({
                         <button
                           type="button"
                           className="button"
-                          onClick={() => void runProviderAction(provider.providerId, onCompleteHostedCodexLogin)}
+                          onClick={() => void runProviderAction(provider.providerId, provider.providerId === 'claude-cli' ? onCompleteHostedClaudeLogin : onCompleteHostedCodexLogin)}
                           disabled={pending}
                         >
                           Complete Sign-In
@@ -2728,7 +2803,7 @@ function AccountView({
                         <button
                           type="button"
                           className="button button-danger"
-                          onClick={() => void runProviderAction(provider.providerId, onCancelHostedCodexLogin)}
+                          onClick={() => void runProviderAction(provider.providerId, provider.providerId === 'claude-cli' ? onCancelHostedClaudeLogin : onCancelHostedCodexLogin)}
                           disabled={pending}
                         >
                           Cancel
