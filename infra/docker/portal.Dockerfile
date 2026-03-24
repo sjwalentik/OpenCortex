@@ -25,6 +25,7 @@ WORKDIR /src
 # Copy solution and project files
 COPY OpenCortex.sln ./
 COPY src/OpenCortex.Core/OpenCortex.Core.csproj src/OpenCortex.Core/
+COPY src/OpenCortex.Shared/ src/OpenCortex.Shared/
 COPY src/OpenCortex.Portal/OpenCortex.Portal.csproj src/OpenCortex.Portal/
 
 # Restore dependencies. Cache NuGet state and retry transient CI network failures.
@@ -40,6 +41,7 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
 
 # Copy source code
 COPY src/OpenCortex.Core/ src/OpenCortex.Core/
+COPY src/OpenCortex.Shared/ src/OpenCortex.Shared/
 COPY src/OpenCortex.Portal/ src/OpenCortex.Portal/
 
 # Copy frontend build output to wwwroot (Vite outputs to ../wwwroot/app relative to Frontend dir)

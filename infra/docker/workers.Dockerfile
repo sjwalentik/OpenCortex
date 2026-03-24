@@ -13,6 +13,7 @@ COPY src/OpenCortex.Persistence.Postgres/OpenCortex.Persistence.Postgres.csproj 
 COPY src/OpenCortex.Indexer/OpenCortex.Indexer.csproj src/OpenCortex.Indexer/
 COPY src/OpenCortex.Providers.Abstractions/OpenCortex.Providers.Abstractions.csproj src/OpenCortex.Providers.Abstractions/
 COPY src/OpenCortex.Retrieval/OpenCortex.Retrieval.csproj src/OpenCortex.Retrieval/
+COPY src/OpenCortex.Shared/ src/OpenCortex.Shared/
 COPY src/OpenCortex.Workers/OpenCortex.Workers.csproj src/OpenCortex.Workers/
 
 # Restore dependencies. Cache NuGet state and retry transient CI network failures.
@@ -33,6 +34,7 @@ COPY src/OpenCortex.Persistence.Postgres/ src/OpenCortex.Persistence.Postgres/
 COPY src/OpenCortex.Indexer/ src/OpenCortex.Indexer/
 COPY src/OpenCortex.Providers.Abstractions/ src/OpenCortex.Providers.Abstractions/
 COPY src/OpenCortex.Retrieval/ src/OpenCortex.Retrieval/
+COPY src/OpenCortex.Shared/ src/OpenCortex.Shared/
 COPY src/OpenCortex.Workers/ src/OpenCortex.Workers/
 
 # Build and publish. The restore will be fast if packages are already cached.
