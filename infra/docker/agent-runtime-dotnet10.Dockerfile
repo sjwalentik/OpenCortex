@@ -22,21 +22,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN if ! getent group agent >/dev/null; then groupadd agent; fi && \
-    if ! id -u agent >/dev/null 2>&1; then useradd -g agent -m -s /bin/bash agent; fi
-
 RUN git config --system init.defaultBranch main && \
     git config --system user.email "agent@opencortex.local" && \
     git config --system user.name "OpenCortex Agent"
 
-RUN mkdir -p /workspace && chown agent:agent /workspace
+RUN mkdir -p /workspace && chown 1000:1000 /workspace
 
 VOLUME /workspace
 WORKDIR /workspace
 
-USER agent
+USER 1000:1000
 
-ENV HOME=/home/agent
-ENV PATH="/home/agent/.local/bin:${PATH}"
+ENV HOME=/home/ubuntu
+ENV DOTNET_CLI_HOME=/home/ubuntu
+ENV PATH="/home/ubuntu/.local/bin:${PATH}"
 
 CMD ["sleep", "infinity"]
