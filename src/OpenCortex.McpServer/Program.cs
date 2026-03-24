@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ModelContextProtocol.AspNetCore;
 using OpenCortex.Core.Configuration;
 using OpenCortex.Core.Embeddings;
@@ -12,6 +13,13 @@ using OpenCortex.Retrieval.Planning;
 using OpenCortex.Tools.Memory.Handlers;
 
 var builder = WebApplication.CreateBuilder(args);
+var webJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+IResult JsonTextResult(object value, int statusCode = StatusCodes.Status200OK, string contentType = "application/json") =>
+    Results.Text(
+        JsonSerializer.Serialize(value, webJsonOptions),
+        contentType,
+        statusCode: statusCode);
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -100,7 +108,7 @@ var toolManifest = OpenCortexToolManifest.Build();
 // Diagnostic HTTP endpoints (not part of MCP protocol)
 // ---------------------------------------------------------------------------
 
-app.MapGet("/", () => Results.Ok(new
+app.MapGet("/", () => JsonTextResult(new
 {
     service = "OpenCortex.McpServer",
     protocol = "mcp/1.1",
@@ -117,7 +125,7 @@ app.MapGet("/health", () => Results.Ok(new
     toolCount = toolManifest.Count,
 }));
 
-app.MapGet("/tool-manifest", () => Results.Ok(new
+app.MapGet("/tool-manifest", () => JsonTextResult(new
 {
     count = toolManifest.Count,
     tools = toolManifest,

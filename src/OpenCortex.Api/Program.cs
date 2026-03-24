@@ -1,5 +1,5 @@
-using System.Threading.RateLimiting;
 using System.Text.Json;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
@@ -34,6 +34,13 @@ using CheckoutSessionLineItemOptions = Stripe.Checkout.SessionLineItemOptions;
 using CheckoutSessionService = Stripe.Checkout.SessionService;
 
 var builder = WebApplication.CreateBuilder(args);
+var webJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+IResult JsonTextResult(object value, int statusCode = StatusCodes.Status200OK, string contentType = "application/json") =>
+    Results.Text(
+        JsonSerializer.Serialize(value, webJsonOptions),
+        contentType,
+        statusCode: statusCode);
 
 var options = builder.Configuration.GetSection(OpenCortexOptions.SectionName).Get<OpenCortexOptions>() ?? new OpenCortexOptions();
 var validationErrors = new OpenCortexOptionsValidator().Validate(options).ToList();
@@ -1227,7 +1234,7 @@ if (hostedAuthConfigured)
             return errorResult;
         }
 
-        return Results.Ok(context);
+        return JsonTextResult(context!);
     });
 
     tenantRoutes.MapGet("/me/memory-brain", MemoryBrainEndpoints.GetMemoryBrainAsync);
@@ -1553,12 +1560,14 @@ if (hostedAuthConfigured)
         }
         catch (Exception ex)
         {
-            return Results.BadRequest(new
-            {
-                message = ErrorMessages.ForExternalFailure(
-                    "The query could not be parsed.",
-                    ex.Message)
-            });
+            return JsonTextResult(
+                new
+                {
+                    message = ErrorMessages.ForExternalFailure(
+                        "The query could not be parsed.",
+                        ex.Message)
+                },
+                StatusCodes.Status400BadRequest);
         }
 
         var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, query.BrainId, cancellationToken);
