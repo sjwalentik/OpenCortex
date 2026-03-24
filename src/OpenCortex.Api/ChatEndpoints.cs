@@ -916,7 +916,7 @@ public static class ChatEndpoints
             {
             }
 
-            await WriteDoneEventAsync(response, writeLock, cancellationToken);
+            await WriteDoneEventAsync(response, writeLock, CancellationToken.None);
             stopwatch.Stop();
         }
 
@@ -1278,6 +1278,7 @@ public static class ChatEndpoints
         response.Headers.Connection = "keep-alive";
 
         using var writeLock = new SemaphoreSlim(1, 1);
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var fullContent = new System.Text.StringBuilder();
         string? providerId = null;
@@ -1286,13 +1287,28 @@ public static class ChatEndpoints
         var usage = TokenUsage.Empty;
         var succeeded = false;
 
+        var heartbeatStage = "starting";
+        var heartbeatMessage = "Starting agentic execution...";
+
         await WriteChatStreamEventAsync(response, new
         {
             eventType = "status",
-            stage = "starting",
-            message = "Starting agentic execution...",
+            stage = heartbeatStage,
+            message = heartbeatMessage,
             timestamp = DateTimeOffset.UtcNow
         }, writeLock, cancellationToken);
+
+        var heartbeatTask = RunHeartbeatLoopAsync(
+            response,
+            writeLock,
+            () => new
+            {
+                eventType = "heartbeat",
+                stage = heartbeatStage,
+                message = heartbeatMessage,
+                timestamp = DateTimeOffset.UtcNow
+            },
+            heartbeatCts.Token);
 
         try
         {
@@ -1301,6 +1317,8 @@ public static class ChatEndpoints
                 switch (evt)
                 {
                     case AgenticWorkspaceProvisioningEvent wsProvisioningEvent:
+                        heartbeatStage = "workspace_provisioning";
+                        heartbeatMessage = wsProvisioningEvent.Message ?? "Provisioning workspace...";
                         await WriteChatStreamEventAsync(response, new
                         {
                             eventType = "workspace_provisioning",
@@ -1312,6 +1330,8 @@ public static class ChatEndpoints
                         break;
 
                     case AgenticWorkspaceReadyEvent wsReadyEvent:
+                        heartbeatStage = "running";
+                        heartbeatMessage = "Workspace ready. Waiting for response...";
                         await WriteChatStreamEventAsync(response, new
                         {
                             eventType = "workspace_ready",
@@ -1338,6 +1358,8 @@ public static class ChatEndpoints
                         break;
 
                     case AgenticIterationStartEvent iterStartEvent:
+                        heartbeatStage = "running";
+                        heartbeatMessage = $"Running iteration {iterStartEvent.Iteration}...";
                         await WriteChatStreamEventAsync(response, new
                         {
                             eventType = "iteration_start",
@@ -1479,7 +1501,17 @@ public static class ChatEndpoints
         }
         finally
         {
-            await WriteDoneEventAsync(response, writeLock, cancellationToken);
+            heartbeatCts.Cancel();
+
+            try
+            {
+                await heartbeatTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            await WriteDoneEventAsync(response, writeLock, CancellationToken.None);
             stopwatch.Stop();
         }
 
