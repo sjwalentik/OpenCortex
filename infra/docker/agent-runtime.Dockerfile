@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y gh \
     && apt-get install -y nodejs \
     && npm install -g @openai/codex \
+    && npm install -g @anthropic-ai/claude-code \
     # Cleanup
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

@@ -232,6 +232,14 @@ public static class ProviderConfigEndpoints
                     false
                 ),
                 new AvailableProvider(
+                    "claude-cli",
+                    "Claude (CLI — workspace agent)",
+                    new[] { "api_key" },
+                    "claude-sonnet-4-6",
+                    "https://console.anthropic.com/settings/keys",
+                    false
+                ),
+                new AvailableProvider(
                     "ollama",
                     "Ollama (Local/Self-hosted)",
                     new[] { "none" },

@@ -3,6 +3,7 @@ namespace OpenCortex.Tools;
 public static class WorkspaceRuntimePaths
 {
     public const string CodexProviderId = "openai-codex";
+    public const string ClaudeCliProviderId = "claude-cli";
     private const string CodexStateDirectoryName = ".opencortex-codex";
 
     public static string GetCodexHomePath(bool supportsContainerIsolation, string workspacePath)

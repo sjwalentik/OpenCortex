@@ -1083,7 +1083,9 @@ public static class ChatEndpoints
             return Results.NotFound(new { message = $"Provider '{normalizedProviderId}' was not found for the current user." });
         }
 
-        if (string.Equals(normalizedProviderId, "openai-codex", StringComparison.OrdinalIgnoreCase))
+        // CLI-native providers handle their own agentic execution; skip the tools capability check
+        if (string.Equals(normalizedProviderId, "openai-codex", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedProviderId, "claude-cli", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }

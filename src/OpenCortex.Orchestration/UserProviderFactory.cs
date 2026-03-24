@@ -163,6 +163,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
                 "anthropic" => CreateAnthropicProvider(config, settings),
                 "openai" => CreateOpenAIProvider(config, settings),
                 "openai-codex" => CreateCodexProvider(config, settings, githubToken),
+                "claude-cli" => CreateClaudeCliProvider(config, settings, githubToken),
                 "ollama" or "ollama-remote" => CreateOllamaProvider(config, settings),
                 _ => null
             };
@@ -257,6 +258,30 @@ public sealed class UserProviderFactory : IUserProviderFactory
             httpClient,
             Options.Create(options),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Providers.Ollama.OllamaProvider>.Instance);
+    }
+
+    private IModelProvider? CreateClaudeCliProvider(UserProviderConfig config, UserProviderSettings? settings, string? githubToken)
+    {
+        if (string.IsNullOrEmpty(config.EncryptedApiKey))
+        {
+            _logger.LogWarning("No API key found for Claude CLI provider");
+            return null;
+        }
+
+        var apiKey = _encryption.Decrypt(config.EncryptedApiKey);
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            _logger.LogWarning("Claude CLI provider API key was empty after decryption");
+            return null;
+        }
+
+        return new ClaudeCliModelProvider(
+            config.UserId,
+            settings?.DefaultModel ?? "claude-sonnet-4-6",
+            apiKey,
+            githubToken,
+            _workspaceManager,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeCliModelProvider>.Instance);
     }
 
     private IModelProvider? CreateCodexProvider(UserProviderConfig config, UserProviderSettings? settings, string? githubToken)

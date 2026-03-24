@@ -33,9 +33,9 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         CancellationToken cancellationToken = default)
     {
         var routedProviderId = await ResolveRequestedOrRoutedProviderIdAsync(request, cancellationToken);
-        if (IsCodexNativeProvider(routedProviderId))
+        if (IsCliNativeProvider(routedProviderId))
         {
-            return await ExecuteCodexNativeAgenticAsync(request, cancellationToken);
+            return await ExecuteCodexNativeAgenticAsync(request, routedProviderId!, cancellationToken);
         }
 
         var stopwatch = Stopwatch.StartNew();
@@ -260,9 +260,9 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var routedProviderId = await ResolveRequestedOrRoutedProviderIdAsync(request, cancellationToken);
-        if (IsCodexNativeProvider(routedProviderId))
+        if (IsCliNativeProvider(routedProviderId))
         {
-            await foreach (var codexEvent in StreamCodexNativeAgenticAsync(request, cancellationToken))
+            await foreach (var codexEvent in StreamCodexNativeAgenticAsync(request, routedProviderId!, cancellationToken))
             {
                 yield return codexEvent;
             }
@@ -563,6 +563,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
 
     private async Task<AgenticOrchestrationResult> ExecuteCodexNativeAgenticAsync(
         AgenticOrchestrationRequest request,
+        string providerId,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -572,7 +573,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
 
         try
         {
-            var orchRequest = BuildCodexNativeOrchestrationRequest(request);
+            var orchRequest = BuildCliNativeOrchestrationRequest(request, providerId);
             var llmStopwatch = Stopwatch.StartNew();
             var result = await _orchestration.ExecuteAsync(
                 request.CustomerId,
@@ -636,7 +637,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
                 ToolExecutions = Array.Empty<ToolExecutionResult>(),
                 Iterations = 1,
                 Duration = stopwatch.Elapsed,
-                ProviderId = "openai-codex",
+                ProviderId = providerId,
                 ModelId = request.RoutingContext?.RequestedModelId ?? string.Empty,
                 ReachedMaxIterations = false,
                 Error = safeError,
@@ -647,6 +648,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
 
     private async IAsyncEnumerable<AgenticStreamEvent> StreamCodexNativeAgenticAsync(
         AgenticOrchestrationRequest request,
+        string providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -654,7 +656,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         var conversation = new List<ChatMessage>(request.Messages);
         var iterationStartedAt = DateTimeOffset.UtcNow;
         var contentBuffer = new System.Text.StringBuilder();
-        var providerId = "openai-codex";
+        // providerId is passed in from the caller (e.g. "openai-codex" or "claude-cli")
         var modelId = request.RoutingContext?.RequestedModelId ?? string.Empty;
         var usage = TokenUsage.Empty;
 
@@ -687,7 +689,7 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
             TraceId = telemetryBuilder.TraceId
         };
 
-        var orchRequest = BuildCodexNativeOrchestrationRequest(request);
+        var orchRequest = BuildCliNativeOrchestrationRequest(request, providerId);
         var llmStopwatch = Stopwatch.StartNew();
         string? streamError = null;
 
@@ -841,8 +843,9 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         };
     }
 
-    private static bool IsCodexNativeProvider(string? providerId) =>
-        string.Equals(providerId?.Trim(), "openai-codex", StringComparison.OrdinalIgnoreCase);
+    private static bool IsCliNativeProvider(string? providerId) =>
+        string.Equals(providerId?.Trim(), "openai-codex", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(providerId?.Trim(), "claude-cli", StringComparison.OrdinalIgnoreCase);
 
     private async Task<string?> ResolveRequestedOrRoutedProviderIdAsync(
         AgenticOrchestrationRequest request,
@@ -869,17 +872,18 @@ public sealed class AgenticOrchestrationEngine : IAgenticOrchestrationEngine
         return routing.ProviderId;
     }
 
-    private static OrchestrationRequest BuildCodexNativeOrchestrationRequest(
-        AgenticOrchestrationRequest request)
+    private static OrchestrationRequest BuildCliNativeOrchestrationRequest(
+        AgenticOrchestrationRequest request,
+        string providerId)
     {
         var routingContext = request.RoutingContext is null
             ? new Routing.RoutingContext
             {
-                RequestedProviderId = "openai-codex"
+                RequestedProviderId = providerId
             }
             : request.RoutingContext with
             {
-                RequestedProviderId = "openai-codex"
+                RequestedProviderId = providerId
             };
 
         return new OrchestrationRequest
