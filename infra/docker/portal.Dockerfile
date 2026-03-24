@@ -19,7 +19,7 @@ COPY src/OpenCortex.Portal/Frontend/ ./
 RUN npm run build
 
 # Stage 2: Build .NET backend
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS backend-build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
 WORKDIR /src
 
 # Copy solution and project files
@@ -56,7 +56,7 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
     -p:UseAppHost=false
 
 # Stage 3: Runtime image
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 # Create non-root user for security

@@ -2,7 +2,7 @@
 # OpenCortex API Dockerfile
 # Multi-stage build for optimized production image
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Copy solution and project files first for better layer caching
@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
     -p:UseAppHost=false
 
 # Runtime image
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 # Install kubectl for Kubernetes workspace management
