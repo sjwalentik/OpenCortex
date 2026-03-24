@@ -8,14 +8,14 @@ public static class WorkspaceRuntimePaths
     public static string GetCodexHomePath(bool supportsContainerIsolation, string workspacePath)
     {
         return supportsContainerIsolation
-            ? "/home/agent/.opencortex-codex-home"
+            ? "/home/ubuntu/.opencortex-codex-home"
             : Path.Combine(workspacePath, ".codex-home");
     }
 
     public static string GetCodexAuthFilePath(bool supportsContainerIsolation, string workspacePath)
     {
         return supportsContainerIsolation
-            ? "/home/agent/.opencortex-codex-home/.codex/auth.json"
+            ? "/home/ubuntu/.opencortex-codex-home/.codex/auth.json"
             : Path.Combine(workspacePath, ".codex-home", ".codex", "auth.json");
     }
 
