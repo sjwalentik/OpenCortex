@@ -29,7 +29,7 @@ Before starting, have these ready:
 - a Firebase project
 - optionally a Stripe account with a Pro price configured
 
-The repo still targets `net8.0` today. The `.NET 10 SDK` is used here as the local build toolchain and can build the current projects without retargeting them yet.
+The repo now targets `net10.0`. Use the `.NET 10 SDK` for local build, test, and run workflows.
 
 ## Step 1: Start Postgres
 
