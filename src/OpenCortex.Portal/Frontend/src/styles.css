@@ -1534,6 +1534,60 @@ h3 {
   font-size: 0.88rem;
 }
 
+/* Thinking / reasoning block */
+.chat-thinking {
+  margin: 6px 0 8px;
+  background: rgba(71, 50, 31, 0.04);
+  border: 1px solid rgba(71, 50, 31, 0.14);
+  border-radius: 12px;
+  font-size: 0.88rem;
+  overflow: hidden;
+}
+
+.chat-thinking-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  list-style: none;
+  user-select: none;
+}
+
+.chat-thinking-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-thinking-summary::before {
+  content: '▶';
+  font-size: 0.65rem;
+  transition: transform 0.15s ease;
+}
+
+.chat-thinking[open] .chat-thinking-summary::before {
+  transform: rotate(90deg);
+}
+
+.chat-thinking-summary:hover {
+  color: var(--text);
+  background: rgba(71, 50, 31, 0.06);
+}
+
+.chat-thinking-content {
+  padding: 10px 14px 14px;
+  border-top: 1px solid rgba(71, 50, 31, 0.1);
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.65;
+  font-size: 0.85rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
 /* Telemetry summary */
 .chat-telemetry {
   margin-top: 8px;

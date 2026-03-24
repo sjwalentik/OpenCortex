@@ -945,6 +945,12 @@ export function ChatView({
                     ))}
                   </div>
                 )}
+                {message.thinkingContent && (
+                  <details className="chat-thinking">
+                    <summary className="chat-thinking-summary">Reasoning</summary>
+                    <div className="chat-thinking-content">{message.thinkingContent}</div>
+                  </details>
+                )}
                 <div className="chat-message-content">
                   {message.content}
                   {message.isStreaming && <span className="chat-cursor" />}
