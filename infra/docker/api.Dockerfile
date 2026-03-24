@@ -20,6 +20,7 @@ COPY src/OpenCortex.Retrieval/OpenCortex.Retrieval.csproj src/OpenCortex.Retriev
 COPY src/OpenCortex.Tools/OpenCortex.Tools.csproj src/OpenCortex.Tools/
 COPY src/OpenCortex.Tools.GitHub/OpenCortex.Tools.GitHub.csproj src/OpenCortex.Tools.GitHub/
 COPY src/OpenCortex.Tools.Memory/OpenCortex.Tools.Memory.csproj src/OpenCortex.Tools.Memory/
+COPY src/OpenCortex.Shared/ src/OpenCortex.Shared/
 COPY src/OpenCortex.Api/OpenCortex.Api.csproj src/OpenCortex.Api/
 
 # Restore dependencies. Cache NuGet state and retry transient CI network failures.
@@ -47,6 +48,7 @@ COPY src/OpenCortex.Retrieval/ src/OpenCortex.Retrieval/
 COPY src/OpenCortex.Tools/ src/OpenCortex.Tools/
 COPY src/OpenCortex.Tools.GitHub/ src/OpenCortex.Tools.GitHub/
 COPY src/OpenCortex.Tools.Memory/ src/OpenCortex.Tools.Memory/
+COPY src/OpenCortex.Shared/ src/OpenCortex.Shared/
 COPY src/OpenCortex.Api/ src/OpenCortex.Api/
 
 # Build and publish. The restore will be fast if packages are already cached.
