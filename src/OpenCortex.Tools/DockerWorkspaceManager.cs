@@ -112,6 +112,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             if (existingStatus == "running")
             {
                 await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
+                await SyncClaudeAuthStateAsync(userId, credentials, cancellationToken);
                 UpdateLastActivity(userId);
                 return new WorkspaceStatus
                 {
@@ -131,6 +132,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
                 if (startResult.Success)
                 {
                     await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
+                    await SyncClaudeAuthStateAsync(userId, credentials, cancellationToken);
                     UpdateLastActivity(userId);
                     return new WorkspaceStatus
                     {
@@ -298,6 +300,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
         _logger.LogInformation("Created container {ContainerName} for user {UserId}", containerName, userId);
 
         await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
+        await SyncClaudeAuthStateAsync(userId, credentials, cancellationToken);
 
         return new WorkspaceStatus
         {
@@ -309,6 +312,41 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             LastActivityAt = DateTime.UtcNow,
             Message = "Container created and started"
         };
+    }
+
+    private async Task SyncClaudeAuthStateAsync(
+        Guid userId,
+        IReadOnlyDictionary<string, string>? credentials,
+        CancellationToken cancellationToken)
+    {
+        var credentialsJson = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeCliProviderId);
+        var credentialsFilePath = WorkspaceRuntimePaths.GetClaudeCredentialsFilePath(
+            supportsContainerIsolation: true,
+            WorkspacePathInContainer);
+        var credentialsDirectory = Path.GetDirectoryName(credentialsFilePath)?.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(credentialsDirectory))
+        {
+            return;
+        }
+
+        var containerName = GetContainerName(userId);
+        var syncScript = string.IsNullOrWhiteSpace(credentialsJson)
+            ? $"rm -f {ShellEscaping.SingleQuote(credentialsFilePath)}"
+            : BuildClaudeCredWriteScript(credentialsDirectory, credentialsFilePath, credentialsJson);
+
+        await RunDockerExecAsync(containerName, syncScript, null, cancellationToken);
+    }
+
+    private static string BuildClaudeCredWriteScript(
+        string credentialsDirectory,
+        string credentialsFilePath,
+        string credentialsJson)
+    {
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentialsJson));
+        return
+            $"mkdir -p {ShellEscaping.SingleQuote(credentialsDirectory)} " +
+            $"&& printf %s {ShellEscaping.SingleQuote(encoded)} | base64 -d > {ShellEscaping.SingleQuote(credentialsFilePath)} " +
+            $"&& chmod 600 {ShellEscaping.SingleQuote(credentialsFilePath)}";
     }
 
     private async Task SyncCodexAuthStateAsync(

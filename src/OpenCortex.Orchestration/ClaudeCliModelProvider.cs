@@ -22,22 +22,27 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
 
     private readonly Guid _userId;
     private readonly string _defaultModel;
-    private readonly string _apiKey;
+    private readonly string? _apiKey;            // set when using api_key auth
+    private readonly string? _credentialsJson;   // set when using session_json (subscription) auth
     private readonly string? _githubToken;
     private readonly IWorkspaceManager _workspaceManager;
     private readonly ILogger _logger;
 
+    /// <param name="apiKey">Anthropic API key — mutually exclusive with credentialsJson.</param>
+    /// <param name="credentialsJson">Claude.ai OAuth credentials JSON — mutually exclusive with apiKey.</param>
     public ClaudeCliModelProvider(
         Guid userId,
         string defaultModel,
-        string apiKey,
+        string? apiKey,
+        string? credentialsJson,
         string? githubToken,
         IWorkspaceManager workspaceManager,
         ILogger logger)
     {
         _userId = userId;
         _defaultModel = string.IsNullOrWhiteSpace(defaultModel) ? "claude-sonnet-4-6" : defaultModel.Trim();
-        _apiKey = apiKey;
+        _apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
+        _credentialsJson = string.IsNullOrWhiteSpace(credentialsJson) ? null : credentialsJson.Trim();
         _githubToken = string.IsNullOrWhiteSpace(githubToken) ? null : githubToken.Trim();
         _workspaceManager = workspaceManager;
         _logger = logger;
@@ -65,20 +70,23 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         var model = string.IsNullOrWhiteSpace(request.Model) ? _defaultModel : request.Model;
         var prompt = BuildPrompt(request);
 
-        await _workspaceManager.EnsureRunningAsync(
-            _userId,
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                [WorkspaceRuntimePaths.ClaudeCliProviderId] = _apiKey
-            },
-            cancellationToken);
+        var credentialsForSync = _credentialsJson is not null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                { [WorkspaceRuntimePaths.ClaudeCliProviderId] = _credentialsJson }
+            : null;
+
+        await _workspaceManager.EnsureRunningAsync(_userId, credentialsForSync, cancellationToken);
+
+        var claudeHomePath = _credentialsJson is not null
+            ? await GetClaudeHomePathAsync(cancellationToken)
+            : null;
 
         var command = ResolveCommand();
         var commandResult = await _workspaceManager.ExecuteCommandAsync(
             _userId,
             command.FileName,
             workingDirectory: null,
-            environmentVariables: BuildRuntimeEnvironment(),
+            environmentVariables: BuildRuntimeEnvironment(claudeHomePath),
             argumentList: BuildArgumentList(command.PrefixArguments, model, _workspaceManager.SupportsContainerIsolation),
             standardInput: prompt,
             cancellationToken: cancellationToken);
@@ -131,19 +139,21 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            await _workspaceManager.EnsureRunningAsync(
-                _userId,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [WorkspaceRuntimePaths.ClaudeCliProviderId] = _apiKey
-                },
-                cancellationToken);
+            var credentialsForSync = _credentialsJson is not null
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    { [WorkspaceRuntimePaths.ClaudeCliProviderId] = _credentialsJson }
+                : null;
+            await _workspaceManager.EnsureRunningAsync(_userId, credentialsForSync, cancellationToken);
+
+            var claudeHomePath = _credentialsJson is not null
+                ? await GetClaudeHomePathAsync(cancellationToken)
+                : null;
 
             var command = ResolveCommand();
             var result = await _workspaceManager.ExecuteCommandAsync(
                 _userId,
                 command.FileName,
-                environmentVariables: BuildRuntimeEnvironment(),
+                environmentVariables: BuildRuntimeEnvironment(claudeHomePath),
                 argumentList: [.. command.PrefixArguments, "--version"],
                 cancellationToken: cancellationToken);
 
@@ -169,13 +179,31 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         return Task.FromResult(models);
     }
 
-    private Dictionary<string, string> BuildRuntimeEnvironment()
+    private async Task<string> GetClaudeHomePathAsync(CancellationToken cancellationToken)
+    {
+        var workspacePath = await _workspaceManager.GetWorkspacePathAsync(_userId, cancellationToken);
+        return WorkspaceRuntimePaths.GetClaudeHomePath(
+            _workspaceManager.SupportsContainerIsolation, workspacePath).Replace('\\', '/');
+    }
+
+    private Dictionary<string, string> BuildRuntimeEnvironment(string? claudeHomePath)
     {
         var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["ANTHROPIC_API_KEY"] = _apiKey,
             ["GIT_TERMINAL_PROMPT"] = "0"
         };
+
+        // API key auth: pass key as env var
+        if (!string.IsNullOrWhiteSpace(_apiKey))
+        {
+            environment["ANTHROPIC_API_KEY"] = _apiKey;
+        }
+
+        // Subscription auth: point HOME at the isolated home dir so claude reads ~/.claude/.credentials.json
+        if (!string.IsNullOrWhiteSpace(claudeHomePath))
+        {
+            environment["HOME"] = claudeHomePath;
+        }
 
         if (!string.IsNullOrWhiteSpace(_githubToken))
         {

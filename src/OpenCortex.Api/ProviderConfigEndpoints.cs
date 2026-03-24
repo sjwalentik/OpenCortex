@@ -234,7 +234,7 @@ public static class ProviderConfigEndpoints
                 new AvailableProvider(
                     "claude-cli",
                     "Claude (CLI — workspace agent)",
-                    new[] { "api_key" },
+                    new[] { "session_json", "api_key" },
                     "claude-sonnet-4-6",
                     "https://console.anthropic.com/settings/keys",
                     false
@@ -470,6 +470,196 @@ public static class ProviderConfigEndpoints
                 cancellationToken);
 
             return Results.Ok(status with { Message = "Hosted Codex sign-in was cancelled." });
+        });
+
+        // --- Claude CLI hosted login ---
+
+        routes.MapPost("/claude-cli/hosted-login/start", async (
+            ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
+            IWorkspaceManager workspaceManager,
+            CancellationToken cancellationToken) =>
+        {
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
+
+            if (!workspaceManager.SupportsContainerIsolation)
+            {
+                return Results.BadRequest(new
+                {
+                    message = "Hosted Claude sign-in is available only when workspaces run in isolated containers or pods. Use an API key for local mode."
+                });
+            }
+
+            var workspaceStatus = await workspaceManager.EnsureRunningAsync(resolved.UserId!.Value, null, cancellationToken);
+            var workspacePath = workspaceStatus.WorkspacePath
+                ?? await workspaceManager.GetWorkspacePathAsync(resolved.UserId.Value, cancellationToken);
+
+            var claudeHomePath = WorkspaceRuntimePaths.GetClaudeHomePath(
+                workspaceManager.SupportsContainerIsolation, workspacePath).Replace('\\', '/');
+            var credentialsFilePath = WorkspaceRuntimePaths.GetClaudeCredentialsFilePath(
+                workspaceManager.SupportsContainerIsolation, workspacePath).Replace('\\', '/');
+            var credentialsDirectory = Path.GetDirectoryName(credentialsFilePath)?.Replace('\\', '/');
+            var logPath = WorkspaceRuntimePaths.GetClaudeLoginLogPath(workspacePath).Replace('\\', '/');
+            var pidPath = WorkspaceRuntimePaths.GetClaudeLoginPidPath(workspacePath).Replace('\\', '/');
+            var stateDirectory = WorkspaceRuntimePaths.GetClaudeStateDirectoryPath(workspacePath).Replace('\\', '/');
+
+            if (string.IsNullOrWhiteSpace(credentialsDirectory))
+            {
+                return Results.Problem(
+                    title: "Hosted Claude sign-in is not ready.",
+                    detail: "Failed to resolve the runtime credentials directory.",
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["HOME"] = claudeHomePath,
+                ["GIT_TERMINAL_PROMPT"] = "0"
+            };
+
+            // Remove any stale credentials, start claude auth login in background
+            var startScript =
+                $"mkdir -p {ShellEscaping.SingleQuote(stateDirectory)} {ShellEscaping.SingleQuote(credentialsDirectory)} " +
+                $"&& rm -f {ShellEscaping.SingleQuote(logPath)} {ShellEscaping.SingleQuote(pidPath)} {ShellEscaping.SingleQuote(credentialsFilePath)} " +
+                $"&& HOME={ShellEscaping.SingleQuote(claudeHomePath)} nohup claude auth login > {ShellEscaping.SingleQuote(logPath)} 2>&1 < /dev/null & echo $! > {ShellEscaping.SingleQuote(pidPath)}";
+
+            var result = await workspaceManager.ExecuteCommandAsync(
+                resolved.UserId.Value,
+                "/bin/sh",
+                argumentList: ["-c", startScript],
+                environmentVariables: environment,
+                cancellationToken: cancellationToken);
+
+            if (!result.Success)
+            {
+                return Results.Problem(
+                    title: "Failed to start hosted Claude sign-in.",
+                    detail: ErrorMessages.ForExternalFailure("Failed to start hosted Claude sign-in.", result.StandardError),
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            var status = await ReadHostedClaudeLoginStatusAsync(workspaceManager, resolved.UserId.Value, cancellationToken);
+            return Results.Ok(status with
+            {
+                Message = "Hosted Claude sign-in started. Open the URL shown in the log output to authenticate with your Claude.ai subscription."
+            });
+        });
+
+        routes.MapGet("/claude-cli/hosted-login/status", async (
+            ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
+            IWorkspaceManager workspaceManager,
+            CancellationToken cancellationToken) =>
+        {
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
+
+            if (!workspaceManager.SupportsContainerIsolation)
+            {
+                return Results.BadRequest(new { message = "Hosted Claude sign-in status is available only for isolated container or pod runtimes." });
+            }
+
+            var status = await ReadHostedClaudeLoginStatusAsync(workspaceManager, resolved.UserId!.Value, cancellationToken);
+            return Results.Ok(status);
+        });
+
+        routes.MapPost("/claude-cli/hosted-login/complete", async (
+            ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
+            IUserProviderConfigRepository repository,
+            ICredentialEncryption encryption,
+            IWorkspaceManager workspaceManager,
+            CancellationToken cancellationToken) =>
+        {
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
+
+            if (!workspaceManager.SupportsContainerIsolation)
+            {
+                return Results.BadRequest(new { message = "Hosted Claude sign-in completion is available only for isolated container or pod runtimes." });
+            }
+
+            var workspacePath = await workspaceManager.GetWorkspacePathAsync(resolved.UserId!.Value, cancellationToken);
+            var credentialsFilePath = WorkspaceRuntimePaths.GetClaudeCredentialsFilePath(
+                workspaceManager.SupportsContainerIsolation, workspacePath).Replace('\\', '/');
+
+            var credReadResult = await workspaceManager.ExecuteCommandAsync(
+                resolved.UserId.Value,
+                "/bin/sh",
+                argumentList: ["-c", $"cat {ShellEscaping.SingleQuote(credentialsFilePath)}"],
+                cancellationToken: cancellationToken);
+
+            if (!credReadResult.Success || string.IsNullOrWhiteSpace(credReadResult.StandardOutput))
+            {
+                return Results.BadRequest(new
+                {
+                    message = "Hosted Claude sign-in has not completed yet. No credentials file was found in the runtime."
+                });
+            }
+
+            var existing = await repository.GetAsync(
+                resolved.CustomerId!.Value,
+                resolved.UserId.Value,
+                WorkspaceRuntimePaths.ClaudeCliProviderId,
+                cancellationToken);
+
+            var config = MergeProviderConfig(
+                existing,
+                new ProviderConfigRequest(
+                    AuthType: "session_json",
+                    SessionJson: credReadResult.StandardOutput.Trim(),
+                    IsEnabled: true),
+                resolved.CustomerId.Value,
+                resolved.UserId.Value,
+                WorkspaceRuntimePaths.ClaudeCliProviderId,
+                encryption);
+
+            try
+            {
+                await repository.UpsertAsync(config, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BuildProviderConfigStorageUnavailableResult(ex);
+            }
+
+            return Results.Ok(new
+            {
+                message = "Hosted Claude sign-in completed and the session was saved for this account.",
+                providerId = WorkspaceRuntimePaths.ClaudeCliProviderId
+            });
+        });
+
+        routes.MapPost("/claude-cli/hosted-login/cancel", async (
+            ClaimsPrincipal user,
+            ITenantCatalogStore catalogStore,
+            IWorkspaceManager workspaceManager,
+            CancellationToken cancellationToken) =>
+        {
+            var resolved = await ResolveProviderConfigContextAsync(user, catalogStore, cancellationToken);
+            if (resolved.ErrorResult is not null) return resolved.ErrorResult;
+
+            if (!workspaceManager.SupportsContainerIsolation)
+            {
+                return Results.BadRequest(new { message = "Hosted Claude sign-in cancellation is available only for isolated container or pod runtimes." });
+            }
+
+            var workspacePath = await workspaceManager.GetWorkspacePathAsync(resolved.UserId!.Value, cancellationToken);
+            var pidPath = WorkspaceRuntimePaths.GetClaudeLoginPidPath(workspacePath).Replace('\\', '/');
+
+            await workspaceManager.ExecuteCommandAsync(
+                resolved.UserId.Value,
+                "/bin/sh",
+                argumentList:
+                [
+                    "-c",
+                    $"if [ -f {ShellEscaping.SingleQuote(pidPath)} ]; then kill $(cat {ShellEscaping.SingleQuote(pidPath)}) >/dev/null 2>&1 || true; rm -f {ShellEscaping.SingleQuote(pidPath)}; fi"
+                ],
+                cancellationToken: cancellationToken);
+
+            var status = await ReadHostedClaudeLoginStatusAsync(workspaceManager, resolved.UserId.Value, cancellationToken);
+            return Results.Ok(status with { Message = "Hosted Claude sign-in was cancelled." });
         });
 
         // --- OAuth Flow Endpoints ---
@@ -901,6 +1091,56 @@ public static class ProviderConfigEndpoints
             string.Equals(statusResult.StandardOutput.Trim(), "not_started", StringComparison.OrdinalIgnoreCase)
                 ? "Hosted Codex sign-in has not started yet."
                 : "Hosted Codex sign-in status loaded.");
+    }
+
+    private static async Task<HostedCodexLoginStatusResponse> ReadHostedClaudeLoginStatusAsync(
+        IWorkspaceManager workspaceManager,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var workspacePath = await workspaceManager.GetWorkspacePathAsync(userId, cancellationToken);
+        var logPath = WorkspaceRuntimePaths.GetClaudeLoginLogPath(workspacePath).Replace('\\', '/');
+        var pidPath = WorkspaceRuntimePaths.GetClaudeLoginPidPath(workspacePath).Replace('\\', '/');
+        var credentialsFilePath = WorkspaceRuntimePaths.GetClaudeCredentialsFilePath(
+            workspaceManager.SupportsContainerIsolation, workspacePath).Replace('\\', '/');
+
+        var statusResult = await workspaceManager.ExecuteCommandAsync(
+            userId,
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"if [ -f {ShellEscaping.SingleQuote(pidPath)} ]; then pid=$(cat {ShellEscaping.SingleQuote(pidPath)}); if kill -0 \"$pid\" >/dev/null 2>&1; then echo running; else echo finished; fi; else echo not_started; fi"
+            ],
+            cancellationToken: cancellationToken);
+
+        var logResult = await workspaceManager.ExecuteCommandAsync(
+            userId,
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"tail -n 80 {ShellEscaping.SingleQuote(logPath)} 2>/dev/null || true"
+            ],
+            cancellationToken: cancellationToken);
+
+        var credResult = await workspaceManager.ExecuteCommandAsync(
+            userId,
+            "/bin/sh",
+            argumentList:
+            [
+                "-c",
+                $"if [ -f {ShellEscaping.SingleQuote(credentialsFilePath)} ]; then echo true; else echo false; fi"
+            ],
+            cancellationToken: cancellationToken);
+
+        return new HostedCodexLoginStatusResponse(
+            string.Equals(statusResult.StandardOutput.Trim(), "running", StringComparison.OrdinalIgnoreCase),
+            string.Equals(credResult.StandardOutput.Trim(), "true", StringComparison.OrdinalIgnoreCase),
+            logResult.StandardOutput.Trim(),
+            string.Equals(statusResult.StandardOutput.Trim(), "not_started", StringComparison.OrdinalIgnoreCase)
+                ? "Hosted Claude sign-in has not started yet."
+                : "Hosted Claude sign-in status loaded.");
     }
 
     private static IReadOnlyDictionary<string, string> BuildCodexRuntimeEnvironment(

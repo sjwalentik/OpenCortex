@@ -148,6 +148,7 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
         // For local mode, just ensure the directory exists
         var workspacePath = await GetWorkspacePathAsync(userId, cancellationToken);
         SyncCodexAuthState(workspacePath, credentials);
+        SyncClaudeAuthState(workspacePath, credentials);
 
         lock (_lock)
         {
@@ -354,6 +355,45 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
 
         Directory.CreateDirectory(authDirectory);
         File.WriteAllText(authFilePath, sessionJson);
+    }
+
+    private static void SyncClaudeAuthState(
+        string workspacePath,
+        IReadOnlyDictionary<string, string>? credentials)
+    {
+        var credentialsFilePath = WorkspaceRuntimePaths.GetClaudeCredentialsFilePath(
+            supportsContainerIsolation: false,
+            workspacePath);
+        var credentialsDirectory = Path.GetDirectoryName(credentialsFilePath);
+        var credentialsJson = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeCliProviderId);
+
+        if (string.IsNullOrWhiteSpace(credentialsJson))
+        {
+            if (File.Exists(credentialsFilePath))
+            {
+                File.Delete(credentialsFilePath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(credentialsDirectory) && Directory.Exists(credentialsDirectory))
+            {
+                TryDeleteEmptyDirectory(credentialsDirectory);
+                var claudeRoot = Directory.GetParent(credentialsDirectory)?.FullName;
+                if (!string.IsNullOrWhiteSpace(claudeRoot))
+                {
+                    TryDeleteEmptyDirectory(claudeRoot);
+                }
+            }
+
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(credentialsDirectory))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(credentialsDirectory);
+        File.WriteAllText(credentialsFilePath, credentialsJson);
     }
 
     private static void TryDeleteEmptyDirectory(string path)

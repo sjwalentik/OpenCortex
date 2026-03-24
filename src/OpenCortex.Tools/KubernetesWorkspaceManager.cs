@@ -114,6 +114,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
             if (existingStatus == "Running")
             {
                 await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
+                await SyncClaudeAuthStateAsync(userId, credentials, cancellationToken);
                 UpdateLastActivity(userId);
                 return new WorkspaceStatus
                 {
@@ -133,6 +134,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
                 if (readyStatus.State == WorkspaceState.Running)
                 {
                     await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
+                    await SyncClaudeAuthStateAsync(userId, credentials, cancellationToken);
                 }
 
                 return readyStatus;
@@ -278,9 +280,46 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
         if (workspaceStatus.State == WorkspaceState.Running)
         {
             await SyncCodexAuthStateAsync(userId, credentials, cancellationToken);
+            await SyncClaudeAuthStateAsync(userId, credentials, cancellationToken);
         }
 
         return workspaceStatus;
+    }
+
+    private async Task SyncClaudeAuthStateAsync(
+        Guid userId,
+        IReadOnlyDictionary<string, string>? credentials,
+        CancellationToken cancellationToken)
+    {
+        var credentialsJson = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeCliProviderId);
+        var credentialsFilePath = WorkspaceRuntimePaths.GetClaudeCredentialsFilePath(
+            supportsContainerIsolation: true,
+            WorkspacePathInPod);
+        var credentialsDirectory = Path.GetDirectoryName(credentialsFilePath)?.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(credentialsDirectory))
+        {
+            return;
+        }
+
+        var podName = GetPodName(userId);
+        var ns = _options.KubernetesNamespace;
+        var syncScript = string.IsNullOrWhiteSpace(credentialsJson)
+            ? $"rm -f {ShellEscaping.SingleQuote(credentialsFilePath)}"
+            : BuildClaudeCredWriteScript(credentialsDirectory, credentialsFilePath, credentialsJson);
+
+        await RunKubectlExecAsync(ns, podName, syncScript, null, cancellationToken);
+    }
+
+    private static string BuildClaudeCredWriteScript(
+        string credentialsDirectory,
+        string credentialsFilePath,
+        string credentialsJson)
+    {
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentialsJson));
+        return
+            $"mkdir -p {ShellEscaping.SingleQuote(credentialsDirectory)} " +
+            $"&& printf %s {ShellEscaping.SingleQuote(encoded)} | base64 -d > {ShellEscaping.SingleQuote(credentialsFilePath)} " +
+            $"&& chmod 600 {ShellEscaping.SingleQuote(credentialsFilePath)}";
     }
 
     private async Task SyncCodexAuthStateAsync(

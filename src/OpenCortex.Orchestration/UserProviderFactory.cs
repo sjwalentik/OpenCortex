@@ -262,23 +262,45 @@ public sealed class UserProviderFactory : IUserProviderFactory
 
     private IModelProvider? CreateClaudeCliProvider(UserProviderConfig config, UserProviderSettings? settings, string? githubToken)
     {
-        if (string.IsNullOrEmpty(config.EncryptedApiKey))
-        {
-            _logger.LogWarning("No API key found for Claude CLI provider");
-            return null;
-        }
+        string? apiKey = null;
+        string? credentialsJson = null;
 
-        var apiKey = _encryption.Decrypt(config.EncryptedApiKey);
-        if (string.IsNullOrWhiteSpace(apiKey))
+        if (string.Equals(config.AuthType, "session_json", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Claude CLI provider API key was empty after decryption");
-            return null;
+            if (string.IsNullOrEmpty(config.EncryptedAccessToken))
+            {
+                _logger.LogWarning("No session credential found for Claude CLI provider");
+                return null;
+            }
+
+            credentialsJson = _encryption.Decrypt(config.EncryptedAccessToken);
+            if (string.IsNullOrWhiteSpace(credentialsJson))
+            {
+                _logger.LogWarning("Claude CLI provider session payload was empty after decryption");
+                return null;
+            }
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(config.EncryptedApiKey))
+            {
+                _logger.LogWarning("No API key found for Claude CLI provider");
+                return null;
+            }
+
+            apiKey = _encryption.Decrypt(config.EncryptedApiKey);
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                _logger.LogWarning("Claude CLI provider API key was empty after decryption");
+                return null;
+            }
         }
 
         return new ClaudeCliModelProvider(
             config.UserId,
             settings?.DefaultModel ?? "claude-sonnet-4-6",
             apiKey,
+            credentialsJson,
             githubToken,
             _workspaceManager,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeCliModelProvider>.Instance);
