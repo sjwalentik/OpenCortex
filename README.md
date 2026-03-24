@@ -99,9 +99,9 @@ During each index run, stale chunks, link edges, and embeddings for rescanned do
 
 The API now serves a lightweight admin console at `/admin/` for operator/debug workflows such as browsing brains, triggering indexing, inspecting run history/errors, and smoke-testing OQL queries from the browser.
 
-Customer-facing workspace flows now live in the separate `OpenCortex.Portal` project, with the React portal now serving as the primary shell at `/app` and the classic browser shell preserved at `/legacy` for fallback access.
+Customer-facing workspace flows now live in the separate `OpenCortex.Portal` project, with the React portal serving as the primary shell at `/app`. Legacy root paths now redirect into the React portal for compatibility.
 
-The portal direction is now active rather than aspirational: React + TypeScript is the primary customer shell, while the classic plain-JS portal remains available at `/legacy` during the cutover. Tiptap for rich document editing and React Flow for graph-aware interaction remain the next major frontend steps. See `docs/architecture/frontend-portal-direction.md`.
+The portal direction is now active rather than aspirational: React + TypeScript is the customer shell. Tiptap for rich document editing and React Flow for graph-aware interaction remain the next major frontend steps. See `docs/architecture/frontend-portal-direction.md`.
 
 The current portal is split into dedicated views for:
 

@@ -1491,9 +1491,6 @@ const memoryViewBrains = memoryActiveBrain ? [memoryActiveBrain] : [];
         <div className="header-meta">
           <div className="session-chip">{sessionChip}</div>
           <div className="action-row compact-actions">
-            <button type="button" className="button" onClick={() => window.location.assign('/legacy')}>
-              Open Classic Portal
-            </button>
             <button
               type="button"
               className="button"
@@ -1801,7 +1798,7 @@ function SignedOutState({
           <p className="eyebrow">Sign In</p>
           <h2>Authenticate directly into the React portal.</h2>
           <p className="summary-detail auth-copy">
-            This host now owns its email and password entry flow. It writes the same browser session contract, then loads workspace state without sending you back through the classic shell.
+            This host now owns its email and password entry flow. It writes the shared browser session contract, then loads workspace state directly in the React portal.
           </p>
           <ul className="feature-list">
             {activeDefinition.bullets.map((bullet) => (
@@ -1814,11 +1811,6 @@ function SignedOutState({
               <h3>Same storage key, new entry surface</h3>
               <p>The React portal writes the shared auth session itself and still reuses the refresh endpoint before tenant API calls.</p>
             </article>
-            <article className="slice-card feature-card">
-              <p className="panel-label">Fallback</p>
-              <h3>Classic shell remains available</h3>
-              <p>The classic portal still lives at /legacy, but it is no longer required just to start a session.</p>
-            </article>
           </div>
         </article>
 
@@ -1826,7 +1818,7 @@ function SignedOutState({
           <p className="panel-label">Portal Access</p>
           <h3>Sign in with hosted auth</h3>
           <p className="summary-detail">
-            Use the same hosted email/password backend the classic portal uses today.
+            Use the hosted email/password backend configured for this portal host.
           </p>
           <form className="session-form" onSubmit={(event) => {
             event.preventDefault();
@@ -1878,9 +1870,6 @@ function SignedOutState({
               {authPendingAction === 'google' ? 'Connecting to Google...' : 'Continue with Google'}
             </button>
           </div>
-          <p className="auth-fallback-note">
-            Need the previous shell for comparison? <a href="/legacy">Open the classic portal</a>.
-          </p>
         </article>
       </section>
     </section>
@@ -3601,6 +3590,4 @@ function handleClearSession() {
 }
 
 export default App;
-
-
 

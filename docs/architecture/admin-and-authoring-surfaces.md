@@ -196,7 +196,7 @@ Current repo status:
 - `save_document` is now the preferred agent write path because it works directly from canonical path, upserts existing documents, and avoids forcing the caller to manage `managed_document_id` for routine edits
 - `delete_document` now accepts either `managed_document_id` or `canonical_path`, and can also infer `brain_id` when the workspace has a single active managed-content brain
 - `create_document` and `update_document` still exist for lower-level callers, but they should not be the default agent path
-- the React portal shell is now the primary customer entrypoint at `/app`, while the classic HTML/CSS/JS shell remains available at `/legacy` for fallback access during the cutover; see `docs/architecture/frontend-portal-direction.md`
+- the React portal shell is now the customer entrypoint at `/app`, with legacy root paths redirected into React for compatibility; see `docs/architecture/frontend-portal-direction.md`
 
 See `docs/architecture/mcp-security.md` for full MCP token design.
 
@@ -225,6 +225,4 @@ See `docs/architecture/mcp-security.md` for full MCP token design.
 - review and publishing workflows
 - customer-scoped branding
 - public read-only brain sharing
-
-
 

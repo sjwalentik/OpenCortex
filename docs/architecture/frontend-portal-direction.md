@@ -4,7 +4,7 @@
 
 OpenCortex should standardize the customer portal on **React + TypeScript**.
 
-The current `OpenCortex.Portal` implementation now uses a React + TypeScript shell as the primary customer entrypoint. The original server-served HTML, CSS, and plain browser JavaScript portal remains available at `/legacy` as a fallback while the cutover settles and the remaining richer frontend work lands.
+The current `OpenCortex.Portal` implementation now uses a React + TypeScript shell as the customer entrypoint. The original server-served HTML, CSS, and plain browser JavaScript portal has been removed, and legacy paths now redirect into the React shell for compatibility.
 
 Blazor is not the recommended direction for the portal.
 
@@ -49,10 +49,10 @@ If OpenCortex were primarily a forms-heavy internal line-of-business app, Blazor
 The React cutover is now in place for the signed-in workspace.
 
 - `/` and `/app` route to the React portal
-- `/legacy` preserves the classic browser portal for fallback access
+- `/index.html` and `/legacy` redirect into the React portal for compatibility
 - Documents, Account, Usage, and Tools now run through React
 - the Tools view now includes live workspace context alongside retrieval smoke tests, MCP setup, full document fetch, and indexing activity
-- signed-out auth still falls back to the classic sign-in surface
+- signed-out auth now runs directly inside the React portal
 
 ## Graph Direction
 
@@ -100,7 +100,6 @@ Substantially completed.
 - migrated the shared portal shell, routing, and auth/session state
 - moved Documents, Account, Usage, and Tools into React views
 - kept the current Markdown editor behavior functionally equivalent during the first pass
-- preserved the classic sign-in surface at `/legacy` as the remaining fallback path for signed-out auth
 
 ### Phase 3
 
@@ -121,7 +120,7 @@ Frontend test infrastructure should follow the React cutover, not precede it.
 
 - add unit/component tests around shared React view logic
 - add a small number of browser-level end-to-end tests for sign-in, document editing, and retrieval tooling
-- avoid building a large frontend test harness around the classic plain-JS portal
+- avoid rebuilding a parallel legacy shell now that React is the only customer portal surface
 
 ## Non-Goals
 
@@ -132,4 +131,5 @@ Frontend test infrastructure should follow the React cutover, not precede it.
 
 ## Current Recommendation For Repo Work
 
-The React cutover is now in place. New portal work should target the React shell first, keep the classic shell only as fallback, and focus the next frontend pass on Tiptap, graph-aware navigation, and frontend test coverage rather than expanding the legacy plain-JS surface.
+The React cutover is now in place. New portal work should target the React shell and focus the next frontend pass on Tiptap, graph-aware navigation, and frontend test coverage rather than rebuilding the removed legacy plain-JS surface.
+

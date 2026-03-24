@@ -50,7 +50,8 @@ app.UseStaticFiles();
 
 app.MapGet("/", () => Results.Redirect("/app/index.html"));
 app.MapGet("/app", () => Results.Redirect("/app/index.html"));
-app.MapGet("/legacy", () => Results.Redirect("/index.html"));
+app.MapGet("/index.html", () => Results.Redirect("/app/index.html"));
+app.MapGet("/legacy", () => Results.Redirect("/app/index.html"));
 
 app.MapGet("/health", (IConfiguration configuration) =>
 {
