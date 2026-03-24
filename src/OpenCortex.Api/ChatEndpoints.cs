@@ -499,6 +499,7 @@ public static class ChatEndpoints
             ClaimsPrincipal user,
             ITenantCatalogStore catalogStore,
             IAgenticOrchestrationEngine agenticEngine,
+            IUserOrchestrationService orchestrationService,
             IConversationService conversationService,
             IConversationRepository conversationRepository,
             OpenCortex.Core.Credentials.IUserCredentialService credentialService,
@@ -521,6 +522,17 @@ public static class ChatEndpoints
                 if (conversationError is not null)
                 {
                     return conversationError;
+                }
+
+                var providerCapabilityError = await ValidateAgenticProviderSelectionAsync(
+                    request.ProviderId,
+                    resolved.CustomerGuid!.Value,
+                    resolved.UserGuid!.Value,
+                    orchestrationService,
+                    cancellationToken);
+                if (providerCapabilityError is not null)
+                {
+                    return providerCapabilityError;
                 }
 
                 var userMessageContent = GetLatestUserMessageContent(request);
@@ -567,6 +579,7 @@ public static class ChatEndpoints
             ClaimsPrincipal user,
             ITenantCatalogStore catalogStore,
             IAgenticOrchestrationEngine agenticEngine,
+            IUserOrchestrationService orchestrationService,
             IConversationService conversationService,
             IConversationRepository conversationRepository,
             OpenCortex.Core.Credentials.IUserCredentialService credentialService,
@@ -590,6 +603,17 @@ public static class ChatEndpoints
                 if (conversationError is not null)
                 {
                     return conversationError;
+                }
+
+                var providerCapabilityError = await ValidateAgenticProviderSelectionAsync(
+                    request.ProviderId,
+                    resolved.CustomerGuid!.Value,
+                    resolved.UserGuid!.Value,
+                    orchestrationService,
+                    cancellationToken);
+                if (providerCapabilityError is not null)
+                {
+                    return providerCapabilityError;
                 }
 
                 var userMessageContent = GetLatestUserMessageContent(request);
@@ -1001,6 +1025,40 @@ public static class ChatEndpoints
         if (conversation.Status != ConversationStatus.Active)
         {
             return Results.BadRequest(new { message = $"Conversation '{conversationId}' is not active." });
+        }
+
+        return null;
+    }
+
+    private static async Task<IResult?> ValidateAgenticProviderSelectionAsync(
+        string? providerId,
+        Guid customerGuid,
+        Guid userGuid,
+        IUserOrchestrationService orchestrationService,
+        CancellationToken cancellationToken)
+    {
+        var normalizedProviderId = NormalizeProviderId(providerId);
+        if (string.IsNullOrWhiteSpace(normalizedProviderId))
+        {
+            return null;
+        }
+
+        var provider = await orchestrationService.GetProviderAsync(
+            customerGuid,
+            userGuid,
+            normalizedProviderId,
+            cancellationToken);
+        if (provider is null)
+        {
+            return Results.NotFound(new { message = $"Provider '{normalizedProviderId}' was not found for the current user." });
+        }
+
+        if (!provider.Capabilities.SupportsTools)
+        {
+            return Results.BadRequest(new
+            {
+                message = $"Provider '{normalizedProviderId}' does not support agentic tool execution. Use standard chat or choose a tool-capable provider."
+            });
         }
 
         return null;
