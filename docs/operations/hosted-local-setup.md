@@ -24,10 +24,12 @@ This is the fastest path to a working local customer workspace with:
 Before starting, have these ready:
 
 - Docker Desktop or another Docker runtime
-- .NET 8 SDK
+- .NET 10 SDK
 - `psql` available locally, or use the PowerShell migration helper
 - a Firebase project
 - optionally a Stripe account with a Pro price configured
+
+The repo still targets `net8.0` today. The `.NET 10 SDK` is used here as the local build toolchain and can build the current projects without retargeting them yet.
 
 ## Step 1: Start Postgres
 
