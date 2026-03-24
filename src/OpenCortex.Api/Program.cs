@@ -895,7 +895,7 @@ app.MapGet("/health", () => Results.Ok(new
 
 if (app.Environment.IsEnvironment("Testing"))
 {
-    app.MapGet("/_testing/rate-limit", () => Results.Ok(new { ok = true }))
+    app.MapGet("/_testing/rate-limit", () => JsonTextResult(new { ok = true }))
         .RequireRateLimiting("testing-low-limit");
 }
 

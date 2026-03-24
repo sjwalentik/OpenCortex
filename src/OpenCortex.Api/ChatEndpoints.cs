@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Security.Claims;
 using OpenCortex.Conversations;
 using OpenCortex.Orchestration;
@@ -13,6 +14,14 @@ namespace OpenCortex.Api;
 /// </summary>
 public static class ChatEndpoints
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static IResult JsonTextResult(object value, int statusCode = StatusCodes.Status200OK, string contentType = "application/json") =>
+        Results.Text(
+            JsonSerializer.Serialize(value, WebJsonOptions),
+            contentType,
+            statusCode: statusCode);
+
     /// <summary>
     /// Map chat endpoints to the application.
     /// </summary>
@@ -562,14 +571,14 @@ public static class ChatEndpoints
                         cancellationToken);
                 }
 
-                return Results.Ok(BuildAgenticCompletionPayload(result));
+                return JsonTextResult(BuildAgenticCompletionPayload(result));
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new
+                return JsonTextResult(new
                 {
                     message = ErrorMessages.ForExternalFailure("Request could not be completed.", ex.Message)
-                });
+                }, StatusCodes.Status400BadRequest);
             }
         });
 
