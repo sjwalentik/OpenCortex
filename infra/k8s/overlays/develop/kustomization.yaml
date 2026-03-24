@@ -34,3 +34,4 @@ patches:
   - path: patches/image-pull-secret.yaml
   - path: patches/configmap.yaml
   - path: patches/api-workspace.yaml
+  - path: patches/portal-node-selector.yaml
