@@ -102,6 +102,42 @@ public sealed class ChatAgenticMemoryTests : IClassFixture<ChatAgenticMemoryTest
         Assert.Contains("save_memory", _factory.Engine.LastRequest.SystemMessage, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task AgenticCompletion_CompressesOlderHistoryIntoDigest()
+    {
+        _factory.Engine.LastRequest = null;
+
+        var messages = Enumerable.Range(1, 18)
+            .SelectMany(index => new object[]
+            {
+                new { role = "user", content = $"User request {index}: review service behavior and keep prior decisions in mind." },
+                new { role = "assistant", content = $"Assistant response {index}: acknowledged and described the next implementation step." }
+            })
+            .ToArray();
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            messages,
+            enableTools = true
+        });
+
+        var response = await _client.PostAsync(
+            "/api/chat/completions/agentic",
+            Json(payload));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(_factory.Engine.LastRequest);
+
+        var compactedMessages = _factory.Engine.LastRequest!.Messages;
+        Assert.True(compactedMessages.Count < messages.Length);
+        Assert.Equal(ChatRole.System, compactedMessages[0].Role);
+        Assert.Contains("Earlier conversation digest", compactedMessages[0].Content, StringComparison.Ordinal);
+        Assert.Contains("User request 1", compactedMessages[0].Content, StringComparison.Ordinal);
+        Assert.DoesNotContain(compactedMessages, message => string.Equals(message.Content, "User request 1: review service behavior and keep prior decisions in mind.", StringComparison.Ordinal));
+        Assert.Contains(compactedMessages, message => string.Equals(message.Content, "User request 18: review service behavior and keep prior decisions in mind.", StringComparison.Ordinal));
+        Assert.Contains(compactedMessages, message => string.Equals(message.Content, "Assistant response 18: acknowledged and described the next implementation step.", StringComparison.Ordinal));
+    }
+
     private static StringContent Json(string body) =>
         new(body, Encoding.UTF8, "application/json");
 

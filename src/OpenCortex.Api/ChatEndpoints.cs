@@ -13,6 +13,11 @@ namespace OpenCortex.Api;
 /// </summary>
 public static class ChatEndpoints
 {
+    private const int MaxVerbatimHistoryMessages = 12;
+    private const int MaxSummaryEntries = 18;
+    private const int MaxSummaryCharacters = 3000;
+    private const int MaxSummarySnippetCharacters = 220;
+
     /// <summary>
     /// Map chat endpoints to the application.
     /// </summary>
@@ -730,11 +735,7 @@ public static class ChatEndpoints
     {
         return new OrchestrationRequest
         {
-            Messages = request.Messages.Select(m => new ChatMessage
-            {
-                Role = ParseRole(m.Role),
-                Content = m.Content
-            }).ToList(),
+            Messages = CompactConversationHistory(MapRequestMessages(request.Messages)),
             SystemMessage = request.SystemMessage,
             RoutingContext = new RoutingContext
             {
@@ -1131,11 +1132,7 @@ public static class ChatEndpoints
             UserId = resolved.UserGuid!.Value,
             CustomerId = resolved.CustomerGuid!.Value,
             ConversationId = request.ConversationId ?? Guid.NewGuid().ToString(),
-            Messages = request.Messages.Select(m => new ChatMessage
-            {
-                Role = ParseRole(m.Role),
-                Content = m.Content
-            }).ToList(),
+            Messages = CompactConversationHistory(MapRequestMessages(request.Messages)),
             SystemMessage = BuildAgenticSystemMessage(request),
             EnabledTools = request.EnabledTools,
             EnabledCategories = request.EnabledCategories,
@@ -1159,6 +1156,123 @@ public static class ChatEndpoints
             Credentials = credentials
         };
     }
+
+    private static IReadOnlyList<ChatMessage> MapRequestMessages(IReadOnlyList<ChatMessageDto> messages) =>
+        messages.Select(m => new ChatMessage
+        {
+            Role = ParseRole(m.Role),
+            Content = m.Content
+        }).ToList();
+
+    private static IReadOnlyList<ChatMessage> CompactConversationHistory(IReadOnlyList<ChatMessage> messages)
+    {
+        if (messages.Count <= MaxVerbatimHistoryMessages)
+        {
+            return messages;
+        }
+
+        var recentMessages = messages
+            .Skip(Math.Max(0, messages.Count - MaxVerbatimHistoryMessages))
+            .ToList();
+        var olderMessages = messages
+            .Take(Math.Max(0, messages.Count - MaxVerbatimHistoryMessages))
+            .ToList();
+
+        var summary = BuildHistorySummary(olderMessages);
+        if (string.IsNullOrWhiteSpace(summary))
+        {
+            return recentMessages;
+        }
+
+        return new[] { ChatMessage.System(summary) }
+            .Concat(recentMessages)
+            .ToList();
+    }
+
+    private static string? BuildHistorySummary(IReadOnlyList<ChatMessage> olderMessages)
+    {
+        var lines = new List<string>();
+        var totalCharacters = 0;
+        var consumedEntries = 0;
+
+        foreach (var message in olderMessages)
+        {
+            var summaryLine = BuildHistorySummaryLine(message);
+            if (string.IsNullOrWhiteSpace(summaryLine))
+            {
+                continue;
+            }
+
+            if (consumedEntries >= MaxSummaryEntries)
+            {
+                break;
+            }
+
+            var projected = totalCharacters + summaryLine.Length + Environment.NewLine.Length;
+            if (projected > MaxSummaryCharacters)
+            {
+                break;
+            }
+
+            lines.Add($"- {summaryLine}");
+            totalCharacters = projected;
+            consumedEntries++;
+        }
+
+        if (lines.Count == 0)
+        {
+            return null;
+        }
+
+        var omittedEntries = CountSummarizableMessages(olderMessages) - consumedEntries;
+        if (omittedEntries > 0)
+        {
+            lines.Add($"- ... {omittedEntries} earlier messages omitted to stay within the shared context budget.");
+        }
+
+        return
+            "Earlier conversation digest (compressed to save context for all providers; prefer the recent verbatim turns if anything conflicts):\n"
+            + string.Join("\n", lines);
+    }
+
+    private static int CountSummarizableMessages(IReadOnlyList<ChatMessage> messages) =>
+        messages.Count(message => !string.IsNullOrWhiteSpace(BuildHistorySummaryLine(message)));
+
+    private static string? BuildHistorySummaryLine(ChatMessage message)
+    {
+        var label = message.Role switch
+        {
+            ChatRole.System => "system",
+            ChatRole.User => "user",
+            ChatRole.Assistant => "assistant",
+            ChatRole.Tool => $"tool:{message.ToolName ?? "unknown"}",
+            _ => "message"
+        };
+
+        if (message.ToolCalls is { Count: > 0 })
+        {
+            var toolNames = string.Join(", ", message.ToolCalls.Select(call => call.Function.Name).Take(4));
+            return $"[{label}] requested tools: {toolNames}";
+        }
+
+        var content = NormalizeMessageContent(message.Content);
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        return $"[{label}] {Truncate(content, MaxSummarySnippetCharacters)}";
+    }
+
+    private static string NormalizeMessageContent(string? content) =>
+        string.IsNullOrWhiteSpace(content)
+            ? string.Empty
+            : string.Join(" ", content.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength
+            ? value
+            : $"{value[..Math.Max(0, maxLength - 3)]}...";
 
     private static string? BuildAgenticSystemMessage(ChatCompletionRequest request)
     {

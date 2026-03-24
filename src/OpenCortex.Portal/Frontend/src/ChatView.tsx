@@ -468,7 +468,7 @@ export function ChatView({
     setMessagesLoading(true);
     setError(null);
     try {
-      const response = await portalFetch(`/portal-api/tenant/conversations/${conversationId}?messageLimit=100`);
+      const response = await portalFetch(`/portal-api/tenant/conversations/${conversationId}?messageLimit=40`);
       const data = await response.json() as ConversationDetailResponse;
       setMessages(data.messages || []);
       setSelectedProviderId(data.providerId || '');
