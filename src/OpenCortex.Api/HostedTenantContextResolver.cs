@@ -13,12 +13,10 @@ internal static class HostedTenantContextResolver
     {
         if (!HostedTenantClaims.TryCreateProfile(user, out var profile, out var error))
         {
-            return (
-                null,
-                Results.Problem(
-                    title: "Invalid authenticated user profile",
-                    detail: error,
-                    statusCode: StatusCodes.Status401Unauthorized));
+            return (null, Results.Problem(
+                title: "Invalid authenticated user profile",
+                detail: error,
+                statusCode: StatusCodes.Status401Unauthorized));
         }
 
         var context = await catalogStore.EnsureTenantContextAsync(profile!, cancellationToken);

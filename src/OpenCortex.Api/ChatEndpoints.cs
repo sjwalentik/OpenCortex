@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Security.Claims;
 using OpenCortex.Conversations;
 using OpenCortex.Orchestration;
@@ -5,6 +6,7 @@ using OpenCortex.Orchestration.Execution;
 using OpenCortex.Orchestration.Routing;
 using OpenCortex.Providers.Abstractions;
 using OpenCortex.Core.Persistence;
+using OpenCortex.Http;
 
 namespace OpenCortex.Api;
 
@@ -567,14 +569,14 @@ public static class ChatEndpoints
                         cancellationToken);
                 }
 
-                return Results.Ok(BuildAgenticCompletionPayload(result));
+                return JsonHttpResults.Text(BuildAgenticCompletionPayload(result));
             }
             catch (InvalidOperationException ex)
             {
-                return Results.BadRequest(new
+                return JsonHttpResults.Text(new
                 {
                     message = ErrorMessages.ForExternalFailure("Request could not be completed.", ex.Message)
-                });
+                }, StatusCodes.Status400BadRequest);
             }
         });
 

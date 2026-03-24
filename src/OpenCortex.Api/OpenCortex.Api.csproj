@@ -17,12 +17,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\OpenCortex.Shared\JsonHttpResults.cs" Link="JsonHttpResults.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.3" />
     <PackageReference Include="Stripe.net" Version="49.0.0" />
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>7f1a8194-1bd9-43b8-814b-6776b974b77f</UserSecretsId>

@@ -113,9 +113,8 @@ public sealed class OllamaProvider : ModelProviderBase
         string? model = null;
         var inThinkBlock = false;
 
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
             if (string.IsNullOrEmpty(line)) continue;
             if (!line.StartsWith("data: ")) continue;
 

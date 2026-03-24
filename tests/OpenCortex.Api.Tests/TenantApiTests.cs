@@ -61,6 +61,10 @@ public sealed class TenantApiTests : IClassFixture<TenantApiTests.TenantApiWebAp
         var response = await _client.GetAsync("/tenant/me");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Invalid authenticated user profile", json.RootElement.GetProperty("title").GetString());
+        Assert.Contains("subject claim", json.RootElement.GetProperty("detail").GetString());
     }
 
     [Fact]
@@ -72,6 +76,10 @@ public sealed class TenantApiTests : IClassFixture<TenantApiTests.TenantApiWebAp
         var response = await _client.GetAsync("/tenant/me");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Invalid authenticated user profile", json.RootElement.GetProperty("title").GetString());
+        Assert.Contains("email", json.RootElement.GetProperty("detail").GetString());
     }
 
     [Fact]
