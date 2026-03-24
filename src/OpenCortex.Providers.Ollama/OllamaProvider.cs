@@ -218,22 +218,19 @@ public sealed class OllamaProvider : ModelProviderBase
     public override async Task<IReadOnlyList<ModelInfo>> ListModelsAsync(
         CancellationToken cancellationToken = default)
     {
-        // Use the native Ollama API to list models
-        var response = await HttpClient.GetAsync("/api/tags", cancellationToken);
-        response.EnsureSuccessStatusCode();
+        var nativeModels = await TryListNativeModelsAsync(cancellationToken);
+        if (nativeModels.Count > 0)
+        {
+            return nativeModels;
+        }
 
-        var modelsResponse = await response.Content.ReadFromJsonAsync<OllamaModelsResponse>(
-            JsonOptions,
-            cancellationToken);
+        var compatibleModels = await TryListOpenAICompatibleModelsAsync(cancellationToken);
+        if (compatibleModels.Count > 0)
+        {
+            return compatibleModels;
+        }
 
-        return modelsResponse?.Models?
-            .Select(m => new ModelInfo
-            {
-                Id = m.Name ?? "unknown",
-                Name = m.Name,
-                OwnedBy = "local"
-            })
-            .ToList() ?? [];
+        return nativeModels;
     }
 
     public override async Task<ProviderHealthResult> CheckHealthAsync(
@@ -327,6 +324,66 @@ public sealed class OllamaProvider : ModelProviderBase
         }
 
         return ollamaMessage;
+    }
+
+    private async Task<IReadOnlyList<ModelInfo>> TryListNativeModelsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await HttpClient.GetAsync("/api/tags", cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return [];
+            }
+
+            var modelsResponse = await response.Content.ReadFromJsonAsync<OllamaModelsResponse>(
+                JsonOptions,
+                cancellationToken);
+
+            return modelsResponse?.Models?
+                .Select(m => new ModelInfo
+                {
+                    Id = m.Name ?? "unknown",
+                    Name = m.Name,
+                    OwnedBy = "local"
+                })
+                .ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Native Ollama model discovery failed for endpoint {Endpoint}", _options.Endpoint);
+            return [];
+        }
+    }
+
+    private async Task<IReadOnlyList<ModelInfo>> TryListOpenAICompatibleModelsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await HttpClient.GetAsync("/v1/models", cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return [];
+            }
+
+            var modelsResponse = await response.Content.ReadFromJsonAsync<OpenAICompatibleModelsResponse>(
+                cancellationToken: cancellationToken);
+
+            return modelsResponse?.Data?
+                .Where(m => !string.IsNullOrWhiteSpace(m.Id))
+                .Select(m => new ModelInfo
+                {
+                    Id = m.Id!,
+                    Name = m.Id,
+                    OwnedBy = string.IsNullOrWhiteSpace(m.OwnedBy) ? "remote" : m.OwnedBy
+                })
+                .ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "OpenAI-compatible Ollama model discovery failed for endpoint {Endpoint}", _options.Endpoint);
+            return [];
+        }
     }
 
     private static ChatCompletion MapToCompletion(OllamaResponse response)
@@ -518,6 +575,17 @@ internal sealed class OllamaModelInfo
     public string? Name { get; set; }
     public string? ModifiedAt { get; set; }
     public long? Size { get; set; }
+}
+
+internal sealed class OpenAICompatibleModelsResponse
+{
+    public List<OpenAICompatibleModel>? Data { get; set; }
+}
+
+internal sealed class OpenAICompatibleModel
+{
+    public string? Id { get; set; }
+    public string? OwnedBy { get; set; }
 }
 
 #endregion
