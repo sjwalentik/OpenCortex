@@ -13,6 +13,7 @@ using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Query;
 using OpenCortex.Core.Security;
 using OpenCortex.Core.Tenancy;
+using OpenCortex.Http;
 using OpenCortex.Indexer.Indexing;
 using OpenCortex.Orchestration;
 using OpenCortex.Orchestration.Routing;
@@ -34,13 +35,6 @@ using CheckoutSessionLineItemOptions = Stripe.Checkout.SessionLineItemOptions;
 using CheckoutSessionService = Stripe.Checkout.SessionService;
 
 var builder = WebApplication.CreateBuilder(args);
-var webJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-
-IResult JsonTextResult(object value, int statusCode = StatusCodes.Status200OK, string contentType = "application/json") =>
-    Results.Text(
-        JsonSerializer.Serialize(value, webJsonOptions),
-        contentType,
-        statusCode: statusCode);
 
 var options = builder.Configuration.GetSection(OpenCortexOptions.SectionName).Get<OpenCortexOptions>() ?? new OpenCortexOptions();
 var validationErrors = new OpenCortexOptionsValidator().Validate(options).ToList();
@@ -895,7 +889,7 @@ app.MapGet("/health", () => Results.Ok(new
 
 if (app.Environment.IsEnvironment("Testing"))
 {
-    app.MapGet("/_testing/rate-limit", () => JsonTextResult(new { ok = true }))
+    app.MapGet("/_testing/rate-limit", () => JsonHttpResults.Text(new { ok = true }))
         .RequireRateLimiting("testing-low-limit");
 }
 
@@ -1234,7 +1228,7 @@ if (hostedAuthConfigured)
             return errorResult;
         }
 
-        return JsonTextResult(context!);
+        return JsonHttpResults.Text(context!);
     });
 
     tenantRoutes.MapGet("/me/memory-brain", MemoryBrainEndpoints.GetMemoryBrainAsync);
@@ -1560,7 +1554,7 @@ if (hostedAuthConfigured)
         }
         catch (Exception ex)
         {
-            return JsonTextResult(
+            return JsonHttpResults.Text(
                 new
                 {
                     message = ErrorMessages.ForExternalFailure(

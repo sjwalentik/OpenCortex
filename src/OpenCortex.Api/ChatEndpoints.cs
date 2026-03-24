@@ -6,6 +6,7 @@ using OpenCortex.Orchestration.Execution;
 using OpenCortex.Orchestration.Routing;
 using OpenCortex.Providers.Abstractions;
 using OpenCortex.Core.Persistence;
+using OpenCortex.Http;
 
 namespace OpenCortex.Api;
 
@@ -14,14 +15,6 @@ namespace OpenCortex.Api;
 /// </summary>
 public static class ChatEndpoints
 {
-    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
-
-    private static IResult JsonTextResult(object value, int statusCode = StatusCodes.Status200OK, string contentType = "application/json") =>
-        Results.Text(
-            JsonSerializer.Serialize(value, WebJsonOptions),
-            contentType,
-            statusCode: statusCode);
-
     /// <summary>
     /// Map chat endpoints to the application.
     /// </summary>
@@ -571,11 +564,11 @@ public static class ChatEndpoints
                         cancellationToken);
                 }
 
-                return JsonTextResult(BuildAgenticCompletionPayload(result));
+                return JsonHttpResults.Text(BuildAgenticCompletionPayload(result));
             }
             catch (InvalidOperationException ex)
             {
-                return JsonTextResult(new
+                return JsonHttpResults.Text(new
                 {
                     message = ErrorMessages.ForExternalFailure("Request could not be completed.", ex.Message)
                 }, StatusCodes.Status400BadRequest);

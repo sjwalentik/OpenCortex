@@ -11,6 +11,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\OpenCortex.Shared\JsonHttpResults.cs" Link="JsonHttpResults.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.1.0" />
   </ItemGroup>
 
