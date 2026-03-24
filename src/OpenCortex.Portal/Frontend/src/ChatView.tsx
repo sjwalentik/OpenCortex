@@ -345,7 +345,7 @@ export function ChatView({
   const [streamingProviderId, setStreamingProviderId] = useState<string | null>(null);
   const [streamActivities, setStreamActivities] = useState<StreamActivity[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [agenticMode, setAgenticMode] = useState(false);
+  const [agenticMode, setAgenticMode] = useState(true);
   const [currentIteration, setCurrentIteration] = useState(0);
   const [currentTraceId, setCurrentTraceId] = useState<string | null>(null);
   const [pendingToolCalls, setPendingToolCalls] = useState<ToolCallDisplay[]>([]);
@@ -1114,15 +1114,22 @@ export function ChatView({
         ) : null}
 
         <div className="chat-input-container">
+          <textarea
+            placeholder={hasConfiguredProviders ? (agenticMode ? 'Ask me to do something with tools (e.g., "List files in microsoft/vscode repo")...' : 'Type a message or use /model <provider> <model>...') : 'Configure a provider in Account before chatting.'}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={3}
+          />
           <div className="chat-input-options">
-            <label className="field">
+            <label className="chat-input-field">
               <span>Provider</span>
               <select
                 value={selectedProviderId}
                 onChange={(e) => void handleProviderSelectionChange(e.target.value)}
                 disabled={isStreaming || !hasConfiguredProviders}
               >
-                <option value="">Auto routing</option>
+                <option value="">Auto</option>
                 {availableProviders.map((provider) => (
                   <option key={provider.providerId} value={provider.providerId}>
                     {provider.name}
@@ -1130,14 +1137,14 @@ export function ChatView({
                 ))}
               </select>
             </label>
-            <label className="field">
+            <label className="chat-input-field">
               <span>Model</span>
               <select
                 value={selectedModelId}
                 onChange={(e) => void handleModelSelectionChange(e.target.value)}
                 disabled={isStreaming || !selectedProviderId || providerModels.length === 0}
               >
-                <option value="">Provider default</option>
+                <option value="">Default</option>
                 {providerModels.map((model) => (
                   <option key={model.id} value={model.id}>
                     {model.name || model.id}
@@ -1152,7 +1159,7 @@ export function ChatView({
                 onChange={(e) => setAgenticMode(e.target.checked)}
                 disabled={isStreaming}
               />
-              <span className="chat-toggle-label">Enable Tools (Agentic)</span>
+              <span className="chat-toggle-label">Agent</span>
             </label>
             {currentTraceId && (
               <span className="chat-trace-id" title="Trace ID for debugging">
@@ -1160,52 +1167,47 @@ export function ChatView({
               </span>
             )}
           </div>
-          <div className="chat-context-preview">
-            <details>
-              <summary>
-                Next request context: {contextPreview.compactedMessages} messages, about {contextPreview.estimatedTokens} tokens
-              </summary>
-              <div className="chat-context-preview-details">
-                <div>Total turns queued: {contextPreview.totalMessages}</div>
-                <div>Verbatim turns: {contextPreview.verbatimMessages}</div>
-                <div>Summarized older turns: {contextPreview.summarizedMessages}</div>
-                <div>Approx chars sent: {contextPreview.estimatedCharacters}</div>
-                <div>Route: {formatModelSelection(selectedProviderId, selectedModelId)}</div>
-                <div>Mode: {agenticMode ? 'Agentic' : 'Standard chat'}</div>
-                {contextPreview.digest ? (
-                  <pre className="chat-context-preview-digest">{contextPreview.digest}</pre>
-                ) : (
-                  <div>No summary digest yet. The next request is still within the verbatim window.</div>
-                )}
-              </div>
-            </details>
-          </div>
-          <textarea
-            placeholder={hasConfiguredProviders ? (agenticMode ? 'Ask me to do something with tools (e.g., "List files in microsoft/vscode repo")...' : 'Type a message or use /model <provider> <model>...') : 'Configure a provider in Account before chatting.'}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={3}
-          />
-          <div className="chat-input-actions">
-            {isStreaming ? (
-              <button
-                type="button"
-                className="button button-danger"
-                onClick={handleStopStreaming}
-              >
-                Stop
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => void sendMessage()}
-                disabled={!hasConfiguredProviders || !inputValue.trim()}
-              >
-                Send
-              </button>
-            )}
+          <div className="chat-input-footer">
+            <div className="chat-context-preview">
+              <details>
+                <summary>
+                  ▶ Next request context: {contextPreview.compactedMessages} messages, about {contextPreview.estimatedTokens} tokens
+                </summary>
+                <div className="chat-context-preview-details">
+                  <div>Total turns queued: {contextPreview.totalMessages}</div>
+                  <div>Verbatim turns: {contextPreview.verbatimMessages}</div>
+                  <div>Summarized older turns: {contextPreview.summarizedMessages}</div>
+                  <div>Approx chars sent: {contextPreview.estimatedCharacters}</div>
+                  <div>Route: {formatModelSelection(selectedProviderId, selectedModelId)}</div>
+                  <div>Mode: {agenticMode ? 'Agent' : 'Standard chat'}</div>
+                  {contextPreview.digest ? (
+                    <pre className="chat-context-preview-digest">{contextPreview.digest}</pre>
+                  ) : (
+                    <div>No summary digest yet. The next request is still within the verbatim window.</div>
+                  )}
+                </div>
+              </details>
+            </div>
+            <div className="chat-input-actions">
+              {isStreaming ? (
+                <button
+                  type="button"
+                  className="button button-danger"
+                  onClick={handleStopStreaming}
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => void sendMessage()}
+                  disabled={!hasConfiguredProviders || !inputValue.trim()}
+                >
+                  Send
+                </button>
+              )}
+            </div>
           </div>
         </div>
         {telemetrySummary && (
