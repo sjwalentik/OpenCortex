@@ -12,6 +12,7 @@ namespace OpenCortex.Orchestration;
 /// </summary>
 internal sealed class CodexCliModelProvider : IModelProvider
 {
+    private const int MaxTransientRetries = 3;
     private static readonly string[] BuiltInModels =
     [
         "gpt-5.4",
@@ -73,25 +74,46 @@ internal sealed class CodexCliModelProvider : IModelProvider
 
         var homePath = await GetRuntimeHomePathAsync(cancellationToken);
         var command = ResolveCommand();
-        var commandResult = await _workspaceManager.ExecuteCommandAsync(
-            _userId,
-            command.FileName,
-            workingDirectory: null,
-            environmentVariables: BuildRuntimeEnvironment(homePath),
-            argumentList: BuildArgumentList(command.PrefixArguments, model, _workspaceManager.SupportsContainerIsolation),
-            standardInput: prompt,
-            cancellationToken: cancellationToken);
-
-        if (!commandResult.Success)
+        CommandResult? commandResult = null;
+        for (var attempt = 1; attempt <= MaxTransientRetries; attempt++)
         {
-            _logger.LogWarning(
-                "Codex exec failed for user {UserId}. ExitCode={ExitCode}",
+            commandResult = await _workspaceManager.ExecuteCommandAsync(
                 _userId,
-                commandResult.ExitCode);
-            throw new InvalidOperationException(
-                string.IsNullOrWhiteSpace(commandResult.StandardError)
-                    ? "Codex execution failed."
-                    : commandResult.StandardError.Trim());
+                command.FileName,
+                workingDirectory: null,
+                environmentVariables: BuildRuntimeEnvironment(homePath),
+                argumentList: BuildArgumentList(command.PrefixArguments, model, _workspaceManager.SupportsContainerIsolation),
+                standardInput: prompt,
+                cancellationToken: cancellationToken);
+
+            if (commandResult.Success)
+            {
+                break;
+            }
+
+            if (attempt >= MaxTransientRetries || !IsTransientTransportFailure(commandResult))
+            {
+                _logger.LogWarning(
+                    "Codex exec failed for user {UserId}. ExitCode={ExitCode}. Attempt={Attempt}",
+                    _userId,
+                    commandResult.ExitCode,
+                    attempt);
+                throw new InvalidOperationException(GetFailureMessage(commandResult));
+            }
+
+            _logger.LogWarning(
+                "Codex exec hit a transient transport failure for user {UserId}. ExitCode={ExitCode}. Attempt={Attempt}/{MaxAttempts}",
+                _userId,
+                commandResult.ExitCode,
+                attempt,
+                MaxTransientRetries);
+
+            await Task.Delay(TimeSpan.FromSeconds(attempt * 2), cancellationToken);
+        }
+
+        if (commandResult is null)
+        {
+            throw new InvalidOperationException("Codex execution failed.");
         }
 
         var parsed = ParseResult(commandResult.StandardOutput, model);
@@ -186,6 +208,30 @@ internal sealed class CodexCliModelProvider : IModelProvider
     }
 
     private static string GetCodexHomeDirectory(string homePath) => $"{homePath.TrimEnd('/', '\\')}/.codex";
+
+    private static bool IsTransientTransportFailure(CommandResult result)
+    {
+        var combined = $"{result.StandardOutput}\n{result.StandardError}";
+        return combined.Contains("currently experiencing high demand", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("responses_websocket", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("Falling back from WebSockets to HTTPS transport", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("500 Internal Server Error", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetFailureMessage(CommandResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.StandardError))
+        {
+            return result.StandardError.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            return result.StandardOutput.Trim();
+        }
+
+        return "Codex execution failed.";
+    }
 
     private Dictionary<string, string> BuildRuntimeEnvironment(string homePath)
     {

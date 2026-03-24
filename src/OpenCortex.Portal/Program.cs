@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text;
 using System.Text.Json.Serialization;
 
@@ -240,7 +241,14 @@ app.MapMethods("/portal-api/{**path}", ["GET", "POST", "PUT", "PATCH", "DELETE"]
     CopyDownstreamResponseHeaders(downstreamResponse, httpContext.Response);
 
     await using var downstreamStream = await downstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
-    await downstreamStream.CopyToAsync(httpContext.Response.Body, cancellationToken);
+    if (IsServerSentEventsResponse(downstreamResponse))
+    {
+        await ProxyServerSentEventsAsync(httpContext, downstreamStream, cancellationToken);
+    }
+    else
+    {
+        await downstreamStream.CopyToAsync(httpContext.Response.Body, cancellationToken);
+    }
 
     return Results.Empty;
 });
@@ -507,6 +515,73 @@ static bool IsHopByHopHeader(string headerName) =>
     || headerName.Equals("Trailer", StringComparison.OrdinalIgnoreCase)
     || headerName.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase)
     || headerName.Equals("Upgrade", StringComparison.OrdinalIgnoreCase);
+
+static bool IsServerSentEventsResponse(HttpResponseMessage downstreamResponse) =>
+    string.Equals(
+        downstreamResponse.Content.Headers.ContentType?.MediaType,
+        "text/event-stream",
+        StringComparison.OrdinalIgnoreCase);
+
+static async Task ProxyServerSentEventsAsync(
+    HttpContext httpContext,
+    Stream downstreamStream,
+    CancellationToken cancellationToken)
+{
+    var buffer = new byte[16 * 1024];
+
+    try
+    {
+        while (true)
+        {
+            var bytesRead = await downstreamStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            await httpContext.Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+            await httpContext.Response.Body.FlushAsync(cancellationToken);
+        }
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+        throw;
+    }
+    catch (IOException)
+    {
+        await TryWriteSseProxyErrorAsync(httpContext, cancellationToken);
+    }
+    catch (HttpRequestException)
+    {
+        await TryWriteSseProxyErrorAsync(httpContext, cancellationToken);
+    }
+}
+
+static async Task TryWriteSseProxyErrorAsync(HttpContext httpContext, CancellationToken cancellationToken)
+{
+    if (httpContext.RequestAborted.IsCancellationRequested || cancellationToken.IsCancellationRequested)
+    {
+        return;
+    }
+
+    try
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            eventType = "error",
+            error = "The upstream chat stream disconnected. Try again.",
+            timestamp = DateTimeOffset.UtcNow
+        });
+
+        await httpContext.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
+        await httpContext.Response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+        await httpContext.Response.Body.FlushAsync(cancellationToken);
+    }
+    catch
+    {
+        // Best effort only. If the client connection is already gone, suppress the secondary failure.
+    }
+}
 
 static bool IsProviderConfigOAuthActionPath(string normalizedPath)
 {
