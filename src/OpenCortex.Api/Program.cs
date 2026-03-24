@@ -715,10 +715,9 @@ builder.Services.AddCors(cors =>
         }
         else
         {
-            // Development fallback: allow any origin when not configured
-            policy.AllowAnyOrigin()
-                .AllowAnyHeader()
-                .AllowAnyMethod();
+            // No origins configured — deny all cross-origin requests.
+            // Set OpenCortex:Cors:AllowedOrigins in configuration to enable CORS.
+            policy.WithOrigins();
         }
     });
 });

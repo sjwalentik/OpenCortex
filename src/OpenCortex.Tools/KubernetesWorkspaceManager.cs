@@ -150,7 +150,6 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
     public async Task<CommandResult> ExecuteCommandAsync(
         Guid userId,
         string command,
-        string? arguments = null,
         string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environmentVariables = null,
         IReadOnlyList<string>? argumentList = null,
@@ -174,7 +173,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
             ? WorkspacePathInPod
             : ResolvePath(userId, workingDirectory);
 
-        var fullCommand = BuildShellCommand(command, arguments, argumentList, environmentVariables);
+        var fullCommand = BuildShellCommand(command, argumentList, environmentVariables);
         var shellScript = $"cd -- {ShellEscaping.SingleQuote(workDir)} && {fullCommand}";
 
         var stopwatch = Stopwatch.StartNew();
@@ -322,7 +321,6 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
 
     private static string BuildShellCommand(
         string command,
-        string? arguments,
         IReadOnlyList<string>? argumentList,
         IReadOnlyDictionary<string, string>? environmentVariables)
     {
@@ -347,10 +345,6 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
             {
                 builder.Append(' ').Append(ShellEscaping.SingleQuote(argument));
             }
-        }
-        else if (!string.IsNullOrWhiteSpace(arguments))
-        {
-            builder.Append(' ').Append(arguments);
         }
 
         return builder.ToString();

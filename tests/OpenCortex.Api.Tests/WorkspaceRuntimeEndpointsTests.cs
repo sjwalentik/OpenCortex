@@ -154,7 +154,7 @@ public sealed class WorkspaceRuntimeEndpointsTests
         public Task DeleteWorkspaceAsync(Guid userId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<WorkspaceStatus> EnsureRunningAsync(Guid userId, IReadOnlyDictionary<string, string>? credentials = null, CancellationToken cancellationToken = default)
             => Task.FromResult(new WorkspaceStatus { UserId = userId, State = WorkspaceState.Running, WorkspacePath = "/workspace" });
-        public Task<CommandResult> ExecuteCommandAsync(Guid userId, string command, string? arguments = null, string? workingDirectory = null, IReadOnlyDictionary<string, string>? environmentVariables = null, IReadOnlyList<string>? argumentList = null, string? standardInput = null, CancellationToken cancellationToken = default)
+        public Task<CommandResult> ExecuteCommandAsync(Guid userId, string command, string? workingDirectory = null, IReadOnlyDictionary<string, string>? environmentVariables = null, IReadOnlyList<string>? argumentList = null, string? standardInput = null, CancellationToken cancellationToken = default)
             => Task.FromResult(new CommandResult { ExitCode = 0, StandardOutput = string.Empty, StandardError = string.Empty, Duration = TimeSpan.Zero });
         public Task<WorkspaceStatus> GetStatusAsync(Guid userId, CancellationToken cancellationToken = default)
             => Task.FromResult(new WorkspaceStatus { UserId = userId, State = WorkspaceState.Running, WorkspacePath = "/workspace" });

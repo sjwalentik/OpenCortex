@@ -168,7 +168,6 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
     public async Task<CommandResult> ExecuteCommandAsync(
         Guid userId,
         string command,
-        string? arguments = null,
         string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environmentVariables = null,
         IReadOnlyList<string>? argumentList = null,
@@ -211,10 +210,6 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
             {
                 process.StartInfo.ArgumentList.Add(argument);
             }
-        }
-        else
-        {
-            process.StartInfo.Arguments = arguments ?? string.Empty;
         }
 
         if (environmentVariables is not null)

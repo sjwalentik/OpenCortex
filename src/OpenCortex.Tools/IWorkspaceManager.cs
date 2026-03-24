@@ -70,13 +70,14 @@ public interface IWorkspaceManager
     /// </summary>
     /// <param name="userId">User ID.</param>
     /// <param name="command">Command to execute.</param>
-    /// <param name="arguments">Command arguments.</param>
     /// <param name="workingDirectory">Working directory relative to workspace root.</param>
+    /// <param name="environmentVariables">Optional environment variables to set for the command.</param>
+    /// <param name="argumentList">Command arguments. Each entry is passed as a separate, shell-escaped argument.</param>
+    /// <param name="standardInput">Optional text to write to the process stdin.</param>
     /// <returns>Command execution result.</returns>
     Task<CommandResult> ExecuteCommandAsync(
         Guid userId,
         string command,
-        string? arguments = null,
         string? workingDirectory = null,
         IReadOnlyDictionary<string, string>? environmentVariables = null,
         IReadOnlyList<string>? argumentList = null,
