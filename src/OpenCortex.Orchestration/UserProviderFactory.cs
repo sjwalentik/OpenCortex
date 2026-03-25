@@ -415,7 +415,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
                     Name: "workspace-mcp-agent",
                     TokenHash: generated.TokenHash,
                     TokenPrefix: generated.TokenPrefix,
-                    Scopes: ["mcp:read"],
+                    Scopes: ["mcp:read", "mcp:write"],
                     ExpiresAt: DateTimeOffset.UtcNow.AddDays(30)),
                 cancellationToken);
 
