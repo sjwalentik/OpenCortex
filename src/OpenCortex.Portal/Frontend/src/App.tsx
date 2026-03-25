@@ -2629,7 +2629,7 @@ function AccountView({
               const isOllama = provider.providerId === 'ollama';
               const isOAuthMode = editor.authType === 'oauth';
               const isSessionJsonMode = editor.authType === 'session_json';
-              const currentHostedCodexStatus = provider.providerId === 'openai-codex' ? codexHostedLoginStatus : provider.providerId === 'claude-cli' ? claudeHostedLoginStatus : null;
+              const currentHostedCodexStatus = provider.providerId === 'openai-codex' ? codexHostedLoginStatus : null;
               const statusClass = configured
                 ? (configured.isEnabled ? 'status-chip-active' : 'status-chip-expired')
                 : 'status-chip-revoked';
@@ -2753,11 +2753,13 @@ function AccountView({
 
                   {supportsSessionJson && isSessionJsonMode ? (
                     <p className="summary-detail provider-auth-note">
-                      The stored session credentials are encrypted, then materialized only inside the user&apos;s isolated workspace runtime so the CLI runs under that user&apos;s own subscription.
+                      {provider.providerId === 'claude-cli'
+                        ? 'Paste the full JSON contents of ~/.claude/.credentials.json from your local machine. Make sure the file is fresh — run claude locally first to refresh the tokens, then copy the file.'
+                        : 'The stored session credentials are encrypted, then materialized only inside the user\'s isolated workspace runtime so the CLI runs under that user\'s own subscription.'}
                     </p>
                   ) : null}
 
-                  {(provider.providerId === 'openai-codex' || provider.providerId === 'claude-cli') && supportsSessionJson && isSessionJsonMode ? (
+                  {provider.providerId === 'openai-codex' && supportsSessionJson && isSessionJsonMode ? (
                     <section className="created-token-panel">
                       <div className="panel-header compact-header">
                         <div>
