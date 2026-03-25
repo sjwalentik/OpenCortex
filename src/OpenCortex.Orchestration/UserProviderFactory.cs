@@ -22,6 +22,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
     private readonly Tools.IWorkspaceManager _workspaceManager;
     private readonly IProviderOAuthService _oauthService;
     private readonly IApiTokenStore _apiTokenStore;
+    private readonly WorkspaceTenantIds _tenantIds;
     private readonly string _workspaceMcpServerUrl;
     private readonly ILogger<UserProviderFactory> _logger;
 
@@ -32,6 +33,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
         Tools.IWorkspaceManager workspaceManager,
         IProviderOAuthService oauthService,
         IApiTokenStore apiTokenStore,
+        WorkspaceTenantIds tenantIds,
         IConfiguration configuration,
         ILogger<UserProviderFactory> logger)
     {
@@ -41,6 +43,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
         _workspaceManager = workspaceManager;
         _oauthService = oauthService;
         _apiTokenStore = apiTokenStore;
+        _tenantIds = tenantIds;
         _logger = logger;
 
         var mcpBase = configuration["MCP_INTERNAL_URL"];
@@ -365,6 +368,16 @@ public sealed class UserProviderFactory : IUserProviderFactory
         UserProviderConfig config,
         CancellationToken cancellationToken)
     {
+        // Requires the internal tenant user/customer IDs (users.user_id / customers.customer_id)
+        // which satisfy the api_tokens FK constraint. These are set by the API layer via WorkspaceTenantIds.
+        var tenantUserId = _tenantIds.UserId;
+        var tenantCustomerId = _tenantIds.CustomerId;
+        if (string.IsNullOrWhiteSpace(tenantUserId) || string.IsNullOrWhiteSpace(tenantCustomerId))
+        {
+            _logger.LogDebug("Skipping MCP token mint — tenant IDs not available in this request context");
+            return;
+        }
+
         var settings = config.SettingsJson is not null
             ? JsonSerializer.Deserialize<UserProviderSettings>(config.SettingsJson) ?? new UserProviderSettings()
             : new UserProviderSettings();
@@ -382,8 +395,8 @@ public sealed class UserProviderFactory : IUserProviderFactory
             var generated = PersonalApiToken.Generate();
             await _apiTokenStore.CreateTokenAsync(
                 new ApiTokenCreateRequest(
-                    UserId: userId.ToString(),
-                    CustomerId: customerId.ToString(),
+                    UserId: tenantUserId,
+                    CustomerId: tenantCustomerId,
                     Name: "workspace-mcp-agent",
                     TokenHash: generated.TokenHash,
                     TokenPrefix: generated.TokenPrefix,

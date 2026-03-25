@@ -231,9 +231,10 @@ public static class ChatEndpoints
             ClaimsPrincipal user,
             ITenantCatalogStore catalogStore,
             IUserOrchestrationService orchestrationService,
+            OpenCortex.Orchestration.WorkspaceTenantIds tenantIds,
             CancellationToken cancellationToken) =>
         {
-            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken);
+            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken, tenantIds);
             if (resolved.ErrorResult is not null)
             {
                 return resolved.ErrorResult;
@@ -251,9 +252,10 @@ public static class ChatEndpoints
             ClaimsPrincipal user,
             ITenantCatalogStore catalogStore,
             IUserOrchestrationService orchestrationService,
+            OpenCortex.Orchestration.WorkspaceTenantIds tenantIds,
             CancellationToken cancellationToken) =>
         {
-            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken);
+            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken, tenantIds);
             if (resolved.ErrorResult is not null)
             {
                 return resolved.ErrorResult;
@@ -285,9 +287,10 @@ public static class ChatEndpoints
             ClaimsPrincipal user,
             ITenantCatalogStore catalogStore,
             IUserOrchestrationService orchestrationService,
+            OpenCortex.Orchestration.WorkspaceTenantIds tenantIds,
             CancellationToken cancellationToken) =>
         {
-            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken);
+            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken, tenantIds);
             if (resolved.ErrorResult is not null)
             {
                 return resolved.ErrorResult;
@@ -325,9 +328,10 @@ public static class ChatEndpoints
             ClaimsPrincipal user,
             ITenantCatalogStore catalogStore,
             IUserOrchestrationService orchestrationService,
+            OpenCortex.Orchestration.WorkspaceTenantIds tenantIds,
             CancellationToken cancellationToken) =>
         {
-            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken);
+            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken, tenantIds);
             if (resolved.ErrorResult is not null)
             {
                 return resolved.ErrorResult;
@@ -372,9 +376,10 @@ public static class ChatEndpoints
             IUserOrchestrationService orchestrationService,
             IConversationService conversationService,
             IConversationRepository conversationRepository,
+            OpenCortex.Orchestration.WorkspaceTenantIds tenantIds,
             CancellationToken cancellationToken) =>
         {
-            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken);
+            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken, tenantIds);
             if (resolved.ErrorResult is not null)
             {
                 return resolved.ErrorResult;
@@ -437,10 +442,11 @@ public static class ChatEndpoints
             IUserOrchestrationService orchestrationService,
             IConversationService conversationService,
             IConversationRepository conversationRepository,
+            OpenCortex.Orchestration.WorkspaceTenantIds tenantIds,
             HttpResponse response,
             CancellationToken cancellationToken) =>
         {
-            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken);
+            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken, tenantIds);
             if (resolved.ErrorResult is not null)
             {
                 return resolved.ErrorResult;
@@ -510,9 +516,10 @@ public static class ChatEndpoints
             IConversationService conversationService,
             IConversationRepository conversationRepository,
             OpenCortex.Core.Credentials.IUserCredentialService credentialService,
+            OpenCortex.Orchestration.WorkspaceTenantIds tenantIds,
             CancellationToken cancellationToken) =>
         {
-            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken);
+            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken, tenantIds);
             if (resolved.ErrorResult is not null)
             {
                 return resolved.ErrorResult;
@@ -590,10 +597,11 @@ public static class ChatEndpoints
             IConversationService conversationService,
             IConversationRepository conversationRepository,
             OpenCortex.Core.Credentials.IUserCredentialService credentialService,
+            OpenCortex.Orchestration.WorkspaceTenantIds tenantIds,
             HttpResponse response,
             CancellationToken cancellationToken) =>
         {
-            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken);
+            var resolved = await ResolveAuthenticatedChatContextAsync(user, catalogStore, cancellationToken, tenantIds);
             if (resolved.ErrorResult is not null)
             {
                 return resolved.ErrorResult;
@@ -669,7 +677,8 @@ public static class ChatEndpoints
     private static async Task<(Guid? CustomerGuid, Guid? UserGuid, OpenCortex.Core.Tenancy.TenantContext? TenantContext, IResult? ErrorResult)> ResolveAuthenticatedChatContextAsync(
         ClaimsPrincipal user,
         ITenantCatalogStore catalogStore,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        OpenCortex.Orchestration.WorkspaceTenantIds? tenantIds = null)
     {
         var (context, errorResult) = await HostedTenantContextResolver.ResolveAsync(user, catalogStore, cancellationToken);
         if (errorResult is not null)
@@ -683,6 +692,13 @@ public static class ChatEndpoints
                 title: "Invalid authenticated user profile",
                 detail: "Authenticated token is missing a stable user or customer identifier.",
                 statusCode: StatusCodes.Status401Unauthorized));
+        }
+
+        // Populate scoped holder so UserProviderFactory can create user-scoped API tokens
+        if (tenantIds is not null)
+        {
+            tenantIds.UserId = context.UserId;
+            tenantIds.CustomerId = context.CustomerId;
         }
 
         return (GuidFromString(context.CustomerId), GuidFromString(context.ExternalId), context, null);

@@ -33,6 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMemoryBrainResolver, MemoryBrainResolver>();
         services.AddScoped<IUserOrchestrationService, UserOrchestrationService>();
         services.AddScoped<IAgenticOrchestrationEngine, AgenticOrchestrationEngine>();
+        services.AddScoped<WorkspaceTenantIds>();
 
         return services;
     }
@@ -53,6 +54,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMemoryBrainResolver, MemoryBrainResolver>();
         services.AddScoped<IUserOrchestrationService, UserOrchestrationService>();
         services.AddScoped<IAgenticOrchestrationEngine, AgenticOrchestrationEngine>();
+        services.AddScoped<WorkspaceTenantIds>();
 
         return services;
     }
