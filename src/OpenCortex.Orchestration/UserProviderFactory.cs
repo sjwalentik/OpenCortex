@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -72,6 +73,13 @@ public sealed class UserProviderFactory : IUserProviderFactory
             }
         }
 
+        // Refresh session_json OAuth credentials if they are near expiry
+        if (string.Equals(normalizedProviderId, "claude-cli", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(config.AuthType, "session_json", StringComparison.OrdinalIgnoreCase))
+        {
+            await RefreshClaudeCliSessionJsonIfNeededAsync(config, cancellationToken);
+        }
+
         // Ensure a valid workspace MCP token exists for claude-cli providers
         if (string.Equals(normalizedProviderId, "claude-cli", StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(_workspaceMcpServerUrl))
@@ -103,6 +111,13 @@ public sealed class UserProviderFactory : IUserProviderFactory
                 {
                     continue;
                 }
+            }
+
+            // Refresh session_json OAuth credentials if they are near expiry
+            if (string.Equals(currentConfig.ProviderId, "claude-cli", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(currentConfig.AuthType, "session_json", StringComparison.OrdinalIgnoreCase))
+            {
+                await RefreshClaudeCliSessionJsonIfNeededAsync(currentConfig, cancellationToken);
             }
 
             // Ensure a valid workspace MCP token exists for claude-cli providers
@@ -448,4 +463,113 @@ public sealed class UserProviderFactory : IUserProviderFactory
         string.Equals(providerId, "ollama-remote", StringComparison.OrdinalIgnoreCase)
             ? "ollama"
             : providerId;
+
+    // Claude Code's public PKCE OAuth client identifier (no secret required for refresh).
+    private const string ClaudeCodeOAuthClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+    private const string AnthropicTokenEndpoint = "https://api.anthropic.com/oauth/token";
+
+    private async Task RefreshClaudeCliSessionJsonIfNeededAsync(UserProviderConfig config, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(config.EncryptedAccessToken))
+            return;
+
+        string credentialsJson;
+        try
+        {
+            credentialsJson = _encryption.Decrypt(config.EncryptedAccessToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to decrypt claude-cli session_json for expiry check");
+            return;
+        }
+
+        ClaudeCredentialsJson? creds;
+        try
+        {
+            creds = JsonSerializer.Deserialize<ClaudeCredentialsJson>(credentialsJson);
+        }
+        catch (JsonException)
+        {
+            return; // Not OAuth JSON format — nothing to refresh
+        }
+
+        var oauth = creds?.ClaudeAiOauth;
+        if (oauth is null)
+            return;
+
+        // Only refresh if within 5 minutes of expiry (or already expired)
+        if (oauth.ExpiresAt.HasValue && oauth.ExpiresAt.Value > DateTimeOffset.UtcNow.AddMinutes(5))
+            return;
+
+        if (string.IsNullOrWhiteSpace(oauth.RefreshToken))
+        {
+            _logger.LogWarning("Claude CLI session OAuth token is expired but no refresh token is available for user {UserId}", config.UserId);
+            return;
+        }
+
+        _logger.LogDebug("Claude CLI session OAuth token near/past expiry ({ExpiresAt}), refreshing for user {UserId}", oauth.ExpiresAt, config.UserId);
+
+        try
+        {
+            var httpClient = _httpClientFactory.CreateClient("Anthropic");
+            var formContent = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = oauth.RefreshToken,
+                ["client_id"] = ClaudeCodeOAuthClientId
+            });
+
+            var response = await httpClient.PostAsync(AnthropicTokenEndpoint, formContent, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Claude CLI credential refresh failed ({StatusCode}) for user {UserId}", response.StatusCode, config.UserId);
+                return;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("access_token", out var accessTokenEl) || string.IsNullOrEmpty(accessTokenEl.GetString()))
+            {
+                _logger.LogWarning("Claude CLI credential refresh returned no access_token for user {UserId}", config.UserId);
+                return;
+            }
+
+            oauth.AccessToken = accessTokenEl.GetString();
+            if (root.TryGetProperty("refresh_token", out var refreshTokenEl) && !string.IsNullOrEmpty(refreshTokenEl.GetString()))
+                oauth.RefreshToken = refreshTokenEl.GetString();
+            if (root.TryGetProperty("expires_in", out var expiresInEl) && expiresInEl.TryGetInt32(out var expiresIn))
+                oauth.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn);
+
+            config.EncryptedAccessToken = _encryption.Encrypt(JsonSerializer.Serialize(creds));
+            await _configRepository.UpsertAsync(config, cancellationToken);
+
+            _logger.LogDebug("Refreshed Claude CLI session OAuth token for user {UserId}, new expiry {ExpiresAt}", config.UserId, oauth.ExpiresAt);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Exception while refreshing Claude CLI session OAuth credentials for user {UserId}", config.UserId);
+        }
+    }
+
+    private sealed class ClaudeCredentialsJson
+    {
+        [JsonPropertyName("claudeAiOauth")]
+        public ClaudeAiOAuthToken? ClaudeAiOauth { get; set; }
+    }
+
+    private sealed class ClaudeAiOAuthToken
+    {
+        [JsonPropertyName("accessToken")]
+        public string? AccessToken { get; set; }
+
+        [JsonPropertyName("refreshToken")]
+        public string? RefreshToken { get; set; }
+
+        [JsonPropertyName("expiresAt")]
+        public DateTimeOffset? ExpiresAt { get; set; }
+    }
 }

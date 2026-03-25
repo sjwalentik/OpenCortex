@@ -6,7 +6,7 @@ data:
   HOSTED_AUTH_ENABLED: "true"
   STRIPE_ENABLED: "false"
   API_INTERNAL_URL: "http://opencortex-api:8080"
-  MCP_INTERNAL_URL: "http://opencortex-mcp:8080"
+  MCP_INTERNAL_URL: "http://opencortex-mcp.opencortex-develop.svc.cluster.local:8080"
   EMBEDDINGS_PROVIDER: "ollama"
   EMBEDDINGS_MODEL: "nomic-embed-text"
   EMBEDDINGS_DIMENSIONS: "768"
