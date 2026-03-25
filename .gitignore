@@ -51,3 +51,4 @@ nul
 .codex-verify/
 
 scripts/
+src/OpenCortex.Api/workspaces/

@@ -418,7 +418,7 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
             {
                 ["OpenCortex"] = new
                 {
-                    type = "sse",
+                    type = "http",
                     url = mcpServerUrl,
                     headers = new Dictionary<string, string>
                     {

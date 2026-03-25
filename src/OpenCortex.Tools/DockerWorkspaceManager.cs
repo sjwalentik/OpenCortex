@@ -374,7 +374,7 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             {
                 ["OpenCortex"] = new
                 {
-                    type = "sse",
+                    type = "http",
                     url = mcpServerUrl,
                     headers = new Dictionary<string, string>
                     {

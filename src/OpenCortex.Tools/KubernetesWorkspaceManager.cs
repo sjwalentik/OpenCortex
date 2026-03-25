@@ -347,7 +347,7 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
             {
                 ["OpenCortex"] = new
                 {
-                    type = "sse",
+                    type = "http",
                     url = mcpServerUrl,
                     headers = new Dictionary<string, string>
                     {
