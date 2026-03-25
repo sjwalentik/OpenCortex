@@ -385,17 +385,109 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
             {
                 using var doc = JsonDocument.Parse(line);
                 var root = doc.RootElement;
+
+                if (TryExtractRateLimitMessage(root, out var rateLimitMessage))
+                {
+                    return rateLimitMessage;
+                }
+
                 if (root.TryGetProperty("type", out var t) && string.Equals(t.GetString(), "result", StringComparison.Ordinal)
                     && root.TryGetProperty("subtype", out var st) && string.Equals(st.GetString(), "error", StringComparison.Ordinal)
                     && root.TryGetProperty("error", out var err))
                 {
                     return err.GetString();
                 }
+
+                if (root.TryGetProperty("type", out t)
+                    && string.Equals(t.GetString(), "result", StringComparison.Ordinal)
+                    && root.TryGetProperty("is_error", out var isErrorElement)
+                    && isErrorElement.ValueKind is JsonValueKind.True
+                    && root.TryGetProperty("result", out var resultTextElement))
+                {
+                    var resultText = resultTextElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(resultText))
+                    {
+                        return resultText;
+                    }
+                }
             }
             catch (JsonException) { }
         }
 
         return null;
+    }
+
+    private static bool TryExtractRateLimitMessage(JsonElement root, out string? message)
+    {
+        message = null;
+
+        if (!root.TryGetProperty("type", out var typeElement))
+        {
+            return false;
+        }
+
+        var eventType = typeElement.GetString();
+        if (!string.Equals(eventType, "rate_limit_event", StringComparison.Ordinal)
+            && !string.Equals(eventType, "assistant", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.Equals(eventType, "rate_limit_event", StringComparison.Ordinal)
+            && root.TryGetProperty("rate_limit_info", out var rateLimitInfo))
+        {
+            var resetsAt = rateLimitInfo.TryGetProperty("resetsAt", out var resetsAtElement)
+                && resetsAtElement.ValueKind == JsonValueKind.Number
+                && resetsAtElement.TryGetInt64(out var resetUnixSeconds)
+                ? DateTimeOffset.FromUnixTimeSeconds(resetUnixSeconds).ToUniversalTime()
+                : (DateTimeOffset?)null;
+
+            var limitType = rateLimitInfo.TryGetProperty("rateLimitType", out var limitTypeElement)
+                ? limitTypeElement.GetString()
+                : null;
+
+            if (resetsAt.HasValue)
+            {
+                var limitLabel = string.IsNullOrWhiteSpace(limitType)
+                    ? "Claude CLI usage limit reached"
+                    : $"Claude CLI {limitType.Replace('_', ' ')} limit reached";
+                message = $"{limitLabel}. Resets at {resetsAt.Value:htt} UTC.";
+                return true;
+            }
+
+            message = "Claude CLI usage limit reached. Please wait for your quota window to reset.";
+            return true;
+        }
+
+        if (string.Equals(eventType, "assistant", StringComparison.Ordinal)
+            && root.TryGetProperty("error", out var assistantErrorElement)
+            && string.Equals(assistantErrorElement.GetString(), "rate_limit", StringComparison.Ordinal))
+        {
+            if (root.TryGetProperty("message", out var messageElement)
+                && messageElement.TryGetProperty("content", out var contentArray)
+                && contentArray.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var contentItem in contentArray.EnumerateArray())
+                {
+                    if (contentItem.TryGetProperty("type", out var contentType)
+                        && string.Equals(contentType.GetString(), "text", StringComparison.Ordinal)
+                        && contentItem.TryGetProperty("text", out var textElement))
+                    {
+                        var text = textElement.GetString();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            message = $"Claude CLI rate limit reached. {text}";
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            message = "Claude CLI rate limit reached. Please wait for your quota window to reset.";
+            return true;
+        }
+
+        return false;
     }
 
     private static int GetInt32(JsonElement element, string propertyName)
