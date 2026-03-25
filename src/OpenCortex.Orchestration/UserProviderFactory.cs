@@ -102,6 +102,13 @@ public sealed class UserProviderFactory : IUserProviderFactory
                 }
             }
 
+            // Ensure a valid workspace MCP token exists for claude-cli providers
+            if (string.Equals(currentConfig.ProviderId, "claude-cli", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(_workspaceMcpServerUrl))
+            {
+                await EnsureClaudeMcpTokenAsync(customerId, userId, currentConfig, cancellationToken);
+            }
+
             var provider = CreateProvider(currentConfig, githubToken);
             if (provider is not null)
             {
