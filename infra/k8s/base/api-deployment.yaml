@@ -93,6 +93,12 @@ spec:
                   name: opencortex-firebase
                   key: admin-email-patterns
                   optional: true
+            # MCP server URL (used to inject MCP config into workspace agents)
+            - name: MCP_INTERNAL_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: opencortex-config
+                  key: MCP_INTERNAL_URL
             # Stripe
             - name: OpenCortex__Billing__Stripe__Enabled
               valueFrom:
