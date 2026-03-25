@@ -680,6 +680,7 @@ export function ChatView({
       : '/portal-api/api/chat/completions/stream';
 
     try {
+      let streamErrorMessage: string | null = null;
       abortControllerRef.current = new AbortController();
 
       const response = await fetchWithAuth(endpoint, {
@@ -839,7 +840,10 @@ export function ChatView({
               setStreamActivities((prev) => applyStreamActivity(prev, chunk));
               if (chunk.eventType === 'error') {
                 const errorText = chunk.message || chunk.error;
-                if (errorText) setError(errorText);
+                if (errorText) {
+                  streamErrorMessage = errorText;
+                  setError(errorText);
+                }
               }
             }
 
@@ -866,6 +870,9 @@ export function ChatView({
       await loadConversations();
       if (activeConversationIdRef.current === conversationId) {
         await loadConversation(conversationId);
+        if (streamErrorMessage) {
+          addLocalSystemMessage(`Provider error: ${streamErrorMessage}`);
+        }
       }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
