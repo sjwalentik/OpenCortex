@@ -94,9 +94,11 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         if (!commandResult.Success)
         {
             _logger.LogWarning(
-                "Claude CLI exec failed for user {UserId}. ExitCode={ExitCode}",
+                "Claude CLI exec failed for user {UserId}. ExitCode={ExitCode} Stderr={Stderr} Stdout={Stdout}",
                 _userId,
-                commandResult.ExitCode);
+                commandResult.ExitCode,
+                commandResult.StandardError,
+                commandResult.StandardOutput);
             throw new InvalidOperationException(GetFailureMessage(commandResult));
         }
 
@@ -333,11 +335,45 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
 
     private static string GetFailureMessage(CommandResult result)
     {
+        // Try to extract a meaningful error from stream-json stdout first
+        var streamError = TryExtractStreamJsonError(result.StandardOutput);
+        if (!string.IsNullOrWhiteSpace(streamError))
+            return streamError;
+
+        // stderr may include both claude's output and the kubectl "command terminated" wrapper message
+        // Include stdout too in case claude wrote error details there
+        var parts = new List<string>(2);
         if (!string.IsNullOrWhiteSpace(result.StandardError))
-            return result.StandardError.Trim();
+            parts.Add(result.StandardError.Trim());
         if (!string.IsNullOrWhiteSpace(result.StandardOutput))
-            return result.StandardOutput.Trim();
-        return "Claude CLI execution failed.";
+            parts.Add(result.StandardOutput.Trim());
+
+        return parts.Count > 0 ? string.Join(" | ", parts) : "Claude CLI execution failed.";
+    }
+
+    private static string? TryExtractStreamJsonError(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return null;
+
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!line.StartsWith('{')) continue;
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("type", out var t) && string.Equals(t.GetString(), "result", StringComparison.Ordinal)
+                    && root.TryGetProperty("subtype", out var st) && string.Equals(st.GetString(), "error", StringComparison.Ordinal)
+                    && root.TryGetProperty("error", out var err))
+                {
+                    return err.GetString();
+                }
+            }
+            catch (JsonException) { }
+        }
+
+        return null;
     }
 
     private static int GetInt32(JsonElement element, string propertyName)
