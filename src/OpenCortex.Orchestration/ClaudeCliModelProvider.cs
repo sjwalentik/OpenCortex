@@ -82,9 +82,9 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
 
         await _workspaceManager.EnsureRunningAsync(_userId, credentialsForSync, cancellationToken);
 
-        var claudeHomePath = _credentialsJson is not null
-            ? await GetClaudeHomePathAsync(cancellationToken)
-            : null;
+        // Always set HOME to the isolated directory so claude reads our settings.json
+        // regardless of whether session_json or api_key auth is used.
+        var claudeHomePath = await GetClaudeHomePathAsync(cancellationToken);
 
         var command = ResolveCommand();
         var commandResult = await _workspaceManager.ExecuteCommandAsync(
@@ -148,9 +148,7 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         {
             await _workspaceManager.EnsureRunningAsync(_userId, BuildCredentialsForSync(), cancellationToken);
 
-            var claudeHomePath = _credentialsJson is not null
-                ? await GetClaudeHomePathAsync(cancellationToken)
-                : null;
+            var claudeHomePath = await GetClaudeHomePathAsync(cancellationToken);
 
             var command = ResolveCommand();
             var result = await _workspaceManager.ExecuteCommandAsync(
@@ -224,7 +222,8 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
             environment["ANTHROPIC_API_KEY"] = _apiKey;
         }
 
-        // Subscription auth: point HOME at the isolated home dir so claude reads ~/.claude/.credentials.json
+        // Always point HOME at the isolated dir so claude reads ~/.claude/settings.json and
+        // (for session_json auth) ~/.claude/.credentials.json from the isolated home.
         if (!string.IsNullOrWhiteSpace(claudeHomePath))
         {
             environment["HOME"] = claudeHomePath;
