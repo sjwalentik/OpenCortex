@@ -228,6 +228,7 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         {
             "--output-format",
             "stream-json",
+            "--verbose",
             "--model",
             model
         };
