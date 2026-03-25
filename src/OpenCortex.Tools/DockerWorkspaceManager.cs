@@ -336,21 +336,16 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
 
         await RunDockerExecAsync(containerName, syncScript, null, cancellationToken);
 
-        // Write ~/.claude/settings.json with MCP server configuration when a token is available
+        // Merge mcpServers into ~/.claude.json (Claude Code 2.x user config)
         var mcpToken = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeMcpTokenKey);
         var mcpServerUrl = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeMcpServerUrlKey);
         if (!string.IsNullOrWhiteSpace(mcpToken) && !string.IsNullOrWhiteSpace(mcpServerUrl))
         {
-            var settingsFilePath = WorkspaceRuntimePaths.GetClaudeGlobalSettingsPath(
+            var dotJsonPath = WorkspaceRuntimePaths.GetClaudeDotJsonPath(
                 supportsContainerIsolation: true,
                 WorkspacePathInContainer);
-            var settingsDirectory = Path.GetDirectoryName(settingsFilePath)?.Replace('\\', '/');
-            if (!string.IsNullOrWhiteSpace(settingsDirectory))
-            {
-                var settingsJson = BuildClaudeMcpSettingsJson(mcpServerUrl, mcpToken);
-                var mcpScript = BuildClaudeCredWriteScript(settingsDirectory, settingsFilePath, settingsJson);
-                await RunDockerExecAsync(containerName, mcpScript, null, cancellationToken);
-            }
+            var mergeScript = BuildClaudeDotJsonMergeScript(dotJsonPath, mcpServerUrl, mcpToken);
+            await RunDockerExecAsync(containerName, mergeScript, null, cancellationToken);
         }
     }
 
@@ -366,28 +361,37 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             $"&& chmod 600 {ShellEscaping.SingleQuote(credentialsFilePath)}";
     }
 
-    private static string BuildClaudeMcpSettingsJson(string mcpServerUrl, string mcpToken)
+    private static string BuildClaudeDotJsonMergeScript(string dotJsonPath, string mcpServerUrl, string mcpToken)
     {
-        return System.Text.Json.JsonSerializer.Serialize(new
+        var mcpServersJson = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
         {
-            mcpServers = new Dictionary<string, object>
+            ["OpenCortex"] = new
             {
-                ["OpenCortex"] = new
+                type = "http",
+                url = mcpServerUrl,
+                headers = new Dictionary<string, string>
                 {
-                    type = "http",
-                    url = mcpServerUrl,
-                    headers = new Dictionary<string, string>
-                    {
-                        ["Authorization"] = $"Bearer {mcpToken}"
-                    }
+                    ["Authorization"] = $"Bearer {mcpToken}"
                 }
-            },
-            permissions = new
-            {
-                allow = new[] { "mcp__OpenCortex__*" }
             }
         });
+        var mcpServersB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(mcpServersJson));
+
+        var pythonScript =
+            $"import json,os,base64;" +
+            $"p={PythonStr(dotJsonPath)};" +
+            $"d={{}};" +
+            $"d.update(json.load(open(p))) if os.path.exists(p) else None;" +
+            $"d['mcpServers']=json.loads(base64.b64decode(b'{mcpServersB64}').decode());" +
+            $"open(p,'w').write(json.dumps(d,indent=2));" +
+            $"os.chmod(p,0o600)";
+
+        var scriptB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(pythonScript));
+        return $"python3 -c \"exec(__import__('base64').b64decode('{scriptB64}').decode())\"";
     }
+
+    private static string PythonStr(string value) => $"'{value.Replace("'", "\\'")}'";
+
 
     private async Task SyncCodexAuthStateAsync(
         Guid userId,

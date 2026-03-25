@@ -393,44 +393,48 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
             }
         }
 
-        // Write ~/.claude/settings.json with MCP server configuration when a token is available
+        // Merge mcpServers into ~/.claude.json (Claude Code 2.x user config)
         var mcpToken = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeMcpTokenKey);
         var mcpServerUrl = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeMcpServerUrlKey);
         if (!string.IsNullOrWhiteSpace(mcpToken) && !string.IsNullOrWhiteSpace(mcpServerUrl))
         {
-            var settingsFilePath = WorkspaceRuntimePaths.GetClaudeGlobalSettingsPath(
+            var dotJsonPath = WorkspaceRuntimePaths.GetClaudeDotJsonPath(
                 supportsContainerIsolation: false,
                 workspacePath);
-            var settingsDirectory = Path.GetDirectoryName(settingsFilePath);
-            if (!string.IsNullOrWhiteSpace(settingsDirectory))
+            var dotJsonDir = Path.GetDirectoryName(dotJsonPath);
+            if (!string.IsNullOrWhiteSpace(dotJsonDir))
             {
-                Directory.CreateDirectory(settingsDirectory);
-                File.WriteAllText(settingsFilePath, BuildClaudeMcpSettingsJson(mcpServerUrl, mcpToken));
+                Directory.CreateDirectory(dotJsonDir);
             }
-        }
-    }
 
-    private static string BuildClaudeMcpSettingsJson(string mcpServerUrl, string mcpToken)
-    {
-        return System.Text.Json.JsonSerializer.Serialize(new
-        {
-            mcpServers = new Dictionary<string, object>
+            // Read existing .claude.json (or start fresh), merge mcpServers key, write back
+            var existing = new System.Text.Json.Nodes.JsonObject();
+            if (File.Exists(dotJsonPath))
             {
-                ["OpenCortex"] = new
+                try
                 {
-                    type = "http",
-                    url = mcpServerUrl,
-                    headers = new Dictionary<string, string>
-                    {
-                        ["Authorization"] = $"Bearer {mcpToken}"
-                    }
+                    var raw = File.ReadAllText(dotJsonPath);
+                    existing = System.Text.Json.Nodes.JsonNode.Parse(raw)?.AsObject() ?? new System.Text.Json.Nodes.JsonObject();
                 }
-            },
-            permissions = new
-            {
-                allow = new[] { "mcp__OpenCortex__*" }
+                catch { /* ignore parse errors, start fresh */ }
             }
-        });
+
+            existing["mcpServers"] = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, object>
+                {
+                    ["OpenCortex"] = new
+                    {
+                        type = "http",
+                        url = mcpServerUrl,
+                        headers = new Dictionary<string, string>
+                        {
+                            ["Authorization"] = $"Bearer {mcpToken}"
+                        }
+                    }
+                }));
+
+            File.WriteAllText(dotJsonPath, existing.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
     }
 
     private static void TryDeleteEmptyDirectory(string path)

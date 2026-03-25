@@ -56,6 +56,14 @@ public static class WorkspaceRuntimePaths
             ? "/home/ubuntu/.opencortex-claude-home/.claude/settings.json"
             : Path.Combine(workspacePath, ".claude-home", ".claude", "settings.json");
 
+    /// <summary>
+    /// Path to ~/.claude.json — the Claude Code 2.x user-level config file where mcpServers is stored.
+    /// </summary>
+    public static string GetClaudeDotJsonPath(bool supportsContainerIsolation, string workspacePath)
+        => supportsContainerIsolation
+            ? "/home/ubuntu/.opencortex-claude-home/.claude.json"
+            : Path.Combine(workspacePath, ".claude-home", ".claude.json");
+
     /// <summary>Key used in the credentials dictionary to pass the MCP token to workspace managers.</summary>
     public const string ClaudeMcpTokenKey = "claude-mcp-token";
 
