@@ -383,17 +383,54 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
                     TryDeleteEmptyDirectory(claudeRoot);
                 }
             }
-
-            return;
         }
-
-        if (string.IsNullOrWhiteSpace(credentialsDirectory))
+        else
         {
-            return;
+            if (!string.IsNullOrWhiteSpace(credentialsDirectory))
+            {
+                Directory.CreateDirectory(credentialsDirectory);
+                File.WriteAllText(credentialsFilePath, credentialsJson);
+            }
         }
 
-        Directory.CreateDirectory(credentialsDirectory);
-        File.WriteAllText(credentialsFilePath, credentialsJson);
+        // Write ~/.claude/settings.json with MCP server configuration when a token is available
+        var mcpToken = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeMcpTokenKey);
+        var mcpServerUrl = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeMcpServerUrlKey);
+        if (!string.IsNullOrWhiteSpace(mcpToken) && !string.IsNullOrWhiteSpace(mcpServerUrl))
+        {
+            var settingsFilePath = WorkspaceRuntimePaths.GetClaudeGlobalSettingsPath(
+                supportsContainerIsolation: false,
+                workspacePath);
+            var settingsDirectory = Path.GetDirectoryName(settingsFilePath);
+            if (!string.IsNullOrWhiteSpace(settingsDirectory))
+            {
+                Directory.CreateDirectory(settingsDirectory);
+                File.WriteAllText(settingsFilePath, BuildClaudeMcpSettingsJson(mcpServerUrl, mcpToken));
+            }
+        }
+    }
+
+    private static string BuildClaudeMcpSettingsJson(string mcpServerUrl, string mcpToken)
+    {
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            mcpServers = new Dictionary<string, object>
+            {
+                ["OpenCortex"] = new
+                {
+                    type = "sse",
+                    url = mcpServerUrl,
+                    headers = new Dictionary<string, string>
+                    {
+                        ["Authorization"] = $"Bearer {mcpToken}"
+                    }
+                }
+            },
+            permissions = new
+            {
+                allow = new[] { "mcp__OpenCortex__*" }
+            }
+        });
     }
 
     private static void TryDeleteEmptyDirectory(string path)

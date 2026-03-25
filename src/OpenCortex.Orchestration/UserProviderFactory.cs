@@ -1,8 +1,11 @@
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenCortex.Core;
 using OpenCortex.Core.OAuth;
+using OpenCortex.Core.Persistence;
+using OpenCortex.Core.Security;
 using OpenCortex.Providers.Abstractions;
 
 namespace OpenCortex.Orchestration;
@@ -18,6 +21,8 @@ public sealed class UserProviderFactory : IUserProviderFactory
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly Tools.IWorkspaceManager _workspaceManager;
     private readonly IProviderOAuthService _oauthService;
+    private readonly IApiTokenStore _apiTokenStore;
+    private readonly string _workspaceMcpServerUrl;
     private readonly ILogger<UserProviderFactory> _logger;
 
     public UserProviderFactory(
@@ -26,6 +31,8 @@ public sealed class UserProviderFactory : IUserProviderFactory
         IHttpClientFactory httpClientFactory,
         Tools.IWorkspaceManager workspaceManager,
         IProviderOAuthService oauthService,
+        IApiTokenStore apiTokenStore,
+        IConfiguration configuration,
         ILogger<UserProviderFactory> logger)
     {
         _configRepository = configRepository;
@@ -33,7 +40,13 @@ public sealed class UserProviderFactory : IUserProviderFactory
         _httpClientFactory = httpClientFactory;
         _workspaceManager = workspaceManager;
         _oauthService = oauthService;
+        _apiTokenStore = apiTokenStore;
         _logger = logger;
+
+        var mcpBase = configuration["MCP_INTERNAL_URL"];
+        _workspaceMcpServerUrl = string.IsNullOrWhiteSpace(mcpBase)
+            ? string.Empty
+            : mcpBase.TrimEnd('/') + "/mcp";
     }
 
     public async Task<IModelProvider?> GetProviderForUserAsync(Guid customerId, Guid userId, string providerId, CancellationToken cancellationToken = default)
@@ -54,6 +67,13 @@ public sealed class UserProviderFactory : IUserProviderFactory
             {
                 return null;
             }
+        }
+
+        // Ensure a valid workspace MCP token exists for claude-cli providers
+        if (string.Equals(normalizedProviderId, "claude-cli", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(_workspaceMcpServerUrl))
+        {
+            await EnsureClaudeMcpTokenAsync(customerId, userId, config, cancellationToken);
         }
 
         var githubToken = await GetGitHubCredentialAsync(customerId, userId, cancellationToken);
@@ -302,6 +322,8 @@ public sealed class UserProviderFactory : IUserProviderFactory
             apiKey,
             credentialsJson,
             githubToken,
+            mcpToken: settings?.McpToken,
+            mcpServerUrl: _workspaceMcpServerUrl,
             _workspaceManager,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeCliModelProvider>.Instance);
     }
@@ -328,6 +350,51 @@ public sealed class UserProviderFactory : IUserProviderFactory
             githubToken,
             _workspaceManager,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CodexCliModelProvider>.Instance);
+    }
+
+    private async Task EnsureClaudeMcpTokenAsync(
+        Guid customerId,
+        Guid userId,
+        UserProviderConfig config,
+        CancellationToken cancellationToken)
+    {
+        var settings = config.SettingsJson is not null
+            ? JsonSerializer.Deserialize<UserProviderSettings>(config.SettingsJson) ?? new UserProviderSettings()
+            : new UserProviderSettings();
+
+        // Reuse existing token if it won't expire within 24 hours
+        if (!string.IsNullOrWhiteSpace(settings.McpToken)
+            && settings.McpTokenExpiry.HasValue
+            && settings.McpTokenExpiry.Value > DateTimeOffset.UtcNow.AddHours(24))
+        {
+            return;
+        }
+
+        try
+        {
+            var generated = PersonalApiToken.Generate();
+            await _apiTokenStore.CreateTokenAsync(
+                new ApiTokenCreateRequest(
+                    UserId: userId.ToString(),
+                    CustomerId: customerId.ToString(),
+                    Name: "workspace-mcp-agent",
+                    TokenHash: generated.TokenHash,
+                    TokenPrefix: generated.TokenPrefix,
+                    Scopes: ["mcp:read"],
+                    ExpiresAt: DateTimeOffset.UtcNow.AddDays(30)),
+                cancellationToken);
+
+            settings.McpToken = generated.RawToken;
+            settings.McpTokenExpiry = DateTimeOffset.UtcNow.AddDays(30);
+            config.SettingsJson = JsonSerializer.Serialize(settings);
+            await _configRepository.UpsertAsync(config, cancellationToken);
+
+            _logger.LogDebug("Minted workspace MCP token for user {UserId}", userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to mint workspace MCP token for user {UserId}", userId);
+        }
     }
 
     private string? TryDecryptCredential(UserProviderConfig? config)

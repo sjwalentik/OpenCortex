@@ -335,6 +335,23 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             : BuildClaudeCredWriteScript(credentialsDirectory, credentialsFilePath, credentialsJson);
 
         await RunDockerExecAsync(containerName, syncScript, null, cancellationToken);
+
+        // Write ~/.claude/settings.json with MCP server configuration when a token is available
+        var mcpToken = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeMcpTokenKey);
+        var mcpServerUrl = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.ClaudeMcpServerUrlKey);
+        if (!string.IsNullOrWhiteSpace(mcpToken) && !string.IsNullOrWhiteSpace(mcpServerUrl))
+        {
+            var settingsFilePath = WorkspaceRuntimePaths.GetClaudeGlobalSettingsPath(
+                supportsContainerIsolation: true,
+                WorkspacePathInContainer);
+            var settingsDirectory = Path.GetDirectoryName(settingsFilePath)?.Replace('\\', '/');
+            if (!string.IsNullOrWhiteSpace(settingsDirectory))
+            {
+                var settingsJson = BuildClaudeMcpSettingsJson(mcpServerUrl, mcpToken);
+                var mcpScript = BuildClaudeCredWriteScript(settingsDirectory, settingsFilePath, settingsJson);
+                await RunDockerExecAsync(containerName, mcpScript, null, cancellationToken);
+            }
+        }
     }
 
     private static string BuildClaudeCredWriteScript(
@@ -347,6 +364,29 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             $"mkdir -p {ShellEscaping.SingleQuote(credentialsDirectory)} " +
             $"&& printf %s {ShellEscaping.SingleQuote(encoded)} | base64 -d > {ShellEscaping.SingleQuote(credentialsFilePath)} " +
             $"&& chmod 600 {ShellEscaping.SingleQuote(credentialsFilePath)}";
+    }
+
+    private static string BuildClaudeMcpSettingsJson(string mcpServerUrl, string mcpToken)
+    {
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            mcpServers = new Dictionary<string, object>
+            {
+                ["OpenCortex"] = new
+                {
+                    type = "sse",
+                    url = mcpServerUrl,
+                    headers = new Dictionary<string, string>
+                    {
+                        ["Authorization"] = $"Bearer {mcpToken}"
+                    }
+                }
+            },
+            permissions = new
+            {
+                allow = new[] { "mcp__OpenCortex__*" }
+            }
+        });
     }
 
     private async Task SyncCodexAuthStateAsync(

@@ -802,6 +802,9 @@ builder.Services.AddSingleton<IUserWorkspaceRuntimeProfileStore>(sp =>
 builder.Services.Configure<ProviderOAuthConfig>(builder.Configuration.GetSection(ProviderOAuthConfig.SectionName));
 builder.Services.AddHttpClient<IProviderOAuthService, ProviderOAuthService>();
 
+// Register API token store for DI access (used by UserProviderFactory to mint workspace MCP tokens)
+builder.Services.AddSingleton<OpenCortex.Core.Persistence.IApiTokenStore>(apiTokenStore);
+
 // Register user provider factory (creates providers with user credentials)
 builder.Services.AddScoped<IUserProviderFactory, UserProviderFactory>();
 

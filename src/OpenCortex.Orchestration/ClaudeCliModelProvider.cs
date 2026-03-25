@@ -25,17 +25,23 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
     private readonly string? _apiKey;            // set when using api_key auth
     private readonly string? _credentialsJson;   // set when using session_json (subscription) auth
     private readonly string? _githubToken;
+    private readonly string? _mcpToken;
+    private readonly string? _mcpServerUrl;
     private readonly IWorkspaceManager _workspaceManager;
     private readonly ILogger _logger;
 
     /// <param name="apiKey">Anthropic API key — mutually exclusive with credentialsJson.</param>
     /// <param name="credentialsJson">Claude.ai OAuth credentials JSON — mutually exclusive with apiKey.</param>
+    /// <param name="mcpToken">Session-scoped personal API token granting mcp:read access to the OpenCortex MCP server.</param>
+    /// <param name="mcpServerUrl">Internal URL of the OpenCortex MCP server (e.g. http://opencortex-mcp:8080/mcp).</param>
     public ClaudeCliModelProvider(
         Guid userId,
         string defaultModel,
         string? apiKey,
         string? credentialsJson,
         string? githubToken,
+        string? mcpToken,
+        string? mcpServerUrl,
         IWorkspaceManager workspaceManager,
         ILogger logger)
     {
@@ -44,6 +50,8 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         _apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
         _credentialsJson = string.IsNullOrWhiteSpace(credentialsJson) ? null : credentialsJson.Trim();
         _githubToken = string.IsNullOrWhiteSpace(githubToken) ? null : githubToken.Trim();
+        _mcpToken = string.IsNullOrWhiteSpace(mcpToken) ? null : mcpToken.Trim();
+        _mcpServerUrl = string.IsNullOrWhiteSpace(mcpServerUrl) ? null : mcpServerUrl.Trim();
         _workspaceManager = workspaceManager;
         _logger = logger;
     }
@@ -70,10 +78,7 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         var model = string.IsNullOrWhiteSpace(request.Model) ? _defaultModel : request.Model;
         var prompt = BuildPrompt(request);
 
-        var credentialsForSync = _credentialsJson is not null
-            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                { [WorkspaceRuntimePaths.ClaudeCliProviderId] = _credentialsJson }
-            : null;
+        var credentialsForSync = BuildCredentialsForSync();
 
         await _workspaceManager.EnsureRunningAsync(_userId, credentialsForSync, cancellationToken);
 
@@ -141,11 +146,7 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var credentialsForSync = _credentialsJson is not null
-                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    { [WorkspaceRuntimePaths.ClaudeCliProviderId] = _credentialsJson }
-                : null;
-            await _workspaceManager.EnsureRunningAsync(_userId, credentialsForSync, cancellationToken);
+            await _workspaceManager.EnsureRunningAsync(_userId, BuildCredentialsForSync(), cancellationToken);
 
             var claudeHomePath = _credentialsJson is not null
                 ? await GetClaudeHomePathAsync(cancellationToken)
@@ -186,6 +187,28 @@ internal sealed class ClaudeCliModelProvider : IModelProvider
         var workspacePath = await _workspaceManager.GetWorkspacePathAsync(_userId, cancellationToken);
         return WorkspaceRuntimePaths.GetClaudeHomePath(
             _workspaceManager.SupportsContainerIsolation, workspacePath).Replace('\\', '/');
+    }
+
+    private Dictionary<string, string>? BuildCredentialsForSync()
+    {
+        var creds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (_credentialsJson is not null)
+        {
+            creds[WorkspaceRuntimePaths.ClaudeCliProviderId] = _credentialsJson;
+        }
+
+        if (_mcpToken is not null)
+        {
+            creds[WorkspaceRuntimePaths.ClaudeMcpTokenKey] = _mcpToken;
+        }
+
+        if (_mcpServerUrl is not null)
+        {
+            creds[WorkspaceRuntimePaths.ClaudeMcpServerUrlKey] = _mcpServerUrl;
+        }
+
+        return creds.Count > 0 ? creds : null;
     }
 
     private Dictionary<string, string> BuildRuntimeEnvironment(string? claudeHomePath)

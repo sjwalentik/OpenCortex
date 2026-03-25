@@ -58,4 +58,15 @@ public sealed class UserProviderSettings
     public string? BaseUrl { get; set; }
     public int? MaxTokens { get; set; }
     public double? Temperature { get; set; }
+
+    /// <summary>
+    /// Session-scoped MCP token injected into the workspace agent at runtime.
+    /// Stored encrypted via SettingsJson; no DB migration required.
+    /// </summary>
+    public string? McpToken { get; set; }
+
+    /// <summary>
+    /// Expiry of the session-scoped MCP token.
+    /// </summary>
+    public DateTimeOffset? McpTokenExpiry { get; set; }
 }

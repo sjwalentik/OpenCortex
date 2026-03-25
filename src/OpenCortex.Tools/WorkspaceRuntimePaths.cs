@@ -50,4 +50,15 @@ public static class WorkspaceRuntimePaths
 
     public static string GetClaudeLoginPidPath(string workspacePath)
         => Path.Combine(GetClaudeStateDirectoryPath(workspacePath), "login.pid");
+
+    public static string GetClaudeGlobalSettingsPath(bool supportsContainerIsolation, string workspacePath)
+        => supportsContainerIsolation
+            ? "/home/ubuntu/.opencortex-claude-home/.claude/settings.json"
+            : Path.Combine(workspacePath, ".claude-home", ".claude", "settings.json");
+
+    /// <summary>Key used in the credentials dictionary to pass the MCP token to workspace managers.</summary>
+    public const string ClaudeMcpTokenKey = "claude-mcp-token";
+
+    /// <summary>Key used in the credentials dictionary to pass the MCP server URL to workspace managers.</summary>
+    public const string ClaudeMcpServerUrlKey = "claude-mcp-server-url";
 }
