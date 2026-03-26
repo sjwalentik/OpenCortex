@@ -321,6 +321,20 @@ public sealed class ConversationService : IConversationService
             : generatedTitle;
     }
 
+    /// <summary>
+    /// Returns <see langword="true"/> for conversations whose title has never been set by the user
+    /// (<see langword="null"/> or the legacy "New Conversation" sentinel).
+    ///
+    /// <para>
+    /// <b>Retry behaviour:</b> Because this check runs on every call to
+    /// <see cref="AddAssistantMessageAsync"/>, a conversation that stays untitled (e.g. the first
+    /// message is empty and both the model generator and the deterministic fallback produce nothing)
+    /// will attempt title generation again on the next assistant reply.  This is intentional — it
+    /// acts as an implicit retry — but it means a persistently-untitled conversation incurs one
+    /// extra LLM call per assistant message until a title is finally produced.  If this becomes a
+    /// concern, callers can set an explicit placeholder title to suppress further attempts.
+    /// </para>
+    /// </summary>
     private static bool ShouldAutoGenerateTitle(string? title) =>
         string.IsNullOrWhiteSpace(title)
         || string.Equals(title.Trim(), DefaultConversationTitle, StringComparison.OrdinalIgnoreCase);

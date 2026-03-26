@@ -13,7 +13,6 @@ using OpenCortex.Core.Persistence;
 using OpenCortex.Core.Query;
 using OpenCortex.Core.Security;
 using OpenCortex.Core.Tenancy;
-using OpenCortex.Http;
 using OpenCortex.Indexer.Indexing;
 using OpenCortex.Orchestration;
 using OpenCortex.Orchestration.Routing;
@@ -890,7 +889,7 @@ app.MapGet("/health", () => Results.Ok(new
 
 if (app.Environment.IsEnvironment("Testing"))
 {
-    app.MapGet("/_testing/rate-limit", () => JsonHttpResults.Text(new { ok = true }))
+    app.MapGet("/_testing/rate-limit", () => Results.Ok(new { ok = true }))
         .RequireRateLimiting("testing-low-limit");
 }
 
@@ -1229,7 +1228,7 @@ if (hostedAuthConfigured)
             return errorResult;
         }
 
-        return JsonHttpResults.Text(context!);
+        return Results.Ok(context);
     });
 
     tenantRoutes.MapGet("/me/memory-brain", MemoryBrainEndpoints.GetMemoryBrainAsync);
@@ -1555,14 +1554,12 @@ if (hostedAuthConfigured)
         }
         catch (Exception ex)
         {
-            return JsonHttpResults.Text(
-                new
-                {
-                    message = ErrorMessages.ForExternalFailure(
-                        "The query could not be parsed.",
-                        ex.Message)
-                },
-                StatusCodes.Status400BadRequest);
+            return Results.BadRequest(new
+            {
+                message = ErrorMessages.ForExternalFailure(
+                    "The query could not be parsed.",
+                    ex.Message)
+            });
         }
 
         var brain = await brainCatalogStore.GetBrainByCustomerAsync(context!.CustomerId, query.BrainId, cancellationToken);

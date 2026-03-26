@@ -76,20 +76,30 @@ public sealed class ConversationTitleGenerationTests
 
     private sealed class InMemoryConversationRepository : IConversationRepository
     {
+        private readonly Dictionary<string, Conversation> _conversations = new(StringComparer.Ordinal);
         private readonly List<Message> _messages = [];
 
         public InMemoryConversationRepository(Conversation conversation)
         {
-            Conversation = conversation;
+            _conversations[conversation.ConversationId] = conversation;
         }
 
-        public Conversation Conversation { get; }
+        /// <summary>
+        /// Returns the current persisted state of the first seeded conversation.
+        /// Always reflects the last <see cref="UpdateAsync"/> call, so assertions
+        /// remain correct even if the service creates a new object rather than
+        /// mutating the original reference.
+        /// </summary>
+        public Conversation Conversation => _conversations.Values.First();
 
         public Task<int> CountAsync(string customerId, ConversationStatus? status = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(1);
 
-        public Task<Conversation> CreateAsync(Conversation conversation, CancellationToken cancellationToken = default) =>
-            Task.FromResult(conversation);
+        public Task<Conversation> CreateAsync(Conversation conversation, CancellationToken cancellationToken = default)
+        {
+            _conversations[conversation.ConversationId] = conversation;
+            return Task.FromResult(conversation);
+        }
 
         public Task DeleteAsync(string conversationId, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
@@ -101,7 +111,7 @@ public sealed class ConversationTitleGenerationTests
         }
 
         public Task<Conversation?> GetByIdAsync(string conversationId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Conversation?>(Conversation.ConversationId == conversationId ? Conversation : null);
+            Task.FromResult(_conversations.TryGetValue(conversationId, out var c) ? c : null);
 
         public Task<IReadOnlyList<Message>> GetMessagesAsync(string conversationId, int? limit = null, int? offset = null, CancellationToken cancellationToken = default)
         {
@@ -115,20 +125,25 @@ public sealed class ConversationTitleGenerationTests
 
         public Task<Conversation?> GetWithMessagesAsync(string conversationId, int? messageLimit = null, CancellationToken cancellationToken = default)
         {
-            if (Conversation.ConversationId != conversationId)
+            if (!_conversations.TryGetValue(conversationId, out var conversation))
             {
                 return Task.FromResult<Conversation?>(null);
             }
 
-            Conversation.Messages = _messages.ToList();
-            return Task.FromResult<Conversation?>(Conversation);
+            conversation.Messages = _messages
+                .Where(m => m.ConversationId == conversationId)
+                .ToList();
+            return Task.FromResult<Conversation?>(conversation);
         }
 
         public Task<IReadOnlyList<Conversation>> ListAsync(string customerId, string userId, ConversationStatus? status = null, int? limit = null, int? offset = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Conversation>>([Conversation]);
+            Task.FromResult<IReadOnlyList<Conversation>>([.._conversations.Values]);
 
-        public Task UpdateAsync(Conversation conversation, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+        public Task UpdateAsync(Conversation conversation, CancellationToken cancellationToken = default)
+        {
+            _conversations[conversation.ConversationId] = conversation;
+            return Task.CompletedTask;
+        }
 
         public Task UpdateMessageAsync(Message message, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
