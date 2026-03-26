@@ -33,6 +33,10 @@ export type Conversation = {
 
 type ConversationDetailResponse = {
   conversationId: string;
+  title?: string | null;
+  createdAt?: string;
+  lastMessageAt?: string | null;
+  status?: string;
   messages?: ChatMessage[];
   providerId?: string | null;
   modelId?: string | null;
@@ -237,6 +241,9 @@ export function ChatView({
   const [providerModels, setProviderModels] = useState<ChatProviderModel[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState('');
   const [selectedModelId, setSelectedModelId] = useState('');
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null);
+  const [editingConversationTitle, setEditingConversationTitle] = useState('');
+  const [savingConversationId, setSavingConversationId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
@@ -470,6 +477,25 @@ export function ChatView({
     try {
       const response = await portalFetch(`/portal-api/tenant/conversations/${conversationId}?messageLimit=100`);
       const data = await response.json() as ConversationDetailResponse;
+      setConversations((prev) => {
+        const existingConversation = prev.find((conversation) => conversation.conversationId === conversationId);
+        const nextConversation: Conversation = {
+          conversationId,
+          title: data.title ?? existingConversation?.title,
+          createdAt: data.createdAt ?? existingConversation?.createdAt ?? new Date().toISOString(),
+          lastMessageAt: data.lastMessageAt ?? existingConversation?.lastMessageAt,
+          status: data.status ?? existingConversation?.status ?? 'active',
+        };
+
+        if (!existingConversation) {
+          return [nextConversation, ...prev];
+        }
+
+        return prev.map((conversation) =>
+          conversation.conversationId === conversationId
+            ? nextConversation
+            : conversation);
+      });
       setMessages(data.messages || []);
       setSelectedProviderId(data.providerId || '');
       setSelectedModelId(data.modelId || '');
@@ -486,7 +512,7 @@ export function ChatView({
       const response = await portalFetch('/portal-api/tenant/conversations', {
         method: 'POST',
         body: JSON.stringify({
-          title: 'New Conversation',
+          title: null,
           brainId: activeBrainId || null,
           providerId: selectedProviderId || null,
           modelId: selectedModelId || null,
@@ -792,6 +818,53 @@ export function ChatView({
     setMessages([]);
     setError(null);
     setStreamActivities([]);
+    setEditingConversationId(null);
+    setEditingConversationTitle('');
+  }
+
+  function getConversationDisplayTitle(title?: string) {
+    return title?.trim() || 'New Conversation';
+  }
+
+  function handleStartConversationRename(conversation: Conversation) {
+    setEditingConversationId(conversation.conversationId);
+    setEditingConversationTitle(conversation.title?.trim() || '');
+    setError(null);
+  }
+
+  function handleCancelConversationRename() {
+    setEditingConversationId(null);
+    setEditingConversationTitle('');
+  }
+
+  async function saveConversationTitle(conversationId: string) {
+    const trimmedTitle = editingConversationTitle.trim();
+    if (!trimmedTitle) {
+      setError('Conversation title cannot be empty.');
+      return;
+    }
+
+    setSavingConversationId(conversationId);
+    setError(null);
+
+    try {
+      await portalFetch(`/portal-api/tenant/conversations/${conversationId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: trimmedTitle,
+        }),
+      });
+
+      setConversations((prev) => prev.map((conversation) =>
+        conversation.conversationId === conversationId
+          ? { ...conversation, title: trimmedTitle }
+          : conversation));
+      handleCancelConversationRename();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update conversation title');
+    } finally {
+      setSavingConversationId(null);
+    }
   }
 
   function formatTime(dateString?: string) {
@@ -839,18 +912,71 @@ export function ChatView({
                 key={conv.conversationId}
                 className={conv.conversationId === activeConversationId ? 'active' : ''}
               >
-                <button
-                  type="button"
-                  className="chat-conversation-item"
-                  onClick={() => void loadConversation(conv.conversationId)}
-                >
-                  <span className="chat-conversation-title">
-                    {conv.title || 'Untitled'}
-                  </span>
-                  <span className="chat-conversation-date">
-                    {formatDate(conv.lastMessageAt || conv.createdAt)}
-                  </span>
-                </button>
+                {editingConversationId === conv.conversationId ? (
+                  <form
+                    className="chat-conversation-edit-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void saveConversationTitle(conv.conversationId);
+                    }}
+                  >
+                    <input
+                      className="chat-conversation-title-input"
+                      type="text"
+                      value={editingConversationTitle}
+                      onChange={(event) => setEditingConversationTitle(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          handleCancelConversationRename();
+                        }
+                      }}
+                      maxLength={120}
+                      placeholder="Conversation title"
+                      autoFocus
+                    />
+                    <div className="chat-conversation-edit-actions">
+                      <button
+                        type="submit"
+                        className="chat-conversation-action"
+                        disabled={savingConversationId === conv.conversationId}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-conversation-action"
+                        onClick={handleCancelConversationRename}
+                        disabled={savingConversationId === conv.conversationId}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    className="chat-conversation-item"
+                    onClick={() => void loadConversation(conv.conversationId)}
+                  >
+                    <span className="chat-conversation-title">
+                      {getConversationDisplayTitle(conv.title)}
+                    </span>
+                    <span className="chat-conversation-date">
+                      {formatDate(conv.lastMessageAt || conv.createdAt)}
+                    </span>
+                  </button>
+                )}
+                {editingConversationId !== conv.conversationId && (
+                  <button
+                    type="button"
+                    className="chat-conversation-action"
+                    onClick={() => handleStartConversationRename(conv)}
+                    title="Rename conversation"
+                  >
+                    Edit
+                  </button>
+                )}
                 <button
                   type="button"
                   className="chat-conversation-archive"
@@ -1088,4 +1214,3 @@ export function ChatView({
     </section>
   );
 }
-
