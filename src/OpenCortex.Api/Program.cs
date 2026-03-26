@@ -819,6 +819,7 @@ builder.Services.AddMemoryTools();
 
 // Register conversation services
 builder.Services.AddConversations();
+builder.Services.AddScoped<IConversationTitleGenerator, ModelBackedConversationTitleGenerator>();
 builder.Services.AddScoped<IConversationRepository>(sp =>
     new PostgresConversationRepository(connectionFactory));
 

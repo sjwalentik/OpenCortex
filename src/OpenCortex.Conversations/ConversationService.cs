@@ -77,18 +77,60 @@ public interface IConversationService
 }
 
 /// <summary>
+/// Generates conversation titles from message history.
+/// </summary>
+public interface IConversationTitleGenerator
+{
+    /// <summary>
+    /// Generate a title for the conversation from its early messages.
+    /// </summary>
+    Task<string?> GenerateTitleAsync(
+        Conversation conversation,
+        IReadOnlyList<Message> messages,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Default no-op title generator used when no model-backed implementation is registered.
+/// </summary>
+public sealed class NullConversationTitleGenerator : IConversationTitleGenerator
+{
+    /// <summary>
+    /// Shared singleton instance.
+    /// </summary>
+    public static NullConversationTitleGenerator Instance { get; } = new();
+
+    private NullConversationTitleGenerator()
+    {
+    }
+
+    public Task<string?> GenerateTitleAsync(
+        Conversation conversation,
+        IReadOnlyList<Message> messages,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<string?>(null);
+}
+
+/// <summary>
 /// Default conversation service implementation.
 /// </summary>
 public sealed class ConversationService : IConversationService
 {
+    private const string DefaultConversationTitle = "New Conversation";
+    private const int AutoTitleMessageSampleSize = 6;
+    private const int MaxAutoTitleLength = 60;
+
     private readonly IConversationRepository _repository;
+    private readonly IConversationTitleGenerator _titleGenerator;
     private readonly ILogger<ConversationService> _logger;
 
     public ConversationService(
         IConversationRepository repository,
+        IConversationTitleGenerator titleGenerator,
         ILogger<ConversationService> logger)
     {
         _repository = repository;
+        _titleGenerator = titleGenerator;
         _logger = logger;
     }
 
@@ -210,6 +252,7 @@ public sealed class ConversationService : IConversationService
         if (conversation is not null)
         {
             conversation.LastMessageAt = message.CreatedAt;
+            conversation.Title = await ResolveConversationTitleAsync(conversation, cancellationToken);
             await _repository.UpdateAsync(conversation, cancellationToken);
         }
 
@@ -248,4 +291,137 @@ public sealed class ConversationService : IConversationService
 
     public Task UpdateConversationAsync(Conversation conversation, CancellationToken cancellationToken = default)
         => _repository.UpdateAsync(conversation, cancellationToken);
+
+    private async Task<string?> ResolveConversationTitleAsync(
+        Conversation conversation,
+        CancellationToken cancellationToken)
+    {
+        if (!ShouldAutoGenerateTitle(conversation.Title))
+        {
+            return conversation.Title;
+        }
+
+        var messages = await _repository.GetMessagesAsync(
+            conversation.ConversationId,
+            AutoTitleMessageSampleSize,
+            cancellationToken: cancellationToken);
+
+        var generatedTitle = await _titleGenerator.GenerateTitleAsync(
+            conversation,
+            messages,
+            cancellationToken);
+        if (!string.IsNullOrWhiteSpace(generatedTitle))
+        {
+            return ClampTitle(generatedTitle);
+        }
+
+        generatedTitle = GenerateConversationTitle(messages);
+        return string.IsNullOrWhiteSpace(generatedTitle)
+            ? conversation.Title
+            : generatedTitle;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> for conversations whose title has never been set by the user
+    /// (<see langword="null"/> or the legacy "New Conversation" sentinel).
+    ///
+    /// <para>
+    /// <b>Retry behaviour:</b> Because this check runs on every call to
+    /// <see cref="AddAssistantMessageAsync"/>, a conversation that stays untitled (e.g. the first
+    /// message is empty and both the model generator and the deterministic fallback produce nothing)
+    /// will attempt title generation again on the next assistant reply.  This is intentional — it
+    /// acts as an implicit retry — but it means a persistently-untitled conversation incurs one
+    /// extra LLM call per assistant message until a title is finally produced.  If this becomes a
+    /// concern, callers can set an explicit placeholder title to suppress further attempts.
+    /// </para>
+    /// </summary>
+    private static bool ShouldAutoGenerateTitle(string? title) =>
+        string.IsNullOrWhiteSpace(title)
+        || string.Equals(title.Trim(), DefaultConversationTitle, StringComparison.OrdinalIgnoreCase);
+
+    private static string? GenerateConversationTitle(IReadOnlyList<Message> messages)
+    {
+        var firstUserMessage = messages
+            .FirstOrDefault(message =>
+                message.Role == MessageRole.User
+                && !string.IsNullOrWhiteSpace(message.Content));
+
+        if (firstUserMessage is null)
+        {
+            return null;
+        }
+
+        var normalizedUserContent = NormalizeTitleSource(firstUserMessage.Content);
+        if (string.IsNullOrWhiteSpace(normalizedUserContent))
+        {
+            return null;
+        }
+
+        if (normalizedUserContent.Length >= 18)
+        {
+            return ClampTitle(normalizedUserContent);
+        }
+
+        var firstAssistantMessage = messages
+            .FirstOrDefault(message =>
+                message.Role == MessageRole.Assistant
+                && !string.IsNullOrWhiteSpace(message.Content));
+
+        var normalizedAssistantContent = NormalizeTitleSource(firstAssistantMessage?.Content);
+        if (string.IsNullOrWhiteSpace(normalizedAssistantContent))
+        {
+            return ClampTitle(normalizedUserContent);
+        }
+
+        return ClampTitle($"{normalizedUserContent}: {normalizedAssistantContent}");
+    }
+
+    private static string NormalizeTitleSource(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return string.Empty;
+        }
+
+        var collapsed = content
+            .Replace("```", " ", StringComparison.Ordinal)
+            .Replace('`', ' ')
+            .Replace('\r', ' ')
+            .Replace('\n', ' ')
+            .Trim();
+
+        collapsed = System.Text.RegularExpressions.Regex.Replace(collapsed, @"https?://\S+", " ");
+        collapsed = System.Text.RegularExpressions.Regex.Replace(collapsed, @"[#>*_\-\[\]\(\)]+", " ");
+        collapsed = System.Text.RegularExpressions.Regex.Replace(collapsed, @"\s+", " ").Trim(' ', '.', ',', ':', ';', '-', '!', '?');
+
+        if (string.IsNullOrWhiteSpace(collapsed))
+        {
+            return string.Empty;
+        }
+
+        var clause = System.Text.RegularExpressions.Regex.Split(collapsed, @"(?<=[.!?])\s+|(?<=:)\s+")
+            .Select(segment => segment.Trim())
+            .FirstOrDefault(segment => !string.IsNullOrWhiteSpace(segment))
+            ?? collapsed;
+
+        return clause.Trim(' ', '.', ',', ':', ';', '-', '!', '?');
+    }
+
+    private static string ClampTitle(string value)
+    {
+        var title = value.Trim();
+        if (title.Length <= MaxAutoTitleLength)
+        {
+            return title;
+        }
+
+        var candidate = title[..MaxAutoTitleLength];
+        var lastWhitespace = candidate.LastIndexOf(' ');
+        if (lastWhitespace > 20)
+        {
+            candidate = candidate[..lastWhitespace];
+        }
+
+        return candidate.TrimEnd(' ', '.', ',', ':', ';', '-', '!', '?');
+    }
 }

@@ -1100,6 +1100,14 @@ h3 {
   font: inherit;
 }
 
+.chat-conversation-edit-form {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
 .chat-conversation-title {
   font-weight: 600;
   font-size: 0.95rem;
@@ -1108,22 +1116,61 @@ h3 {
   text-overflow: ellipsis;
 }
 
+.chat-conversation-title-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: inherit;
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.chat-conversation-title-input:focus {
+  outline: 2px solid rgba(138, 75, 36, 0.22);
+  outline-offset: 1px;
+}
+
 .chat-conversation-date {
   font-size: 0.75rem;
   color: var(--muted);
 }
 
-.chat-conversation-archive {
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 1.2rem;
-  cursor: pointer;
-  padding: 4px 8px;
-  opacity: 0;
-  transition: opacity 120ms ease;
+.chat-conversation-edit-actions {
+  display: flex;
+  gap: 6px;
 }
 
+.chat-conversation-action,
+.chat-conversation-archive {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 6px 8px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  border-radius: 8px;
+  align-self: center;
+}
+
+.chat-conversation-edit-form .chat-conversation-action {
+  opacity: 1;
+}
+
+.chat-conversation-action:hover,
+.chat-conversation-action:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.chat-conversation-archive {
+  font-size: 1.1rem;
+}
+
+.chat-conversation-list li:hover .chat-conversation-action,
 .chat-conversation-list li:hover .chat-conversation-archive {
   opacity: 1;
 }
@@ -1693,7 +1740,6 @@ h3 {
   gap: 4px;
   color: var(--muted);
 }
-
 
 
 

@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddConversations(this IServiceCollection services)
     {
+        services.AddScoped<IConversationTitleGenerator>(_ => NullConversationTitleGenerator.Instance);
         services.AddScoped<IConversationService, ConversationService>();
         return services;
     }
