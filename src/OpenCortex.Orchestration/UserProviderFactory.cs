@@ -466,7 +466,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
 
     // Claude Code's public PKCE OAuth client identifier (no secret required for refresh).
     private const string ClaudeCodeOAuthClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-    private const string AnthropicTokenEndpoint = "https://api.anthropic.com/oauth/token";
+    private const string AnthropicTokenEndpoint = "https://platform.claude.com/v1/oauth/token";
 
     private async Task RefreshClaudeCliSessionJsonIfNeededAsync(UserProviderConfig config, CancellationToken cancellationToken)
     {
