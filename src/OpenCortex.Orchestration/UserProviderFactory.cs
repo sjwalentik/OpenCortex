@@ -498,8 +498,10 @@ public sealed class UserProviderFactory : IUserProviderFactory
         if (oauth is null)
             return;
 
-        // Only refresh if within 5 minutes of expiry (or already expired)
-        if (oauth.ExpiresAt.HasValue && oauth.ExpiresAt.Value > DateTimeOffset.UtcNow.AddMinutes(5))
+        // Only refresh if within 5 minutes of expiry (or already expired).
+        // expiresAt is a Unix ms timestamp; skip refresh if token is still valid.
+        var expiresAtOffset = oauth.ExpiresAtOffset;
+        if (expiresAtOffset.HasValue && expiresAtOffset.Value > DateTimeOffset.UtcNow.AddMinutes(5))
             return;
 
         if (string.IsNullOrWhiteSpace(oauth.RefreshToken))
@@ -508,7 +510,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
             return;
         }
 
-        _logger.LogInformation("Claude CLI session OAuth token near/past expiry ({ExpiresAt}), refreshing for user {UserId}", oauth.ExpiresAt, config.UserId);
+        _logger.LogInformation("Claude CLI session OAuth token near/past expiry ({ExpiresAt}), refreshing for user {UserId}", expiresAtOffset, config.UserId);
 
         try
         {
@@ -542,12 +544,12 @@ public sealed class UserProviderFactory : IUserProviderFactory
             if (root.TryGetProperty("refresh_token", out var refreshTokenEl) && !string.IsNullOrEmpty(refreshTokenEl.GetString()))
                 oauth.RefreshToken = refreshTokenEl.GetString();
             if (root.TryGetProperty("expires_in", out var expiresInEl) && expiresInEl.TryGetInt32(out var expiresIn))
-                oauth.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn);
+                oauth.ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn).ToUnixTimeMilliseconds();
 
             config.EncryptedAccessToken = _encryption.Encrypt(JsonSerializer.Serialize(creds));
             await _configRepository.UpsertAsync(config, cancellationToken);
 
-            _logger.LogInformation("Refreshed Claude CLI session OAuth token for user {UserId}, new expiry {ExpiresAt}", config.UserId, oauth.ExpiresAt);
+            _logger.LogInformation("Refreshed Claude CLI session OAuth token for user {UserId}, new expiry {ExpiresAt}", config.UserId, oauth.ExpiresAtOffset);
         }
         catch (Exception ex)
         {
@@ -569,7 +571,11 @@ public sealed class UserProviderFactory : IUserProviderFactory
         [JsonPropertyName("refreshToken")]
         public string? RefreshToken { get; set; }
 
+        // Claude Code stores expiresAt as a Unix timestamp in milliseconds (not an ISO string).
         [JsonPropertyName("expiresAt")]
-        public DateTimeOffset? ExpiresAt { get; set; }
+        public long? ExpiresAt { get; set; }
+
+        public DateTimeOffset? ExpiresAtOffset =>
+            ExpiresAt.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(ExpiresAt.Value) : null;
     }
 }
