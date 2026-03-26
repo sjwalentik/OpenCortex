@@ -508,7 +508,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
             return;
         }
 
-        _logger.LogDebug("Claude CLI session OAuth token near/past expiry ({ExpiresAt}), refreshing for user {UserId}", oauth.ExpiresAt, config.UserId);
+        _logger.LogInformation("Claude CLI session OAuth token near/past expiry ({ExpiresAt}), refreshing for user {UserId}", oauth.ExpiresAt, config.UserId);
 
         try
         {
@@ -525,7 +525,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Claude CLI credential refresh failed ({StatusCode}) for user {UserId}", response.StatusCode, config.UserId);
+                _logger.LogWarning("Claude CLI credential refresh failed ({StatusCode}) body={Body} for user {UserId}", response.StatusCode, body, config.UserId);
                 return;
             }
 
@@ -534,7 +534,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
 
             if (!root.TryGetProperty("access_token", out var accessTokenEl) || string.IsNullOrEmpty(accessTokenEl.GetString()))
             {
-                _logger.LogWarning("Claude CLI credential refresh returned no access_token for user {UserId}", config.UserId);
+                _logger.LogWarning("Claude CLI credential refresh returned no access_token. Body={Body} for user {UserId}", body, config.UserId);
                 return;
             }
 
@@ -547,7 +547,7 @@ public sealed class UserProviderFactory : IUserProviderFactory
             config.EncryptedAccessToken = _encryption.Encrypt(JsonSerializer.Serialize(creds));
             await _configRepository.UpsertAsync(config, cancellationToken);
 
-            _logger.LogDebug("Refreshed Claude CLI session OAuth token for user {UserId}, new expiry {ExpiresAt}", config.UserId, oauth.ExpiresAt);
+            _logger.LogInformation("Refreshed Claude CLI session OAuth token for user {UserId}, new expiry {ExpiresAt}", config.UserId, oauth.ExpiresAt);
         }
         catch (Exception ex)
         {
