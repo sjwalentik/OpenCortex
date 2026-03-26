@@ -355,6 +355,20 @@ public sealed class LocalWorkspaceManager : IWorkspaceManager
 
         Directory.CreateDirectory(authDirectory);
         File.WriteAllText(authFilePath, sessionJson);
+
+        // Write config.toml with MCP server entry if token + URL are available
+        var mcpToken = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.CodexMcpTokenKey);
+        var mcpServerUrl = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.CodexMcpServerUrlKey);
+        if (!string.IsNullOrWhiteSpace(mcpToken) && !string.IsNullOrWhiteSpace(mcpServerUrl))
+        {
+            var configTomlPath = WorkspaceRuntimePaths.GetCodexConfigTomlPath(
+                supportsContainerIsolation: false, workspacePath);
+            var toml =
+                $"[mcp_servers.OpenCortex]\n" +
+                $"url = \"{mcpServerUrl}\"\n" +
+                $"bearer_token_env_var = \"{WorkspaceRuntimePaths.CodexMcpTokenEnvVar}\"\n";
+            File.WriteAllText(configTomlPath, toml);
+        }
     }
 
     private static void SyncClaudeAuthState(

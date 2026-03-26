@@ -69,4 +69,23 @@ public static class WorkspaceRuntimePaths
 
     /// <summary>Key used in the credentials dictionary to pass the MCP server URL to workspace managers.</summary>
     public const string ClaudeMcpServerUrlKey = "claude-mcp-server-url";
+
+    // Codex MCP paths/keys
+
+    /// <summary>
+    /// Path to ~/.codex/config.toml — where Codex CLI stores MCP server configuration.
+    /// </summary>
+    public static string GetCodexConfigTomlPath(bool supportsContainerIsolation, string workspacePath)
+        => supportsContainerIsolation
+            ? "/home/ubuntu/.opencortex-codex-home/.codex/config.toml"
+            : Path.Combine(workspacePath, ".codex-home", ".codex", "config.toml");
+
+    /// <summary>Key used in the credentials dictionary to pass the MCP token to workspace managers for Codex.</summary>
+    public const string CodexMcpTokenKey = "codex-mcp-token";
+
+    /// <summary>Key used in the credentials dictionary to pass the MCP server URL to workspace managers for Codex.</summary>
+    public const string CodexMcpServerUrlKey = "codex-mcp-server-url";
+
+    /// <summary>Environment variable name used to pass the MCP bearer token to the Codex CLI at runtime.</summary>
+    public const string CodexMcpTokenEnvVar = "OPENCORTEX_MCP_TOKEN";
 }

@@ -87,6 +87,13 @@ public sealed class UserProviderFactory : IUserProviderFactory
             await EnsureClaudeMcpTokenAsync(customerId, userId, config, cancellationToken);
         }
 
+        // Ensure a valid workspace MCP token exists for openai-codex providers
+        if (string.Equals(normalizedProviderId, "openai-codex", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(_workspaceMcpServerUrl))
+        {
+            await EnsureCodexMcpTokenAsync(customerId, userId, config, cancellationToken);
+        }
+
         var githubToken = await GetGitHubCredentialAsync(customerId, userId, cancellationToken);
         return CreateProvider(config, githubToken);
     }
@@ -125,6 +132,13 @@ public sealed class UserProviderFactory : IUserProviderFactory
                 && !string.IsNullOrWhiteSpace(_workspaceMcpServerUrl))
             {
                 await EnsureClaudeMcpTokenAsync(customerId, userId, currentConfig, cancellationToken);
+            }
+
+            // Ensure a valid workspace MCP token exists for openai-codex providers
+            if (string.Equals(currentConfig.ProviderId, "openai-codex", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(_workspaceMcpServerUrl))
+            {
+                await EnsureCodexMcpTokenAsync(customerId, userId, currentConfig, cancellationToken);
             }
 
             var provider = CreateProvider(currentConfig, githubToken);
@@ -373,6 +387,8 @@ public sealed class UserProviderFactory : IUserProviderFactory
             settings?.DefaultModel ?? "gpt-5.4",
             sessionJson,
             githubToken,
+            mcpToken: settings?.McpToken,
+            mcpServerUrl: string.IsNullOrWhiteSpace(_workspaceMcpServerUrl) ? null : _workspaceMcpServerUrl,
             _workspaceManager,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<CodexCliModelProvider>.Instance);
     }
@@ -429,6 +445,58 @@ public sealed class UserProviderFactory : IUserProviderFactory
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to mint workspace MCP token for user {UserId}", userId);
+        }
+    }
+
+    private async Task EnsureCodexMcpTokenAsync(
+        Guid customerId,
+        Guid userId,
+        UserProviderConfig config,
+        CancellationToken cancellationToken)
+    {
+        var tenantUserId = _tenantIds.UserId;
+        var tenantCustomerId = _tenantIds.CustomerId;
+        if (string.IsNullOrWhiteSpace(tenantUserId) || string.IsNullOrWhiteSpace(tenantCustomerId))
+        {
+            _logger.LogDebug("Skipping Codex MCP token mint — tenant IDs not available in this request context");
+            return;
+        }
+
+        var settings = config.SettingsJson is not null
+            ? JsonSerializer.Deserialize<UserProviderSettings>(config.SettingsJson) ?? new UserProviderSettings()
+            : new UserProviderSettings();
+
+        if (!string.IsNullOrWhiteSpace(settings.McpToken)
+            && settings.McpTokenExpiry.HasValue
+            && settings.McpTokenExpiry.Value > DateTimeOffset.UtcNow.AddHours(24))
+        {
+            return;
+        }
+
+        try
+        {
+            var generated = PersonalApiToken.Generate();
+            await _apiTokenStore.CreateTokenAsync(
+                new ApiTokenCreateRequest(
+                    UserId: tenantUserId,
+                    CustomerId: tenantCustomerId,
+                    Name: "workspace-mcp-agent",
+                    TokenHash: generated.TokenHash,
+                    TokenPrefix: generated.TokenPrefix,
+                    Scopes: ["mcp:read", "mcp:write"],
+                    ExpiresAt: DateTimeOffset.UtcNow.AddDays(30)),
+                cancellationToken);
+
+            settings.McpToken = generated.RawToken;
+            settings.McpTokenExpiry = DateTimeOffset.UtcNow.AddDays(30);
+            config.SettingsJson = JsonSerializer.Serialize(settings);
+            await _configRepository.UpsertAsync(config, cancellationToken);
+
+            _logger.LogDebug("Minted Codex workspace MCP token for user {UserId}", userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to mint Codex workspace MCP token for user {UserId}", userId);
         }
     }
 

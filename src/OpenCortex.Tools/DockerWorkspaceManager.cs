@@ -414,6 +414,16 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             : BuildCodexAuthWriteScript(authDirectory, authFilePath, sessionJson);
 
         await RunDockerExecAsync(containerName, syncScript, null, cancellationToken);
+
+        var mcpToken = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.CodexMcpTokenKey);
+        var mcpServerUrl = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.CodexMcpServerUrlKey);
+        if (!string.IsNullOrWhiteSpace(mcpToken) && !string.IsNullOrWhiteSpace(mcpServerUrl))
+        {
+            var configTomlPath = WorkspaceRuntimePaths.GetCodexConfigTomlPath(
+                supportsContainerIsolation: true, WorkspacePathInContainer);
+            var mcpScript = BuildCodexConfigTomlScript(authDirectory, configTomlPath, mcpServerUrl);
+            await RunDockerExecAsync(containerName, mcpScript, null, cancellationToken);
+        }
     }
 
     private static string BuildCodexAuthWriteScript(
@@ -426,6 +436,19 @@ public sealed class DockerWorkspaceManager : IWorkspaceManager, IDisposable
             $"mkdir -p {ShellEscaping.SingleQuote(authDirectory)} " +
             $"&& printf %s {ShellEscaping.SingleQuote(encoded)} | base64 -d > {ShellEscaping.SingleQuote(authFilePath)} " +
             $"&& chmod 600 {ShellEscaping.SingleQuote(authFilePath)}";
+    }
+
+    private static string BuildCodexConfigTomlScript(string configDirectory, string configTomlPath, string mcpServerUrl)
+    {
+        var toml =
+            $"[mcp_servers.OpenCortex]\n" +
+            $"url = \"{mcpServerUrl}\"\n" +
+            $"bearer_token_env_var = \"{WorkspaceRuntimePaths.CodexMcpTokenEnvVar}\"\n";
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(toml));
+        return
+            $"mkdir -p {ShellEscaping.SingleQuote(configDirectory)} " +
+            $"&& printf %s {ShellEscaping.SingleQuote(encoded)} | base64 -d > {ShellEscaping.SingleQuote(configTomlPath)} " +
+            $"&& chmod 600 {ShellEscaping.SingleQuote(configTomlPath)}";
     }
 
     private static string BuildShellCommand(

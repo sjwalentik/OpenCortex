@@ -391,6 +391,17 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
             : BuildCodexAuthWriteScript(authDirectory, authFilePath, sessionJson);
 
         await RunKubectlExecAsync(ns, podName, syncScript, null, cancellationToken);
+
+        // Write config.toml with MCP server entry if a token + URL are available
+        var mcpToken = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.CodexMcpTokenKey);
+        var mcpServerUrl = credentials?.GetValueOrDefault(WorkspaceRuntimePaths.CodexMcpServerUrlKey);
+        if (!string.IsNullOrWhiteSpace(mcpToken) && !string.IsNullOrWhiteSpace(mcpServerUrl))
+        {
+            var configTomlPath = WorkspaceRuntimePaths.GetCodexConfigTomlPath(
+                supportsContainerIsolation: true, WorkspacePathInPod);
+            var mcpScript = BuildCodexConfigTomlScript(authDirectory, configTomlPath, mcpServerUrl);
+            await RunKubectlExecAsync(ns, podName, mcpScript, null, cancellationToken);
+        }
     }
 
     private static string BuildCodexAuthWriteScript(
@@ -403,6 +414,23 @@ public sealed class KubernetesWorkspaceManager : IWorkspaceManager, IDisposable
             $"mkdir -p {ShellEscaping.SingleQuote(authDirectory)} " +
             $"&& printf %s {ShellEscaping.SingleQuote(encoded)} | base64 -d > {ShellEscaping.SingleQuote(authFilePath)} " +
             $"&& chmod 600 {ShellEscaping.SingleQuote(authFilePath)}";
+    }
+
+    /// <summary>
+    /// Writes ~/.codex/config.toml with an MCP server entry referencing the OPENCORTEX_MCP_TOKEN env var.
+    /// The token itself is injected at runtime via the environment, not stored in the file.
+    /// </summary>
+    private static string BuildCodexConfigTomlScript(string configDirectory, string configTomlPath, string mcpServerUrl)
+    {
+        var toml =
+            $"[mcp_servers.OpenCortex]\n" +
+            $"url = \"{mcpServerUrl}\"\n" +
+            $"bearer_token_env_var = \"{WorkspaceRuntimePaths.CodexMcpTokenEnvVar}\"\n";
+        var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(toml));
+        return
+            $"mkdir -p {ShellEscaping.SingleQuote(configDirectory)} " +
+            $"&& printf %s {ShellEscaping.SingleQuote(encoded)} | base64 -d > {ShellEscaping.SingleQuote(configTomlPath)} " +
+            $"&& chmod 600 {ShellEscaping.SingleQuote(configTomlPath)}";
     }
 
     private static string BuildShellCommand(

@@ -24,6 +24,8 @@ internal sealed class CodexCliModelProvider : IModelProvider
     private readonly string _defaultModel;
     private readonly string _sessionJson;
     private readonly string? _githubToken;
+    private readonly string? _mcpToken;
+    private readonly string? _mcpServerUrl;
     private readonly IWorkspaceManager _workspaceManager;
     private readonly ILogger _logger;
 
@@ -32,6 +34,8 @@ internal sealed class CodexCliModelProvider : IModelProvider
         string defaultModel,
         string sessionJson,
         string? githubToken,
+        string? mcpToken,
+        string? mcpServerUrl,
         IWorkspaceManager workspaceManager,
         ILogger logger)
     {
@@ -39,6 +43,8 @@ internal sealed class CodexCliModelProvider : IModelProvider
         _defaultModel = string.IsNullOrWhiteSpace(defaultModel) ? "gpt-5.4" : defaultModel.Trim();
         _sessionJson = sessionJson;
         _githubToken = string.IsNullOrWhiteSpace(githubToken) ? null : githubToken.Trim();
+        _mcpToken = string.IsNullOrWhiteSpace(mcpToken) ? null : mcpToken.Trim();
+        _mcpServerUrl = string.IsNullOrWhiteSpace(mcpServerUrl) ? null : mcpServerUrl.Trim();
         _workspaceManager = workspaceManager;
         _logger = logger;
     }
@@ -66,10 +72,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
 
         await _workspaceManager.EnsureRunningAsync(
             _userId,
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                [WorkspaceRuntimePaths.CodexProviderId] = _sessionJson
-            },
+            BuildCredentialsForSync(),
             cancellationToken);
 
         var homePath = await GetRuntimeHomePathAsync(cancellationToken);
@@ -157,10 +160,7 @@ internal sealed class CodexCliModelProvider : IModelProvider
         {
             await _workspaceManager.EnsureRunningAsync(
                 _userId,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [WorkspaceRuntimePaths.CodexProviderId] = _sessionJson
-                },
+                BuildCredentialsForSync(),
                 cancellationToken);
 
             var homePath = await GetRuntimeHomePathAsync(cancellationToken);
@@ -197,6 +197,22 @@ internal sealed class CodexCliModelProvider : IModelProvider
             .ToList();
 
         return Task.FromResult(models);
+    }
+
+    private Dictionary<string, string> BuildCredentialsForSync()
+    {
+        var creds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [WorkspaceRuntimePaths.CodexProviderId] = _sessionJson
+        };
+
+        if (_mcpToken is not null)
+            creds[WorkspaceRuntimePaths.CodexMcpTokenKey] = _mcpToken;
+
+        if (_mcpServerUrl is not null)
+            creds[WorkspaceRuntimePaths.CodexMcpServerUrlKey] = _mcpServerUrl;
+
+        return creds;
     }
 
     private async Task<string> GetRuntimeHomePathAsync(CancellationToken cancellationToken)
@@ -241,6 +257,11 @@ internal sealed class CodexCliModelProvider : IModelProvider
             ["CODEX_HOME"] = GetCodexHomeDirectory(homePath),
             ["GIT_TERMINAL_PROMPT"] = "0"
         };
+
+        if (!string.IsNullOrWhiteSpace(_mcpToken))
+        {
+            environment[WorkspaceRuntimePaths.CodexMcpTokenEnvVar] = _mcpToken;
+        }
 
         if (!string.IsNullOrWhiteSpace(_githubToken))
         {
