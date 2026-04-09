@@ -35,3 +35,4 @@ patches:
   - path: patches/configmap.yaml
   - path: patches/api-workspace.yaml
   - path: patches/portal-node-selector.yaml
+  - path: patches/mcp-node-selector.yaml

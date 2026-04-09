@@ -28,3 +28,4 @@ images:
 
 patches:
   - path: patches/configmap.yaml
+  - path: patches/mcp-node-selector.yaml
