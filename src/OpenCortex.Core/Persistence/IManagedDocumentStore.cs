@@ -10,6 +10,13 @@ public interface IManagedDocumentStore
         int limit = 200,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<ManagedDocumentDetail>> ListManagedDocumentDetailsAsync(
+        string customerId,
+        string brainId,
+        string? pathPrefix = null,
+        int limit = 200,
+        CancellationToken cancellationToken = default);
+
     Task<int> CountActiveManagedDocumentsAsync(
         string customerId,
         CancellationToken cancellationToken = default);

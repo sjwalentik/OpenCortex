@@ -204,8 +204,9 @@ public sealed class MemoryToolHandlersTests
         Assert.True(json.RootElement.GetProperty("duplicate").GetBoolean());
         Assert.Equal(existing.CanonicalPath, json.RootElement.GetProperty("memory_path").GetString());
         Assert.Single(documentStore.Documents);
-        Assert.Equal(1, documentStore.ListManagedDocumentsCalls);
-        Assert.Equal("memories/preference/", documentStore.LastListPathPrefix);
+        Assert.Equal(0, documentStore.ListManagedDocumentsCalls);
+        Assert.Equal(1, documentStore.ListManagedDocumentDetailsCalls);
+        Assert.Equal("memories/preference/", documentStore.LastDetailListPathPrefix);
         Assert.Equal(0, documentStore.ListForIndexingCalls);
         Assert.Empty(indexingService.Calls);
     }
@@ -511,9 +512,13 @@ public sealed class MemoryToolHandlersTests
 
         public int ListManagedDocumentsCalls { get; private set; }
 
+        public int ListManagedDocumentDetailsCalls { get; private set; }
+
         public int ListForIndexingCalls { get; private set; }
 
         public string? LastListPathPrefix { get; private set; }
+
+        public string? LastDetailListPathPrefix { get; private set; }
 
         public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
             string customerId,
@@ -543,6 +548,24 @@ public sealed class MemoryToolHandlersTests
                     document.WordCount,
                     document.CreatedAt,
                     document.UpdatedAt))
+                .ToList());
+        }
+
+        public Task<IReadOnlyList<ManagedDocumentDetail>> ListManagedDocumentDetailsAsync(
+            string customerId,
+            string brainId,
+            string? pathPrefix = null,
+            int limit = 200,
+            CancellationToken cancellationToken = default)
+        {
+            ListManagedDocumentDetailsCalls++;
+            LastDetailListPathPrefix = pathPrefix;
+            return Task.FromResult<IReadOnlyList<ManagedDocumentDetail>>(_documents.Values
+                .Where(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                    && MatchesPathPrefix(document.CanonicalPath, pathPrefix)
+                    && !document.IsDeleted)
+                .Take(limit)
                 .ToList());
         }
 

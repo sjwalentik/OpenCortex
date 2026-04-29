@@ -99,6 +99,61 @@ public sealed class PostgresManagedDocumentStore : IManagedDocumentStore
         return result is int count ? count : Convert.ToInt32(result);
     }
 
+    public async Task<IReadOnlyList<ManagedDocumentDetail>> ListManagedDocumentDetailsAsync(
+        string customerId,
+        string brainId,
+        string? pathPrefix = null,
+        int limit = 200,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        var sql = $"""
+            SELECT
+                managed_document_id,
+                brain_id,
+                customer_id,
+                title,
+                slug,
+                content,
+                frontmatter,
+                content_hash,
+                status,
+                word_count,
+                created_by,
+                updated_by,
+                created_at,
+                updated_at,
+                is_deleted
+            FROM {_connectionFactory.Schema}.managed_documents
+            WHERE customer_id = @customer_id
+              AND brain_id = @brain_id
+              AND is_deleted = false
+            """;
+
+        if (!string.IsNullOrWhiteSpace(pathPrefix))
+        {
+            sql += "\n  AND slug LIKE @path_prefix_like";
+            command.Parameters.AddWithValue("path_prefix_like", BuildSlugPrefixPattern(pathPrefix));
+        }
+
+        sql += "\nORDER BY updated_at DESC\nLIMIT CAST(@limit AS integer);";
+
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("customer_id", customerId);
+        command.Parameters.AddWithValue("brain_id", brainId);
+        command.Parameters.AddWithValue("limit", NpgsqlDbType.Integer, limit);
+
+        var results = new List<ManagedDocumentDetail>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(ReadDetail(reader));
+        }
+
+        return results;
+    }
+
     public async Task<ManagedDocumentDetail?> GetManagedDocumentAsync(
         string customerId,
         string brainId,

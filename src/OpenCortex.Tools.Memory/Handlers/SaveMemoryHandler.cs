@@ -182,7 +182,7 @@ public sealed class SaveMemoryHandler : IToolHandler
         CancellationToken cancellationToken)
     {
         var pathPrefix = MemoryToolSupport.BuildPathPrefix(category);
-        var candidateSummaries = await _documentStore.ListManagedDocumentsAsync(
+        var candidates = await _documentStore.ListManagedDocumentDetailsAsync(
             customerId,
             brainId,
             pathPrefix,
@@ -192,15 +192,9 @@ public sealed class SaveMemoryHandler : IToolHandler
         ManagedDocumentDetail? bestDuplicate = null;
         var bestSimilarity = 0.0;
 
-        foreach (var candidateSummary in candidateSummaries)
+        foreach (var candidate in candidates)
         {
-            var candidate = await _documentStore.GetManagedDocumentAsync(
-                customerId,
-                brainId,
-                candidateSummary.ManagedDocumentId,
-                cancellationToken);
-
-            if (candidate is null || candidate.IsDeleted)
+            if (candidate.IsDeleted)
             {
                 continue;
             }

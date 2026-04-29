@@ -216,6 +216,20 @@ public sealed class TenantManagedDocumentEndpointsTests
                     document.UpdatedAt))
                 .ToList());
 
+        public Task<IReadOnlyList<ManagedDocumentDetail>> ListManagedDocumentDetailsAsync(
+            string customerId,
+            string brainId,
+            string? pathPrefix = null,
+            int limit = 200,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ManagedDocumentDetail>>(_documents.Values
+                .Where(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                    && !document.IsDeleted
+                    && MatchesPathPrefix(document.CanonicalPath, pathPrefix))
+                .Take(limit)
+                .ToList());
+
         public Task<int> CountActiveManagedDocumentsAsync(string customerId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
