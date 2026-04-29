@@ -74,6 +74,12 @@ public sealed class RecallMemoriesHandler : IToolHandler
         var limit = arguments.TryGetProperty("limit", out var limitElement) && limitElement.TryGetInt32(out var parsedLimit)
             ? Math.Clamp(parsedLimit, 1, 20)
             : 5;
+        var minimumScore = arguments.TryGetProperty("minimum_score", out var minimumScoreElement)
+            && minimumScoreElement.ValueKind == JsonValueKind.Number
+            && minimumScoreElement.TryGetDouble(out var parsedMinimumScore)
+            ? Math.Clamp(parsedMinimumScore, 0.0, 10.0)
+            : 0.05;
+        var retrievalLimit = Math.Clamp(limit * 3, limit, 50);
         var escapedQuery = MemoryToolSupport.EscapeOqlLiteral(query);
         var pathPrefix = MemoryToolSupport.BuildPathPrefix(category);
         var escapedPathPrefix = MemoryToolSupport.EscapeOqlLiteral(pathPrefix);
@@ -83,12 +89,12 @@ public sealed class RecallMemoriesHandler : IToolHandler
             FROM brain("{escapedBrainId}")
             WHERE path_prefix = "{escapedPathPrefix}"
             SEARCH "{escapedQuery}"
-            RANK semantic
-            LIMIT {limit}
+            RANK hybrid
+            LIMIT {retrievalLimit}
             """;
 
         var results = await _queryExecutor.ExecuteAsync(oql, cancellationToken);
-        var memories = new List<object>(results.Results.Count);
+        var memories = new List<MemoryRecallResult>(results.Results.Count);
 
         foreach (var result in results.Results)
         {
@@ -114,26 +120,61 @@ public sealed class RecallMemoriesHandler : IToolHandler
             document?.Frontmatter.TryGetValue("confidence", out confidence);
             document?.Frontmatter.TryGetValue("tags", out tagsValue);
 
-            memories.Add(new
+            var adjustedScore = result.Score * MemoryToolSupport.GetConfidenceScoreMultiplier(confidence);
+            if (adjustedScore < minimumScore)
             {
-                path = result.CanonicalPath,
-                title = result.Title,
-                content = result.Snippet ?? MemoryToolSupport.CreateSnippet(document?.Content),
-                category = resolvedCategory ?? MemoryToolSupport.InferCategoryFromPath(result.CanonicalPath),
+                continue;
+            }
+
+            memories.Add(new MemoryRecallResult(
+                result.CanonicalPath,
+                result.Title,
+                result.Snippet ?? MemoryToolSupport.CreateSnippet(document?.Content),
+                resolvedCategory ?? MemoryToolSupport.InferCategoryFromPath(result.CanonicalPath),
                 confidence,
-                tags = string.IsNullOrWhiteSpace(tagsValue)
-                    ? Array.Empty<string>()
+                string.IsNullOrWhiteSpace(tagsValue)
+                    ? []
                     : tagsValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                score = result.Score
-            });
+                adjustedScore,
+                result.Score,
+                result.Reason));
         }
+
+        var rankedMemories = memories
+            .OrderByDescending(memory => memory.Score)
+            .ThenBy(memory => memory.Title, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .Select(memory => new
+            {
+                path = memory.Path,
+                title = memory.Title,
+                content = memory.Content,
+                category = memory.Category,
+                confidence = memory.Confidence,
+                tags = memory.Tags,
+                score = memory.Score,
+                base_score = memory.BaseScore,
+                reason = memory.Reason
+            })
+            .ToArray();
 
         return JsonSerializer.Serialize(new
         {
             success = true,
             query,
-            count = memories.Count,
-            memories
+            count = rankedMemories.Length,
+            memories = rankedMemories
         });
     }
+
+    private sealed record MemoryRecallResult(
+        string Path,
+        string Title,
+        string Content,
+        string Category,
+        string? Confidence,
+        IReadOnlyList<string> Tags,
+        double Score,
+        double BaseScore,
+        string Reason);
 }

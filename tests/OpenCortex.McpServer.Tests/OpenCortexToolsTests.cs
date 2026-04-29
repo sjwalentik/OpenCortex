@@ -116,6 +116,7 @@ public sealed class OpenCortexToolsTests
         Assert.Contains(saveMemory.Parameters, parameter => string.Equals(parameter.Name, "content", StringComparison.Ordinal));
         Assert.Contains(saveMemory.Parameters, parameter => string.Equals(parameter.Name, "category", StringComparison.Ordinal));
         Assert.Contains(recallMemories.Parameters, parameter => string.Equals(parameter.Name, "query", StringComparison.Ordinal));
+        Assert.Contains(recallMemories.Parameters, parameter => string.Equals(parameter.Name, "minimum_score", StringComparison.Ordinal) && parameter.Optional);
         Assert.Contains(forgetMemory.Parameters, parameter => string.Equals(parameter.Name, "memory_path", StringComparison.Ordinal));
     }
 
@@ -629,6 +630,7 @@ public sealed class OpenCortexToolsTests
         Assert.Equal("brain-write", result.BrainId);
         Assert.Equal("preference", result.Category);
         Assert.Equal("high", result.Confidence);
+        Assert.False(result.Duplicate);
         Assert.Contains("style", result.Tags);
         Assert.Single(indexingService.Calls);
         Assert.Equal("memory-save", indexingService.Calls[0].TriggerType);
@@ -742,7 +744,7 @@ public sealed class OpenCortexToolsTests
             executor: new OqlQueryExecutor(queryStore),
             subscriptionStore: new StubSubscriptionStore(planId: "pro"),
             managedDocumentStore: managedDocumentStore)
-            .recall_memories("day one memory recall", "decision", 3, CancellationToken.None);
+            .recall_memories("day one memory recall", "decision", 3, null, CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.Null(result.Error);
@@ -751,6 +753,9 @@ public sealed class OpenCortexToolsTests
         Assert.Equal("memories/decision/abc123.md", result.Memories[0].Path);
         Assert.Equal("decision", result.Memories[0].Category);
         Assert.Equal("high", result.Memories[0].Confidence);
+        Assert.Equal(0.91, result.Memories[0].BaseScore);
+        Assert.True(result.Memories[0].Score > result.Memories[0].BaseScore);
+        Assert.Equal("semantic", result.Memories[0].Reason);
     }
 
     [Fact]

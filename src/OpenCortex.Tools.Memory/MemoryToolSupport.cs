@@ -145,4 +145,46 @@ internal static class MemoryToolSupport
         var normalized = content.Replace('\r', ' ').Replace('\n', ' ').Trim();
         return normalized.Length > 200 ? normalized[..200].TrimEnd() + "..." : normalized;
     }
+
+    public static double GetConfidenceScoreMultiplier(string? confidence)
+        => NormalizeConfidence(confidence) switch
+        {
+            "high" => 1.15,
+            "low" => 0.75,
+            _ => 1.0
+        };
+
+    public static double CalculateContentSimilarity(string left, string right)
+    {
+        var normalizedLeft = NormalizeComparableText(left);
+        var normalizedRight = NormalizeComparableText(right);
+
+        if (string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal))
+        {
+            return 1.0;
+        }
+
+        var leftTokens = normalizedLeft.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+        var rightTokens = normalizedRight.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+
+        if (leftTokens.Count == 0 || rightTokens.Count == 0)
+        {
+            return 0.0;
+        }
+
+        var intersection = leftTokens.Count(token => rightTokens.Contains(token));
+        var union = leftTokens.Count + rightTokens.Count - intersection;
+        return union == 0 ? 0.0 : (double)intersection / union;
+    }
+
+    private static string NormalizeComparableText(string value)
+    {
+        var chars = value
+            .Trim()
+            .ToLowerInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : ' ')
+            .ToArray();
+
+        return string.Join(' ', new string(chars).Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
 }

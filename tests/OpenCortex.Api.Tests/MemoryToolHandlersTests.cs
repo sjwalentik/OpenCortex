@@ -159,6 +159,58 @@ public sealed class MemoryToolHandlersTests
     }
 
     [Fact]
+    public async Task SaveMemoryHandler_ReturnsExistingMemory_WhenDuplicateFound()
+    {
+        var documentStore = new StubManagedDocumentStore();
+        var indexingService = new StubManagedContentBrainIndexingService();
+        var existing = await documentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                BrainId: "brain-memory",
+                CustomerId: "cust-test",
+                Title: "[preference] Concise summaries",
+                Slug: "memories/preference/existing",
+                Content: "The user prefers concise architecture summaries.",
+                Frontmatter: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["category"] = "preference",
+                    ["confidence"] = "high",
+                    ["tags"] = "user,style"
+                },
+                Status: "published",
+                UserId: "user-test"),
+            CancellationToken.None);
+
+        var handler = new SaveMemoryHandler(
+            documentStore,
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            indexingService,
+            new StubSubscriptionStore(planId: "pro"),
+            new OpenCortexOptions());
+
+        var response = await handler.ExecuteAsync(
+            JsonDocument.Parse("""
+            {
+              "content": "The user prefers concise architecture summaries",
+              "category": "preference",
+              "confidence": "medium"
+            }
+            """).RootElement,
+            CreateContext(),
+            CancellationToken.None);
+
+        using var json = JsonDocument.Parse(response);
+
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.True(json.RootElement.GetProperty("duplicate").GetBoolean());
+        Assert.Equal(existing.CanonicalPath, json.RootElement.GetProperty("memory_path").GetString());
+        Assert.Single(documentStore.Documents);
+        Assert.Equal(1, documentStore.ListManagedDocumentsCalls);
+        Assert.Equal("memories/preference/", documentStore.LastListPathPrefix);
+        Assert.Equal(0, documentStore.ListForIndexingCalls);
+        Assert.Empty(indexingService.Calls);
+    }
+
+    [Fact]
     public async Task RecallMemoriesHandler_EscapesOqlSearchLiteral()
     {
         var queryStore = new RecordingDocumentQueryStore([]);
@@ -184,6 +236,7 @@ public sealed class MemoryToolHandlersTests
         Assert.True(json.RootElement.GetProperty("success").GetBoolean());
         Assert.NotNull(queryStore.LastQuery);
         Assert.DoesNotContain("path_prefix", queryStore.LastQuery!.SearchText, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("hybrid", queryStore.LastQuery.RankMode);
         Assert.Contains(queryStore.LastQuery.Filters, filter => filter.Field == "path_prefix" && filter.Value == "memories/");
     }
 
@@ -252,6 +305,63 @@ public sealed class MemoryToolHandlersTests
         Assert.Equal("memories/decision/abc123.md", memory.GetProperty("path").GetString());
         Assert.Equal("decision", memory.GetProperty("category").GetString());
         Assert.Equal("high", memory.GetProperty("confidence").GetString());
+        Assert.Equal(0.91, memory.GetProperty("base_score").GetDouble(), precision: 6);
+        Assert.True(memory.GetProperty("score").GetDouble() > memory.GetProperty("base_score").GetDouble());
+    }
+
+    [Fact]
+    public async Task RecallMemoriesHandler_FiltersWeakMatchesAfterConfidenceAdjustment()
+    {
+        var queryStore = new RecordingDocumentQueryStore(
+        [
+            new RetrievalResultRecord(
+                "memory-doc-1",
+                "brain-memory",
+                "memories/fact/weak.md",
+                "[fact] Weak match",
+                null,
+                "Weak match.",
+                0.01,
+                "semantic",
+                new ScoreBreakdown(0.0, 0.01, 0.0))
+        ]);
+        var documentStore = new StubManagedDocumentStore();
+        await documentStore.CreateManagedDocumentAsync(
+            new ManagedDocumentCreateRequest(
+                BrainId: "brain-memory",
+                CustomerId: "cust-test",
+                Title: "[fact] Weak match",
+                Slug: "memories/fact/weak",
+                Content: "Weak match.",
+                Frontmatter: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["category"] = "fact",
+                    ["confidence"] = "low"
+                },
+                Status: "published",
+                UserId: "user-test"),
+            CancellationToken.None);
+
+        var handler = new RecallMemoriesHandler(
+            new OqlQueryExecutor(queryStore),
+            documentStore,
+            new StubMemoryBrainResolver(new MemoryBrainResult(true, "brain-memory", null, false)),
+            NullLogger<RecallMemoriesHandler>.Instance);
+
+        var response = await handler.ExecuteAsync(
+            JsonDocument.Parse("""
+            {
+              "query": "unrelated",
+              "minimum_score": 0.05
+            }
+            """).RootElement,
+            CreateContext(),
+            CancellationToken.None);
+
+        using var json = JsonDocument.Parse(response);
+
+        Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(0, json.RootElement.GetProperty("count").GetInt32());
     }
 
     [Fact]
@@ -399,6 +509,12 @@ public sealed class MemoryToolHandlersTests
 
         public List<string> SoftDeletedManagedDocumentIds { get; } = [];
 
+        public int ListManagedDocumentsCalls { get; private set; }
+
+        public int ListForIndexingCalls { get; private set; }
+
+        public string? LastListPathPrefix { get; private set; }
+
         public Task<IReadOnlyList<ManagedDocumentSummary>> ListManagedDocumentsAsync(
             string customerId,
             string brainId,
@@ -406,7 +522,29 @@ public sealed class MemoryToolHandlersTests
             string? excludePathPrefix = null,
             int limit = 200,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<ManagedDocumentSummary>>([]);
+        {
+            ListManagedDocumentsCalls++;
+            LastListPathPrefix = pathPrefix;
+            return Task.FromResult<IReadOnlyList<ManagedDocumentSummary>>(_documents.Values
+                .Where(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                    && MatchesPathPrefix(document.CanonicalPath, pathPrefix)
+                    && !HasExcludedPathPrefix(document.CanonicalPath, excludePathPrefix)
+                    && !document.IsDeleted)
+                .Take(limit)
+                .Select(document => new ManagedDocumentSummary(
+                    document.ManagedDocumentId,
+                    document.BrainId,
+                    document.CustomerId,
+                    document.Title,
+                    document.Slug,
+                    document.CanonicalPath,
+                    document.Status,
+                    document.WordCount,
+                    document.CreatedAt,
+                    document.UpdatedAt))
+                .ToList());
+        }
 
         public Task<int> CountActiveManagedDocumentsAsync(string customerId, CancellationToken cancellationToken = default)
             => Task.FromResult(_documents.Values.Count(document =>
@@ -414,7 +552,14 @@ public sealed class MemoryToolHandlersTests
                 && !document.IsDeleted));
 
         public Task<IReadOnlyList<ManagedDocumentDetail>> ListManagedDocumentsForIndexingAsync(string customerId, string brainId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<ManagedDocumentDetail>>(_documents.Values.ToList());
+        {
+            ListForIndexingCalls++;
+            return Task.FromResult<IReadOnlyList<ManagedDocumentDetail>>(_documents.Values
+                .Where(document => string.Equals(document.CustomerId, customerId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(document.BrainId, brainId, StringComparison.OrdinalIgnoreCase)
+                    && !document.IsDeleted)
+                .ToList());
+        }
 
         public Task<ManagedDocumentDetail?> GetManagedDocumentAsync(string customerId, string brainId, string managedDocumentId, CancellationToken cancellationToken = default)
             => Task.FromResult(_documents.TryGetValue(managedDocumentId, out var document) ? document : null);
@@ -491,6 +636,25 @@ public sealed class MemoryToolHandlersTests
 
         public Task<ManagedDocumentDetail?> RestoreManagedDocumentVersionAsync(string customerId, string brainId, string managedDocumentId, string managedDocumentVersionId, string userId, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
+
+        private static bool MatchesPathPrefix(string canonicalPath, string? pathPrefix)
+        {
+            if (string.IsNullOrWhiteSpace(pathPrefix))
+            {
+                return true;
+            }
+
+            var normalizedPrefix = pathPrefix.Trim().Replace('\\', '/').Trim('/');
+            if (string.IsNullOrWhiteSpace(normalizedPrefix))
+            {
+                return true;
+            }
+
+            return canonicalPath.StartsWith(normalizedPrefix + "/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool HasExcludedPathPrefix(string canonicalPath, string? pathPrefix)
+            => !string.IsNullOrWhiteSpace(pathPrefix) && MatchesPathPrefix(canonicalPath, pathPrefix);
     }
 
     private sealed class StubManagedContentBrainIndexingService : IManagedContentBrainIndexingService

@@ -79,6 +79,30 @@ public sealed class SaveMemoryHandler : IToolHandler
 
         var billingState = await GetBillingStateAsync(customerId, cancellationToken);
         var plan = ResolvePlanEntitlements(billingState.PlanId);
+        var duplicate = await FindDuplicateMemoryAsync(
+            customerId,
+            brainResult.BrainId!,
+            normalizedCategory,
+            content,
+            cancellationToken);
+
+        if (duplicate is not null)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                success = true,
+                duplicate = true,
+                memory_path = duplicate.CanonicalPath,
+                brain_id = duplicate.BrainId,
+                category = normalizedCategory,
+                confidence = duplicate.Frontmatter.TryGetValue("confidence", out var existingConfidence)
+                    ? existingConfidence
+                    : null,
+                tags = duplicate.Frontmatter.TryGetValue("tags", out var existingTags) && !string.IsNullOrWhiteSpace(existingTags)
+                    ? existingTags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    : Array.Empty<string>()
+            });
+        }
 
         var slug = MemoryToolSupport.CreateMemorySlug(normalizedCategory);
         var frontmatter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -148,6 +172,48 @@ public sealed class SaveMemoryHandler : IToolHandler
         }
 
         return _options.Billing.Plans[HostedBillingStateResolver.FreePlanId];
+    }
+
+    private async Task<ManagedDocumentDetail?> FindDuplicateMemoryAsync(
+        string customerId,
+        string brainId,
+        string category,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var pathPrefix = MemoryToolSupport.BuildPathPrefix(category);
+        var candidateSummaries = await _documentStore.ListManagedDocumentsAsync(
+            customerId,
+            brainId,
+            pathPrefix,
+            limit: int.MaxValue,
+            cancellationToken: cancellationToken);
+
+        ManagedDocumentDetail? bestDuplicate = null;
+        var bestSimilarity = 0.0;
+
+        foreach (var candidateSummary in candidateSummaries)
+        {
+            var candidate = await _documentStore.GetManagedDocumentAsync(
+                customerId,
+                brainId,
+                candidateSummary.ManagedDocumentId,
+                cancellationToken);
+
+            if (candidate is null || candidate.IsDeleted)
+            {
+                continue;
+            }
+
+            var similarity = MemoryToolSupport.CalculateContentSimilarity(content, candidate.Content);
+            if (similarity > bestSimilarity)
+            {
+                bestDuplicate = candidate;
+                bestSimilarity = similarity;
+            }
+        }
+
+        return bestSimilarity >= 0.92 ? bestDuplicate : null;
     }
 
     private async Task<EffectiveBillingState> GetBillingStateAsync(string customerId, CancellationToken cancellationToken)

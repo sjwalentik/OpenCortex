@@ -138,7 +138,7 @@ internal sealed class InMemoryDocumentQueryStore : IDocumentQueryStore
 
             var match = filter.Field.ToLowerInvariant() switch
             {
-                "tag"   => doc.Frontmatter.TryGetValue("tag", out var tag) && string.Equals(tag, filter.Value, StringComparison.OrdinalIgnoreCase),
+                "tag"   => MatchesTagFilter(doc.Frontmatter, filter.Value),
                 "title" => string.Equals(doc.Title, filter.Value, StringComparison.OrdinalIgnoreCase),
                 "path"  => string.Equals(doc.CanonicalPath, filter.Value, StringComparison.OrdinalIgnoreCase),
                 "path_prefix" => doc.CanonicalPath.StartsWith(BuildPathPrefixValue(filter.Value), StringComparison.OrdinalIgnoreCase),
@@ -159,6 +159,19 @@ internal sealed class InMemoryDocumentQueryStore : IDocumentQueryStore
         return string.IsNullOrWhiteSpace(normalized)
             ? string.Empty
             : normalized + "/";
+    }
+
+    private static bool MatchesTagFilter(IReadOnlyDictionary<string, string> frontmatter, string value)
+    {
+        if (frontmatter.TryGetValue("tag", out var tag)
+            && string.Equals(tag, value, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return frontmatter.TryGetValue("tags", out var tags)
+            && tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(tagValue => string.Equals(tagValue, value, StringComparison.OrdinalIgnoreCase));
     }
 
     private static float[] BuildQueryVector(string text, int dimensions)

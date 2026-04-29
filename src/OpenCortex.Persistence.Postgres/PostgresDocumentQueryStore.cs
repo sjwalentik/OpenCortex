@@ -252,7 +252,16 @@ public sealed class PostgresDocumentQueryStore : IDocumentQueryStore
             {
                 case "tag":
                     command.Parameters.AddWithValue(parameterName, filter.Value);
-                    clauses.Add($"COALESCE(d.frontmatter ->> 'tag', '') = @{parameterName}");
+                    clauses.Add($"""
+                        (
+                            lower(COALESCE(d.frontmatter ->> 'tag', '')) = lower(@{parameterName})
+                            OR EXISTS (
+                                SELECT 1
+                                FROM unnest(string_to_array(COALESCE(d.frontmatter ->> 'tags', ''), ',')) AS tag_value(value)
+                                WHERE lower(btrim(tag_value.value)) = lower(@{parameterName})
+                            )
+                        )
+                        """);
                     break;
                 case "title":
                     command.Parameters.AddWithValue(parameterName, filter.Value);

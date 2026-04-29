@@ -692,6 +692,7 @@ public sealed class OpenCortexTools(
         [Description("What to search for in saved memories.")] string query,
         [Description("Optional memory category filter. One of: fact, decision, preference, learning.")] string? category = null,
         [Description("Maximum number of memories to return. Defaults to 5.")] int? limit = null,
+        [Description("Minimum adjusted relevance score to return. Defaults to 0.05.")] double? minimum_score = null,
         CancellationToken cancellationToken = default)
     {
         var tokenContext = GetRequiredTokenContext();
@@ -699,7 +700,8 @@ public sealed class OpenCortexTools(
         {
             query,
             category,
-            limit
+            limit,
+            minimum_score
         });
 
         var response = await recallMemoriesHandler.ExecuteAsync(
@@ -809,6 +811,7 @@ public sealed class OpenCortexTools(
                     .Select(tag => tag!)
                     .ToList()
                 : [],
+            root.TryGetProperty("duplicate", out var duplicate) && duplicate.GetBoolean(),
             root.TryGetProperty("needs_configuration", out var needsConfiguration) && needsConfiguration.GetBoolean(),
             root.TryGetProperty("error", out var error) ? error.GetString() : null,
             root.TryGetProperty("quota_exceeded", out var quotaExceeded) && quotaExceeded.GetBoolean(),
@@ -833,7 +836,9 @@ public sealed class OpenCortexTools(
                         .Select(tag => tag!)
                         .ToList()
                     : [],
-                memory.TryGetProperty("score", out var score) ? RoundFinite(score.GetDouble()) : 0.0))
+                memory.TryGetProperty("score", out var score) ? RoundFinite(score.GetDouble()) : 0.0,
+                memory.TryGetProperty("base_score", out var baseScore) ? RoundFinite(baseScore.GetDouble()) : null,
+                memory.TryGetProperty("reason", out var reason) ? reason.GetString() : null))
             .ToList()
             : [];
 
@@ -1118,13 +1123,14 @@ public sealed record SaveMemoryResult(
     string? Category,
     string? Confidence,
     IReadOnlyList<string> Tags,
+    bool Duplicate,
     bool NeedsConfiguration,
     string? Error,
     bool QuotaExceeded,
     string? Suggestion)
 {
     public static SaveMemoryResult Failure(string message) =>
-        new(false, null, null, null, null, [], false, message, false, null);
+        new(false, null, null, null, null, [], false, false, message, false, null);
 }
 
 public sealed record RecallMemoriesResult(
@@ -1157,7 +1163,9 @@ public sealed record MemoryItem(
     string? Category,
     string? Confidence,
     IReadOnlyList<string> Tags,
-    double Score);
+    double Score,
+    double? BaseScore,
+    string? Reason);
 
 public sealed record ManagedDocumentItem(
     string ManagedDocumentId,

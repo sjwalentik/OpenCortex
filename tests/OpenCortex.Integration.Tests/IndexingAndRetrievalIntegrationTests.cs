@@ -297,6 +297,32 @@ public sealed class IndexingAndRetrievalIntegrationTests : IDisposable
         Assert.Equal("Featured", result.Results[0].Title);
     }
 
+    [Fact]
+    public async Task Query_TagFilter_MatchesCommaSeparatedTagsFrontmatter()
+    {
+        Directory.CreateDirectory(_rootPath);
+        File.WriteAllText(Path.Combine(_rootPath, "memory.md"), """
+            ---
+            tags: Roadmap,P1
+            ---
+            # Memory
+            This is memory content.
+            """);
+        File.WriteAllText(Path.Combine(_rootPath, "plain.md"), "# Plain\nNo tag here.");
+
+        var batch = await IngestAsync(MakeBrain());
+        var executor = MakeExecutor(batch);
+
+        var result = await executor.ExecuteAsync("""
+            FROM brain("test-brain")
+            WHERE tag = "p1"
+            LIMIT 10
+            """);
+
+        Assert.Single(result.Results);
+        Assert.Equal("Memory", result.Results[0].Title);
+    }
+
     // -------------------------------------------------------------------------
     // Score breakdown and reason string
     // -------------------------------------------------------------------------
